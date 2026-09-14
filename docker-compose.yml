@@ -1,0 +1,29 @@
+services:
+  vpnkit:
+    build:
+      context: .
+      dockerfile: docker/vpnkit/Dockerfile
+    restart: unless-stopped
+    environment:
+      VPNKIT_ROUTING_MODE: "${VPNKIT_ROUTING_MODE:-tun}"
+      OVPN_CIDR: "${OVPN_CIDR:-10.89.0.0/24}"
+      VPNKIT_IPV6_POLICY: "${VPNKIT_IPV6_POLICY:-block}"
+      SINGBOX_GENERATION_FILE: "${SINGBOX_GENERATION_FILE:-/run/vpnkit/sing-box-generation}"
+      SINGBOX_ACK_FILE: "${SINGBOX_ACK_FILE:-/run/vpnkit/sing-box-generation.ack}"
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      net.ipv4.conf.all.src_valid_mark: "1"
+      net.ipv4.conf.all.rp_filter: "0"
+      net.ipv4.conf.default.rp_filter: "0"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/vpnkit-healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s

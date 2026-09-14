@@ -1,0 +1,32 @@
+# Private state and local settings
+secrets/
+config/*.local.env
+*.key
+*.pem
+*.p12
+*.ovpn
+*sub_url*
+*subscription.url
+*subscription.txt
+# Generated output
+logs/
+rendered/
+generated/
+*.log
+*.pcap
+*.dump
+*.trace
+*.qr.png
+# Dependencies, builds and caches
+node_modules/
+__pycache__/
+*.pyc
+/vibe-vpn
+*.bin
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.oci
+*.docker
+.worktrees/

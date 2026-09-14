@@ -1,0 +1,35 @@
+# NetworkManager/OpenVPN-compatible local vpnkit profile template.
+# Secret blocks are filled only by the local renderer; this file is public-safe.
+client
+dev tun
+proto udp
+remote {{LOCAL_REMOTE}} {{LOCAL_PORT}}
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+remote-cert-tls server
+auth SHA256
+auth-nocache
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305:AES-256-CBC
+data-ciphers-fallback AES-256-CBC
+cipher AES-256-GCM
+tun-mtu 1400
+mssfix 1360
+# The server supplies the default-route push; do not duplicate it here.
+# OpenVPN 2.5+ blocks IPv6 outside this IPv4-only full tunnel.
+block-ipv6
+key-direction 1
+verb 3
+<ca>
+{{CA_CRT}}
+</ca>
+<cert>
+{{CLIENT_CRT}}
+</cert>
+<key>
+{{CLIENT_KEY}}
+</key>
+<tls-auth>
+{{TA_KEY}}
+</tls-auth>

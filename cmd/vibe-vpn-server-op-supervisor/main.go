@@ -1,0 +1,73 @@
+//go:build linux
+
+package main
+
+import (
+	"errors"
+	"io"
+	"os"
+)
+
+const (
+	exitFailure = 1
+	exitUsage   = 2
+	exitOpen    = 3
+)
+
+func main() {
+	os.Exit(dispatch(os.Args[1:], newProductionSupervisor(), os.Stdout))
+}
+
+// dispatch intentionally emits no diagnostics. The only output channel is the
+// bounded stdout of a completed fixed vibe-vpn operation.
+func dispatch(args []string, supervisor *supervisor, stdout io.Writer) int {
+	if len(args) == 0 {
+		return exitUsage
+	}
+	switch args[0] {
+	case "prepare":
+		if len(args) < 3 || len(args) > 5 || (len(args) == 5 && args[2] != "availability" && args[2] != "check-batch") {
+			return exitUsage
+		}
+		if err := supervisor.prepare(args[1:]); err != nil {
+			return exitFailure
+		}
+		return 0
+	case "run":
+		if len(args) < 3 || len(args) > 5 || (len(args) == 5 && args[2] != "availability" && args[2] != "check-batch") {
+			return exitUsage
+		}
+		result, err := supervisor.run(args[1:])
+		if err != nil {
+			return exitFailure
+		}
+		if len(result.output) > 0 {
+			if _, err := stdout.Write(result.output); err != nil {
+				return exitFailure
+			}
+		}
+		return result.exitCode
+	case "cancel":
+		if len(args) != 2 {
+			return exitUsage
+		}
+		if err := supervisor.cancel(args[1]); err != nil {
+			return exitFailure
+		}
+		return 0
+	case "verify":
+		if len(args) != 2 {
+			return exitUsage
+		}
+		err := supervisor.verify(args[1])
+		if errors.Is(err, errOpen) {
+			return exitOpen
+		}
+		if err != nil {
+			return exitFailure
+		}
+		return 0
+	default:
+		return exitUsage
+	}
+}

@@ -1,0 +1,10 @@
+.git
+.worktrees
+secrets
+config/*.local.env
+logs
+**/node_modules
+**/__pycache__
+*.pcap
+*.dump
+vibe-vpn

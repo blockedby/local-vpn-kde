@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "domain_suffix": [
+        "registry.npmjs.org",
+        "npmjs.com",
+        "nodejs.org",
+        "yarnpkg.com",
+        "pnpm.io",
+        "pypi.org",
+        "files.pythonhosted.org",
+        "pythonhosted.org",
+        "python.org",
+        "deb.debian.org",
+        "security.debian.org",
+        "archive.ubuntu.com",
+        "security.ubuntu.com",
+        "archlinux.org",
+        "dl-cdn.alpinelinux.org",
+        "registry-1.docker.io",
+        "auth.docker.io",
+        "production.cloudflare.docker.com",
+        "docker.io",
+        "ghcr.io",
+        "quay.io",
+        "proxy.golang.org",
+        "sum.golang.org",
+        "pkg.go.dev",
+        "golang.org",
+        "go.dev",
+        "crates.io",
+        "static.crates.io",
+        "index.crates.io",
+        "repo.maven.apache.org",
+        "search.maven.org",
+        "plugins.gradle.org",
+        "rubygems.org",
+        "packagist.org",
+        "repo.packagist.org",
+        "nuget.org",
+        "api.nuget.org",
+        "github.com",
+        "objects.githubusercontent.com",
+        "raw.githubusercontent.com",
+        "codeload.github.com",
+        "gitlab.com"
+      ]
+    }
+  ]
+}

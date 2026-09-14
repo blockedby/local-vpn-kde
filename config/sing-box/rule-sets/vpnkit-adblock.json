@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "domain_suffix": [
+        "doubleclick.net",
+        "googlesyndication.com",
+        "googleadservices.com",
+        "adsystem.com",
+        "adnxs.com"
+      ]
+    }
+  ]
+}

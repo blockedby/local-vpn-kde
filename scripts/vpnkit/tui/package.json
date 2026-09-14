@@ -1,0 +1,17 @@
+{
+  "name": "vpnkit-local-tui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun index.ts",
+    "test": "bun test",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opentui/core": "0.5.11"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
+  }
+}
