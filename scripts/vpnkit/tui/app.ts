@@ -356,7 +356,7 @@ export class App {
       return [
         {
           key: "p",
-          label: "Ping всех + сайт · 5 потоков",
+          label: "Ping всех + сайт",
           run: () => void this.runBatch("ping"),
         },
         {
@@ -769,7 +769,7 @@ export class App {
     this.batch.total = ids.length;
     const target = this.batch.target!;
     let stoppedReason: string | undefined;
-    const groupSize = kind === "speed" ? 1 : 5;
+    const groupSize = kind === "speed" ? 1 : Math.max(1, ids.length);
     for (let offset = 0; offset < ids.length; offset += groupSize) {
       const group = ids.slice(offset, offset + groupSize);
       const id = group[0];
@@ -951,8 +951,12 @@ export class App {
             : p.text;
       row.attributes = s.server_id === this.serverID ? TextAttributes.BOLD : 0;
     });
-    if (this.batch)
-      this.progress.content = `${frames[this.frame % 10]} ${this.batch.kind === "speed" ? "Тест скорости" : "Ping → сайт · 5 потоков"} · ${this.batch.done}/${this.batch.total} · ${cell(this.servers.find((s) => s.server_id === this.batch?.id)?.display_name ?? "", 16).trim()}${this.cancelled ? " · отмена…" : " · [k] отменить"}`;
+    if (this.batch) {
+      const detail = this.batch.kind === "speed"
+        ? `Тест скорости · ${this.batch.done}/${this.batch.total} · ${cell(this.servers.find((s) => s.server_id === this.batch?.id)?.display_name ?? "", 16).trim()}`
+        : `Ping → сайт · ${this.batch.total} серверов · ${Math.floor((Date.now() - this.started) / 1000)} с`;
+      this.progress.content = `${frames[this.frame % 10]} ${detail}${this.cancelled ? " · отмена…" : " · [k] отменить"}`;
+    }
     else if (this.busy && this.busy !== "status")
       this.progress.content = `${frames[this.frame % 10]} ${names[this.busy] ?? "Операция"} · ${this.phase || "выполняется"} · ${Math.floor((Date.now() - this.started) / 1000)} с`;
     else

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -121,5 +122,22 @@ func TestCatalogRejectsForeignBatchAndSanitizesUntested(t *testing.T) {
 	row := got["servers"].([]any)[0].(map[string]any)
 	if row["status"] != "untested" || row["ping_status"] != "untested" || row["availability"] != "untested" {
 		t.Fatal("missing measurement became failed")
+	}
+}
+
+func TestServerCheckQueueRequestBounds(t *testing.T) {
+	ids := make([]string, 1001)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("srv_%027d", i)
+	}
+	for _, n := range []int{1, 6, 1000, 1001} {
+		raw, _ := json.Marshal(map[string]any{"ids": ids[:n], "url": "https://example.com"})
+		_, accepted, err := serverArguments("check-batch", string(raw))
+		if n <= 1000 && (err != nil || len(accepted) != n) {
+			t.Fatalf("queue of %d rejected: %v", n, err)
+		}
+		if n > 1000 && err == nil {
+			t.Fatal("oversized queue accepted")
+		}
 	}
 }

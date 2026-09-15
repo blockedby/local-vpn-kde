@@ -17,6 +17,7 @@ import (
 )
 
 const serverCheckWorkers = 5
+const serverCheckLimit = 1000
 
 type serverCheckProbe func(context.Context, config.Config, picker.NodeResult, string) picker.NodeResult
 
@@ -39,23 +40,23 @@ func checkNode(ctx context.Context, c config.Config, result picker.NodeResult, t
 // Each probe reuses the existing temporary sing-box lifecycle, never the active
 // proxy's port or configuration. The sockets are released just before launch.
 func checkNodes(ctx context.Context, c config.Config, records []picker.BrowserRecord, target string, probe serverCheckProbe) ([]picker.NodeResult, error) {
-	if len(records) == 0 || len(records) > serverCheckWorkers {
+	if len(records) == 0 || len(records) > serverCheckLimit {
 		return nil, fmt.Errorf("invalid batch size")
 	}
-	listeners := make([]net.Listener, 0, len(records))
+	listeners := make([]net.Listener, 0, min(len(records), serverCheckWorkers))
 	defer func() {
 		for _, l := range listeners {
 			_ = l.Close()
 		}
 	}()
-	for range records {
+	for range min(len(records), serverCheckWorkers) {
 		l, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			return nil, err
 		}
 		listeners = append(listeners, l)
 	}
-	configs := make([]config.Config, len(records))
+	configs := make([]config.Config, len(listeners))
 	for i, l := range listeners {
 		configs[i] = c
 		configs[i].TestSocks = l.Addr().String()
@@ -64,16 +65,31 @@ func checkNodes(ctx context.Context, c config.Config, records []picker.BrowserRe
 		_ = l.Close()
 	}
 	results := make([]picker.NodeResult, len(records))
+	// One snapshot, one pass. A worker owns its proxy port until it exits and
+	// takes the next job immediately, independent of the other workers.
+	jobs := make(chan int)
 	var workers sync.WaitGroup
-	for i, record := range records {
+	for _, workerConfig := range configs {
 		workers.Add(1)
-		go func(i int, record picker.BrowserRecord) {
+		go func(c config.Config) {
 			defer workers.Done()
-			if ctx.Err() == nil {
-				results[i] = probe(ctx, configs[i], record.Result, target)
+			for i := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				results[i] = probe(ctx, c, records[i].Result, target)
 			}
-		}(i, record)
+		}(workerConfig)
 	}
+feed:
+	for i := range records {
+		select {
+		case <-ctx.Done():
+			break feed
+		case jobs <- i:
+		}
+	}
+	close(jobs)
 	workers.Wait()
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -91,7 +107,7 @@ func addServerCheckBatchCommand(root *cobra.Command, o *cliOptions) {
 		}
 		return runBrowserCheckBatch(cmd, o, strings.Split(ids, ","), target, checkNode)
 	}}
-	cmd.Flags().String("server-id", "", "one to five opaque IDs separated by commas")
+	cmd.Flags().String("server-id", "", "one to 1000 opaque IDs separated by commas")
 	cmd.Flags().String("url", "", "HTTPS availability target after successful TCP ping")
 	cmd.Flags().Bool("json", false, "print bounded redacted results")
 	root.AddCommand(cmd)
@@ -100,7 +116,7 @@ func addServerCheckBatchCommand(root *cobra.Command, o *cliOptions) {
 func runBrowserCheckBatch(cmd *cobra.Command, o *cliOptions, ids []string, target string, probe serverCheckProbe) error {
 	ctx := browserCommandContext(cmd)
 	u, err := url.Parse(target)
-	if len(ids) == 0 || len(ids) > serverCheckWorkers || err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || len(target) > 2048 {
+	if len(ids) == 0 || len(ids) > serverCheckLimit || err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || len(target) > 2048 {
 		return writeBrowserFailure(cmd, "unavailable", 0)
 	}
 	c, err := loadConfig(o.configPath)

@@ -84,7 +84,7 @@ func parseOperationRequest(args []string) (operationRequest, error) {
 			return operationRequest{}, errors.New("invalid batch")
 		}
 		ids := strings.Split(args[2], ",")
-		if len(ids) > 5 {
+		if len(ids) > 1000 {
 			return operationRequest{}, errors.New("invalid batch")
 		}
 		seen := map[string]bool{}

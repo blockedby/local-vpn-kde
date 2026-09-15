@@ -950,11 +950,11 @@ func TestAvailabilityTargetIsBoundToOperationIdentity(t *testing.T) {
 }
 
 func TestCheckBatchRequestBoundsAndIdentity(t *testing.T) {
-	ids := make([]string, 6)
+	ids := make([]string, 1001)
 	for i := range ids {
 		ids[i] = fmt.Sprintf("srv_%027d", i)
 	}
-	good := []string{testToken, "check-batch", strings.Join(ids[:5], ","), "https://example.com/"}
+	good := []string{testToken, "check-batch", strings.Join(ids[:1000], ","), "https://example.com/"}
 	if _, err := parseOperationRequest(good); err != nil {
 		t.Fatal(err)
 	}

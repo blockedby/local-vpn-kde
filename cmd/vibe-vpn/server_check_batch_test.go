@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -47,7 +48,7 @@ func TestCheckNodesRunsFiveIsolatedWorkersAndJoinsCancellation(t *testing.T) {
 	if err := <-finished; err == nil || exited.Load() != 5 {
 		t.Fatal("cancellation returned before all probes stopped")
 	}
-	if _, err := checkNodes(context.Background(), config.Config{}, make([]picker.BrowserRecord, 6), "", nil); err == nil {
+	if _, err := checkNodes(context.Background(), config.Config{}, make([]picker.BrowserRecord, serverCheckLimit+1), "", nil); err == nil {
 		t.Fatal("unbounded batch accepted")
 	}
 }
@@ -113,5 +114,74 @@ func TestCheckBatchRejectsConcurrentCatalogChange(t *testing.T) {
 	})
 	if err == nil || !bytes.Contains(out.Bytes(), []byte(`"status":"stale"`)) {
 		t.Fatal("stale publication accepted")
+	}
+}
+
+func TestCheckNodesRefillsWorkersWithoutWaitingForSlowPeer(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	records := make([]picker.BrowserRecord, 12)
+	for i := range records {
+		records[i].Result.Host = fmt.Sprint(i)
+	}
+	firstFive := make(chan struct{})
+	next := make(chan struct{})
+	releaseSlow := make(chan struct{})
+	finished := make(chan error, 1)
+	var mu sync.Mutex
+	seen := map[string]int{}
+	ports := map[string]bool{}
+	count, peak := 0, 0
+	go func() {
+		_, err := checkNodes(ctx, config.Config{}, records, "https://example.com", func(ctx context.Context, c config.Config, r picker.NodeResult, _ string) picker.NodeResult {
+			mu.Lock()
+			seen[r.Host]++
+			if ports[c.TestSocks] {
+				t.Error("concurrent probes share a port")
+			}
+			ports[c.TestSocks] = true
+			count++
+			peak = max(peak, count)
+			if len(seen) == 5 {
+				close(firstFive)
+			}
+			if r.Host == "5" {
+				close(next)
+			}
+			mu.Unlock()
+			select {
+			case <-firstFive:
+			case <-ctx.Done():
+			}
+			if r.Host == "0" {
+				select {
+				case <-releaseSlow:
+				case <-ctx.Done():
+				}
+			}
+			mu.Lock()
+			count--
+			delete(ports, c.TestSocks)
+			mu.Unlock()
+			return r
+		})
+		finished <- err
+	}()
+	select {
+	case <-next:
+	case <-ctx.Done():
+		t.Fatal("sixth node waited for the slow first node")
+	}
+	close(releaseSlow)
+	if err := <-finished; err != nil {
+		t.Fatal(err)
+	}
+	if peak != 5 || len(seen) != len(records) {
+		t.Fatalf("peak=%d checked=%d", peak, len(seen))
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Fatalf("node %s checked %d times", id, n)
+		}
 	}
 }

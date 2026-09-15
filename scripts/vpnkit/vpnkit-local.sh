@@ -412,7 +412,7 @@ server_browser_batch_valid() {
   local -A seen=()
   [[ -n "$value" && "$value" != *, && "$value" != ,* && "$value" != *,,* ]] || return 1
   IFS=, read -r -a ids <<< "$value"
-  (( ${#ids[@]} <= 5 )) || return 1
+  (( ${#ids[@]} <= 1000 )) || return 1
   for id in "${ids[@]}"; do
     server_browser_id_valid "$id" || return 1
     [[ -z "${seen[$id]:-}" ]] || return 1
@@ -3663,7 +3663,7 @@ usage() {
 Usage: scripts/vpnkit/vpnkit-local.sh backend start|start|disconnect|stop|status [--json]|retest select|toggle mode|diagnostics
        scripts/vpnkit/vpnkit-local.sh servers list|refresh|test-all|ping <opaque-id>|speed <opaque-id>|select <opaque-id>|current
        scripts/vpnkit/vpnkit-local.sh servers availability <opaque-id> <https-url>
-       scripts/vpnkit/vpnkit-local.sh servers check-batch <1-to-5-comma-separated-ids> <https-url>
+       scripts/vpnkit/vpnkit-local.sh servers check-batch <1-to-1000-comma-separated-ids> <https-url>
 
 This lifecycle adapter manages only the isolated local Compose project and the
 fixed `vpnkit-local` NetworkManager profile. It never targets production `vpnkit`.

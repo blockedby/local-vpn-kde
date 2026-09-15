@@ -669,7 +669,7 @@ test("stopping Docker also requires confirmation; mouse No does not disconnect",
   }
 });
 
-test("combined checks split twelve nodes into bounded groups of five", async () => {
+test("combined checks submit one snapshot once without restarting on navigation", async () => {
   const t = await createTestRenderer({ width: 100, height: 30 });
   const b = new FakeBackend();
   b.rows = Array.from({ length: 12 }, (_, i) => ({ ...rows[0], server_id: `srv_${String(i).padStart(27, "0")}` }));
@@ -681,8 +681,14 @@ test("combined checks split twelve nodes into bounded groups of five", async () 
     t.mockInput.pressKey("p");
     await settle();
     const batches = b.calls.filter(c => c.action === "servers/check-batch").map(c => JSON.parse(c.value!).ids);
-    expect(batches.map(ids => ids.length)).toEqual([5, 5, 2]);
+    expect(batches.map(ids => ids.length)).toEqual([12]);
     expect(new Set(batches.flat()).size).toBe(12);
+    t.mockInput.pressKey("d");
+    t.mockInput.pressKey("v");
+    await settle();
+    await t.renderOnce();
+    expect(b.calls.filter(c => c.action === "servers/check-batch")).toHaveLength(1);
+    expect(t.captureCharFrame()).not.toContain("5 потоков");
   } finally { await app.close(); }
 });
 

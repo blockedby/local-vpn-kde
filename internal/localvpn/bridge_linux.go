@@ -347,7 +347,7 @@ func serverArguments(action, value string) ([]string, []string, error) {
 			IDs []string
 			URL string
 		}
-		if json.Unmarshal([]byte(value), &request) != nil || len(request.IDs) < 1 || len(request.IDs) > 5 || !validTarget(request.URL) {
+		if json.Unmarshal([]byte(value), &request) != nil || len(request.IDs) < 1 || len(request.IDs) > 1000 || !validTarget(request.URL) {
 			return nil, nil, invalid
 		}
 		seen := map[string]bool{}
