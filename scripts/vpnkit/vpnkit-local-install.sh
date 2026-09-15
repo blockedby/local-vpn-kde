@@ -8,6 +8,7 @@ set -Eeuo pipefail
 umask 077
 
 DRY_RUN=0
+NON_INTERACTIVE=0
 PHASE=preflight
 ENV_SOURCE=
 ENV_FILE_PRESENT=0
@@ -80,6 +81,7 @@ trap on_exit EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --non-interactive) NON_INTERACTIVE=1; shift ;;
     --dry-run|--plan)
       (( DRY_RUN == 0 )) || die 'only one mode may be selected' 2
       DRY_RUN=1
@@ -429,6 +431,7 @@ fi
 # The installer owns first-run preparation. Subscription entry belongs to the
 # interface and is not an installation prerequisite.
 NATIVE="$REPO_ROOT/.build/local-vpn-kde.bin"
+printf 'vpnkit_phase=setup-assets\n'
 require_source_file "$NATIVE" 'native local VPN binary (run ./install.sh)'
 [[ -x "$NATIVE" ]] || die 'native local VPN binary is not executable; run ./install.sh' 20
 if ! "$NATIVE" prepare --repo "$REPO_ROOT" --secrets-dir "$BASE" \
@@ -449,8 +452,16 @@ printf '\n==> Underlay plan (redacted)\n'
 run_underlay_plan
 
 PHASE=underlay-install
+printf 'vpnkit_phase=setup-underlay\n'
 printf '\n==> Install/update the local underlay helper (sudo may ask for your password)\n'
-if ! sudo -- "$UNDERLAY" install --yes >/dev/null 2>&1; then
+install_underlay() {
+  if (( NON_INTERACTIVE == 1 )); then
+    sudo -n -- "$UNDERLAY" install --yes
+  else
+    sudo -- "$UNDERLAY" install --yes
+  fi
+}
+if ! install_underlay >/dev/null 2>&1; then
   die 'underlay installation failed; the helper should have rolled back its own transaction' 20
 fi
 if ! "$UNDERLAY" verify >/dev/null 2>&1; then
@@ -458,6 +469,7 @@ if ! "$UNDERLAY" verify >/dev/null 2>&1; then
 fi
 printf 'underlay_install=verified\n'
 
+printf 'vpnkit_phase=setup-gateway\n'
 if (( SUBSCRIPTION_READY == 1 )); then
 PHASE=container-start
 printf '\n==> Build and start the localhost-only vpnkit container (NetworkManager is not managed here)\n'
@@ -480,6 +492,7 @@ require_owned_regular "$PROFILE" 'generated local OpenVPN profile' 600
 [[ -s "$PROFILE" ]] || die 'local OpenVPN profile was not generated' 20
 
 PHASE=networkmanager-import
+printf 'vpnkit_phase=setup-profile\n'
 printf '\n==> Import the owned NetworkManager profile without connecting it\n'
 if ! nm_import_output=$(VPNKIT_LOCAL_ENV_FILE=/dev/null VPNKIT_LOCAL_SECRETS_DIR="$BASE" \
     VPNKIT_LOCAL_PROFILE="$PROFILE" VPNKIT_LOCAL_NM_CONNECTION=vpnkit-local \
@@ -493,6 +506,7 @@ fi
 printf 'networkmanager_import=complete\nprofile_activation=manual\n'
 
 PHASE=status
+printf 'vpnkit_phase=setup-verify\n'
 printf '\n==> Redacted status\n'
 NM_STATUS=
 LIFECYCLE_STATUS=

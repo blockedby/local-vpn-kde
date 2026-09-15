@@ -72,3 +72,22 @@ func TestRunProcessNeverInterpretsArguments(t *testing.T) {
 		t.Fatal("argument contract changed")
 	}
 }
+
+func TestSetupProcessKeepsTerminalSessionButIsolatesCancellation(t *testing.T) {
+	output := &boundedOutput{limit: 128}
+	result := runProcess(context.Background(), "bash", []string{"-c", "ps -o sid=,pgid= -p $$"}, os.Environ(), output, nil, time.Second, false)
+	data, _ := output.result()
+	fields := strings.Fields(string(data))
+	if result.Reason != "ok" || len(fields) != 2 {
+		t.Fatal("session fixture failed")
+	}
+	sid, _ := strconv.Atoi(fields[0])
+	pgid, _ := strconv.Atoi(fields[1])
+	currentSID, err := unix.Getsid(0)
+	if err != nil || sid != currentSID {
+		t.Fatal("setup lost its terminal session")
+	}
+	if pgid == unix.Getpgrp() {
+		t.Fatal("setup cancellation would signal the interface")
+	}
+}

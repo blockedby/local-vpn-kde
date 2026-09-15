@@ -112,6 +112,10 @@ func run(args []string) error {
 		return err
 	}
 	switch args[0] {
+	case "setup":
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer cancel()
+		return localvpn.RunSetup(ctx, root, *action, os.Stdout)
 	case "networkmanager":
 		if env("VPNKIT_LOCAL_NM_CONNECTION", "vpnkit-local") != "vpnkit-local" {
 			return fmt.Errorf("connection name must be vpnkit-local")

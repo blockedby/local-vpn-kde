@@ -23,6 +23,7 @@ type BridgeOptions struct {
 	Base, Executable, Mode string
 	Mock                   bool
 	Timeout, Grace         time.Duration
+	keepTerminal           bool
 }
 type Bridge struct {
 	options BridgeOptions

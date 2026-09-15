@@ -15,6 +15,13 @@ import (
 )
 
 var diagnosticReasons = []struct{ message, reason string }{
+	{"A vpnkit-local profile already exists", "foreign-profile"},
+	{"Disconnect the previous local VPN before migrating", "previous-profile-active"},
+	{"underlay installation failed", "underlay-install-failed"},
+	{"underlay verification failed", "underlay-verify-failed"},
+	{"NetworkManager profile import failed", "profile-import-failed"},
+	{"private local assets could not be prepared", "assets-failed"},
+	{"local container start failed", "gateway-start-failed"},
 	{"lifecycle recovery preflight failed", "recovery_required"}, {"lifecycle committed post-state is unverifiable", "recovery_required"}, {"lifecycle recovery required before backend-only start", "recovery_required"},
 	{"failed to resolve source metadata", "docker-registry-failed"}, {"failed to solve:", "gateway-build-failed"},
 	{"IPv4 route did not use the exact local VPN device", "route-conflict"}, {"IPv4 route lookup returned malformed output", "route-invalid"},
@@ -25,7 +32,7 @@ var diagnosticReasons = []struct{ message, reason string }{
 	{"install and verify the vpnkit local underlay helper", "underlay-not-ready"},
 }
 var phasePattern = regexp.MustCompile(`vpnkit_phase=([a-z-]+)`)
-var phases = map[string]bool{"preparing": true, "prepared": true, "render": true, "compose-up": true, "compose-up-done": true, "nm-work": true, "host-smoke": true, "nm-disconnect": true, "compose-down": true, "runtime-wait": true, "committing": true, "committed": true, "compensating": true}
+var phases = map[string]bool{"preparing": true, "prepared": true, "render": true, "compose-up": true, "compose-up-done": true, "nm-work": true, "host-smoke": true, "nm-disconnect": true, "compose-down": true, "runtime-wait": true, "committing": true, "committed": true, "compensating": true, "setup-assets": true, "setup-underlay": true, "setup-gateway": true, "setup-profile": true, "setup-verify": true}
 
 const attemptLimit = 8 * 1024 * 1024
 
@@ -128,7 +135,7 @@ func (b *Bridge) lifecycle(ctx context.Context, action string, args []string, pr
 	if err = metadata("running", ProcessResult{}); err != nil {
 		return failure, ""
 	}
-	result := RunProcess(ctx, b.options.Executable, args, append(os.Environ(), "VPNKIT_TUI_SUPERVISED=1", "VPNKIT_TUI_DIAGNOSTICS=1"), output, output, b.options.Grace)
+	result := runProcess(ctx, b.options.Executable, args, append(os.Environ(), "VPNKIT_TUI_SUPERVISED=1", "VPNKIT_TUI_DIAGNOSTICS=1"), output, output, b.options.Grace, !b.options.keepTerminal)
 	if output.truncated {
 		if _, err = file.Write(output.tail); err != nil {
 			output.captureError = true

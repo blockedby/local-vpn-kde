@@ -21,6 +21,10 @@ type ProcessResult struct {
 // before returning, including children surviving an exited leader. No shell
 // command construction is involved. Writers must be bounded by their caller.
 func RunProcess(ctx context.Context, executable string, args, environment []string, stdout, stderr io.Writer, grace time.Duration) ProcessResult {
+	return runProcess(ctx, executable, args, environment, stdout, stderr, grace, true)
+}
+
+func runProcess(ctx context.Context, executable string, args, environment []string, stdout, stderr io.Writer, grace time.Duration, newSession bool) ProcessResult {
 	if ctx.Err() != nil {
 		return ProcessResult{Reason: contextReason(ctx)}
 	}
@@ -33,7 +37,7 @@ func RunProcess(ctx context.Context, executable string, args, environment []stri
 	cmd.Env = environment
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: newSession, Setpgid: !newSession}
 	cmd.WaitDelay = 250 * time.Millisecond
 	if err := cmd.Start(); err != nil {
 		return ProcessResult{Reason: "unavailable"}
