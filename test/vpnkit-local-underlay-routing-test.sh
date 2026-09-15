@@ -118,6 +118,8 @@ EOF_BAD_ROUTES
   else
     cat <<'EOF_ROUTES'
 default via 192.0.2.1 dev enp42s0 proto dhcp src 192.0.2.10 metric 100
+10.10.0.0/24 dev enp42s0 proto kernel scope link src 10.10.0.10 metric 100
+192.0.0.0/16 dev enp42s0 proto kernel scope link src 192.0.2.10 metric 100
 192.0.2.0/24 dev enp42s0 proto kernel scope link src 192.0.2.10 metric 100
 EOF_ROUTES
   fi

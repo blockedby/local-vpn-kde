@@ -1283,8 +1283,10 @@ discover_uplink() {
       [[ "$line" == *" scope link"* || "$line" == *" scope link "* ]] || continue
       candidate=${line%% *}
       valid_ipv4_cidr "$candidate" || continue
-      candidate_prefix=$candidate
-      break
+      cidrs_overlap "$candidate" "$candidate_gateway/32" || continue
+      if [[ -z "$candidate_prefix" ]] || (( ${candidate##*/} > ${candidate_prefix##*/} )); then
+        candidate_prefix=$candidate
+      fi
     done <<< "$ROUTE_SNAPSHOT"
     [[ -n "$candidate_prefix" ]] || continue
     # A dedicated Docker source subnet must not overlap the physical gateway
