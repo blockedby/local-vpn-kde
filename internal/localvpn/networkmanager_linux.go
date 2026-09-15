@@ -488,7 +488,9 @@ func (n NetworkManager) importProfile(ctx context.Context, cap nmCapability, own
 		}
 	}
 	if importErr != nil && imported == "" {
-		after, e := n.inventory(ctx, false)
+		cleanup, done := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer done()
+		after, e := n.inventory(cleanup, false)
 		if e == nil {
 			newIDs := []string{}
 			for _, row := range after {
@@ -504,17 +506,14 @@ func (n NetworkManager) importProfile(ctx context.Context, cap nmCapability, own
 	if imported == "" || known[imported] || imported == old {
 		return errors.New("import result is not a unique new UUID")
 	}
-	if _, err = n.connection(ctx, imported); err != nil {
-		return errors.New("imported profile could not be proven local")
-	}
 	committed := false
 	defer func() {
 		if !committed {
 			cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			failed := false
-			_ = n.harden(cleanup, imported, "vpnkit-local-import-"+imported)
 			if _, e := n.connection(cleanup, imported); e == nil {
+				_ = n.harden(cleanup, imported, "vpnkit-local-import-"+imported)
 				if e = n.delete(cleanup, imported); e != nil {
 					failed = true
 				}
@@ -531,6 +530,9 @@ func (n NetworkManager) importProfile(ctx context.Context, cap nmCapability, own
 			}
 		}
 	}()
+	if _, err = n.connection(ctx, imported); err != nil {
+		return errors.New("imported profile could not be proven local")
+	}
 	if importErr != nil {
 		return errors.New("NetworkManager import failed after creating a profile")
 	}

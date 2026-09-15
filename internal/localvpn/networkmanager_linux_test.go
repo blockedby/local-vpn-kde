@@ -209,3 +209,33 @@ func TestNMPreviousInstallationMigration(t *testing.T) {
 		})
 	}
 }
+
+func TestNMCancelAfterImportCleansCreatedProfile(t *testing.T) {
+	n := NetworkManager{Base: t.TempDir()}
+	os.MkdirAll(filepath.Dir(n.profilePath()), 0700)
+	os.WriteFile(n.profilePath(), []byte("client\ndev tun\nproto udp\nremote 127.0.0.1 21194\n"), 0600)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	id := "11111111-1111-4111-8111-111111111111"
+	deleted := false
+	n.command = func(ctx context.Context, args ...string) (string, error) {
+		joined := strings.Join(args, " ")
+		if strings.HasPrefix(joined, "connection import ") {
+			cancel()
+			return id, nil
+		}
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		if strings.HasPrefix(joined, "-t -f connection.id,") {
+			return "vpnkit-local:" + id + ":vpn:org.freedesktop.NetworkManager.openvpn:remote = 127.0.0.1:21194\n", nil
+		}
+		if strings.HasPrefix(joined, "connection delete ") {
+			deleted = true
+		}
+		return "", nil
+	}
+	if err := n.importProfile(ctx, nmCapability{}, "missing"); err == nil || !deleted {
+		t.Fatalf("cleanup failed: deleted=%v err=%v", deleted, err)
+	}
+}
