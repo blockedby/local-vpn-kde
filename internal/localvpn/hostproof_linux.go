@@ -66,7 +66,7 @@ func (n NetworkManager) activeDevice(ctx context.Context, uuid string) (string, 
 	if err != nil {
 		return "", err
 	}
-	data, err := runtimeCommand(ctx, "ip", "-o", "-4", "addr")
+	data, err := hostCommand(ctx, "ip", "-o", "-4", "addr")
 	if err != nil {
 		return "", err
 	}
@@ -96,7 +96,7 @@ func hostRoutes(ctx context.Context, device string) error {
 		return errors.New("unsafe owned device")
 	}
 	for _, address := range []string{"1.1.1.1", "8.8.8.8"} {
-		data, err := runtimeCommand(ctx, "ip", "-4", "route", "get", address)
+		data, err := hostCommand(ctx, "ip", "-4", "route", "get", address)
 		if err != nil {
 			return errNMNotReady
 		}

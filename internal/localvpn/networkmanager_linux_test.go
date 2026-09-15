@@ -75,3 +75,67 @@ func TestTerseInventoryPreservesEscapedNames(t *testing.T) {
 		t.Fatal("escaped name shifted UUID/type fields")
 	}
 }
+
+func TestNMRefreshRetainsNewProfileAfterOldDeletion(t *testing.T) {
+	for _, unreadable := range []bool{false, true} {
+		t.Run(map[bool]string{false: "lost-delete-reply", true: "lost-inventory-reply"}[unreadable], func(t *testing.T) {
+			base := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(base, "openvpn/client"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			n := NetworkManager{Base: base}
+			if err := os.WriteFile(n.profilePath(), []byte("client\ndev tun\nproto udp\nremote 127.0.0.1 21194\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			old := "11111111-1111-4111-8111-111111111111"
+			newID := "22222222-2222-4222-8222-222222222222"
+			cap := nmCapability{UUID: old, Fingerprint: strings.Repeat("0", 64)}
+			if err := n.writeCapability(cap); err != nil {
+				t.Fatal(err)
+			}
+			names := map[string]string{old: "vpnkit-local"}
+			deleted := false
+			n.command = func(_ context.Context, args ...string) (string, error) {
+				joined := strings.Join(args, " ")
+				switch {
+				case joined == "-t -f NAME,UUID,TYPE connection show":
+					if deleted && unreadable {
+						return "", errors.New("inventory unavailable")
+					}
+					var out strings.Builder
+					for id, name := range names {
+						out.WriteString(name + ":" + id + ":vpn\n")
+					}
+					return out.String(), nil
+				case strings.HasPrefix(joined, "connection import "):
+					names[newID] = "imported"
+					return newID, nil
+				case strings.HasPrefix(joined, "connection modify uuid "):
+					names[args[3]] = args[5]
+					return "", nil
+				case strings.HasPrefix(joined, "-t -f connection.id,"):
+					id := args[len(args)-1]
+					return names[id] + ":" + id + ":vpn:org.freedesktop.NetworkManager.openvpn:remote = 127.0.0.1:21194\n", nil
+				case joined == "connection delete uuid "+old:
+					delete(names, old)
+					deleted = true
+					return "", errors.New("reply lost after deletion")
+				case joined == "connection delete uuid "+newID:
+					delete(names, newID)
+					return "", nil
+				default:
+					return "", errors.New("unexpected command")
+				}
+			}
+			err := n.importProfile(context.Background(), cap, "owned")
+			if (err != nil) != unreadable {
+				t.Fatalf("unexpected refresh result: %v", err)
+			}
+			got, err := n.readCapability()
+			fingerprint, _ := n.profileFingerprint()
+			if err != nil || got.UUID != newID || got.Fingerprint != fingerprint || names[newID] != "vpnkit-local" {
+				t.Fatal("cleanup uncertainty destroyed the newly committed profile")
+			}
+		})
+	}
+}

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -41,12 +40,8 @@ func (n NetworkManager) call(ctx context.Context, args ...string) (string, error
 	if n.command != nil {
 		return n.command(ctx, args...)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	output := &boundedOutput{limit: 1024 * 1024, cancel: cancel}
-	result := RunProcess(ctx, "nmcli", args, append(os.Environ(), "LC_ALL=C"), output, output, time.Second)
-	data, overflow := output.result()
-	if result.Reason != "ok" || overflow {
+	data, err := hostCommand(ctx, "nmcli", args...)
+	if err != nil {
 		return string(data), errors.New("NetworkManager command failed")
 	}
 	return string(data), nil
@@ -506,15 +501,22 @@ func (n NetworkManager) importProfile(ctx context.Context, cap nmCapability, own
 		return err
 	}
 	if old != "" {
-		if err = n.delete(ctx, old); err != nil {
-			return err
-		}
-		rows, e := n.inventory(ctx, false)
+		deleteErr := n.delete(ctx, old)
+		// A failed reply can follow a successful deletion. Once the old UUID
+		// may be gone, restoring its capability would discard the usable new
+		// profile and leave ownership pointing at a nonexistent connection.
+		check, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		rows, e := n.inventory(check, false)
 		if e != nil {
-			return e
+			committed = true
+			return errors.New("new NetworkManager profile retained; old profile cleanup could not be verified")
 		}
 		for _, row := range rows {
 			if row.UUID == old {
+				if deleteErr != nil {
+					return deleteErr
+				}
 				return errors.New("old profile still present")
 			}
 		}
