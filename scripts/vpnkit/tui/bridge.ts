@@ -52,8 +52,8 @@ export interface Reply {
 export interface CheckProgress {
   event: "server-check";
   server_id: string;
-  stage: "ping" | "complete";
-  ping_status: "ready" | "failed";
+  stage: "start" | "ping" | "complete";
+  ping_status: "untested" | "ready" | "failed";
   latency_ms: number;
   availability: "ready" | "failed" | "untested";
 }
@@ -100,8 +100,8 @@ export class Bridge implements Backend {
           const reply = JSON.parse(line);
           if (reply.event === "server-check") {
             if (!/^srv_[A-Za-z0-9_-]{27}$/.test(reply.server_id) ||
-                !["ping", "complete"].includes(reply.stage) ||
-                !["ready", "failed"].includes(reply.ping_status) ||
+                !["start", "ping", "complete"].includes(reply.stage) ||
+                !(reply.stage === "start" ? reply.ping_status === "untested" && reply.latency_ms === 0 && reply.availability === "untested" : ["ready", "failed"].includes(reply.ping_status)) ||
                 !["ready", "failed", "untested"].includes(reply.availability) ||
                 !Number.isInteger(reply.latency_ms) || reply.latency_ms < 0 || reply.latency_ms > 3600000) throw new Error();
             if (this.pending) this.onCheckProgress?.(reply);

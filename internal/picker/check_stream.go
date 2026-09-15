@@ -89,15 +89,18 @@ func (s *CheckStream) line(line []byte) error {
 	previous, allowed := s.ids[p.ServerID]
 	stage := 0
 	switch p.Stage {
-	case "ping":
+	case "start":
 		stage = 1
-	case "complete":
+	case "ping":
 		stage = 2
+	case "complete":
+		stage = 3
 	}
 	if !allowed || !checkID.MatchString(p.ServerID) || stage <= previous || p.LatencyMS < 0 || p.LatencyMS > 3600000 ||
-		(p.PingStatus != "ready" && p.PingStatus != "failed") ||
+		(p.PingStatus != "ready" && p.PingStatus != "failed" && !(stage == 1 && p.PingStatus == "untested")) ||
 		(p.Availability != "ready" && p.Availability != "failed" && p.Availability != "untested") ||
-		(stage == 1 && p.Availability != "untested") ||
+		(stage <= 2 && p.Availability != "untested") ||
+		(stage == 1 && (p.PingStatus != "untested" || p.LatencyMS != 0)) ||
 		(p.PingStatus == "failed" && (p.LatencyMS != 0 || p.Availability != "untested")) {
 		return errors.New("invalid check evidence")
 	}

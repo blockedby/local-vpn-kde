@@ -20,6 +20,7 @@ const serverCheckWorkers = 5
 const serverCheckLimit = 1000
 
 type checkProgressKey struct{}
+type checkStartedKey struct{}
 
 type serverCheckProbe func(context.Context, config.Config, picker.NodeResult, string) picker.NodeResult
 
@@ -84,6 +85,9 @@ func checkNodes(ctx context.Context, c config.Config, records []picker.BrowserRe
 			for i := range jobs {
 				if ctx.Err() != nil {
 					return
+				}
+				if started, ok := ctx.Value(checkStartedKey{}).(func(int)); ok {
+					started(i)
 				}
 				probeCtx := ctx
 				if emit, ok := ctx.Value(checkProgressKey{}).(func(int, picker.NodeResult)); ok {
@@ -182,6 +186,9 @@ func runBrowserCheckBatch(cmd *cobra.Command, o *cliOptions, ids []string, targe
 	}
 	// The worker's private record is never serialized; only its opaque ID and
 	// finite measurement fields can cross the live progress channel.
+	ctx = context.WithValue(ctx, checkStartedKey{}, func(i int) {
+		emit(records[i].ID, "start", picker.NodeResult{PingStatus: "untested", Availability: "untested"})
+	})
 	ctx = context.WithValue(ctx, checkProgressKey{}, func(i int, r picker.NodeResult) { emit(records[i].ID, "ping", r) })
 	results, err := checkNodes(ctx, c, records, target, probe, func(i int, r picker.NodeResult) { emit(records[i].ID, "complete", r) })
 	if err != nil {

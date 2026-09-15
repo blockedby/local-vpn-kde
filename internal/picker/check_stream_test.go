@@ -12,8 +12,12 @@ func TestCheckStreamForwardsEachFragmentedEventBeforeFinal(t *testing.T) {
 	var final bytes.Buffer
 	var events []CheckProgress
 	s := NewCheckStream([]string{id}, &final, func(p CheckProgress) error { events = append(events, p); return nil })
-	for _, stage := range []string{"ping", "complete"} {
+	for _, stage := range []string{"start", "ping", "complete"} {
 		p := CheckProgress{Event: "server-check", ServerID: id, Stage: stage, PingStatus: "ready", LatencyMS: 12, Availability: "untested"}
+		if stage == "start" {
+			p.PingStatus = "untested"
+			p.LatencyMS = 0
+		}
 		raw, _ := json.Marshal(p)
 		// Extra private fields must never be forwarded by either transport boundary.
 		raw = append(raw[:len(raw)-1], []byte(`,"secret":"private-marker"}`)...)
@@ -26,7 +30,7 @@ func TestCheckStreamForwardsEachFragmentedEventBeforeFinal(t *testing.T) {
 			t.Fatal("event entered final response")
 		}
 	}
-	if len(events) != 2 {
+	if len(events) != 3 {
 		t.Fatal("events waited for final")
 	}
 	encoded, _ := json.Marshal(events)

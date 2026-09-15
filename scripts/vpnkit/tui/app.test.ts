@@ -827,3 +827,29 @@ test("failed current ping overrides an earlier successful speed result", async (
     finish(reply()); await settle();
   } finally { await app.close(); }
 });
+
+test("only assigned workers spin while remaining servers wait in the queue", async () => {
+ const t = await createTestRenderer({ width:120, height:30 });
+ const b = new FakeBackend();
+ b.rows = Array.from({length:6},(_,i)=>({...rows[0]!,server_id:`srv_${String.fromCharCode(97+i).repeat(27)}`,display_name:`Node ${i}`}));
+ let finish!: (r:Reply)=>void;
+ b.hold = {action:"servers/check-batch",promise:new Promise(r=>finish=r)};
+ const app = new App(t.renderer,b);
+ const event = (i:number,stage:"start"|"complete"): CheckProgress => ({event:"server-check",server_id:b.rows[i]!.server_id,stage,ping_status:stage==="start"?"untested":"ready",latency_ms:stage==="start"?0:12,availability:stage==="start"?"untested":"ready"});
+ try {
+  await app.perform("status"); t.mockInput.pressKey("v"); await settle();
+  t.mockInput.pressKey("a"); await settle();
+  for(let i=0;i<5;i++) b.onCheckProgress?.(event(i,"start"));
+  await t.renderOnce();
+  let lines=t.captureCharFrame().split("\n").filter(s=>s.includes("Node "));
+  expect(lines.filter(s=>s.includes("проверка"))).toHaveLength(5);
+  expect(lines.find(s=>s.includes("Node 5"))).toContain("в очереди");
+  expect(lines.find(s=>s.includes("Node 5"))).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+  b.onCheckProgress?.(event(0,"complete")); b.onCheckProgress?.(event(5,"start"));
+  await t.renderOnce();
+  lines=t.captureCharFrame().split("\n").filter(s=>s.includes("Node "));
+  expect(lines.filter(s=>s.includes("проверка"))).toHaveLength(5);
+  expect(lines.find(s=>s.includes("Node 0"))).toContain("готов");
+  expect(lines.find(s=>s.includes("Node 5"))).toContain("проверка");
+ } finally { finish(reply()); await settle(); await app.close(); }
+});

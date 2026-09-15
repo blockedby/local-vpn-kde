@@ -79,6 +79,7 @@ export class App {
     ids?: string[];
     failed: number;
     target?: string;
+    running: Set<string>;
     pinged: Set<string>;
     completed: Set<string>;
     failures: Set<string>;
@@ -229,11 +230,20 @@ export class App {
       if (!batch || batch.kind !== "ping" || this.cancelled || this.closing || !batch.ids?.includes(row.server_id) || batch.completed.has(row.server_id)) return;
       const server = this.servers.find(s => s.server_id === row.server_id);
       if (!server) return;
+      batch.running.add(row.server_id);
+      if (row.stage === "start") {
+        server.ping_status = "untested";
+        server.latency_ms = undefined;
+        server.availability = "untested";
+        this.paint();
+        return;
+      }
       server.ping_status = row.ping_status;
       server.latency_ms = row.ping_status === "ready" ? row.latency_ms : undefined;
       batch.pinged.add(row.server_id);
       if (row.stage === "complete") {
         if (batch.target === this.target) server.availability = row.availability;
+        batch.running.delete(row.server_id);
         batch.completed.add(row.server_id);
         if (row.ping_status !== "ready" || row.availability !== "ready") batch.failures.add(row.server_id);
         batch.done = batch.completed.size;
@@ -771,6 +781,7 @@ export class App {
       total: this.servers.length,
       failed: 0,
       target: this.target,
+      running: new Set(),
       pinged: new Set(), completed: new Set(), failures: new Set(),
     };
     if (!this.catalogLoaded || this.catalogStale) {
@@ -947,14 +958,15 @@ export class App {
       const s = visible[i];
       row.visible = table && i < this.rowCount() && !!s;
       if (!s) return;
-      const active =
-        this.batch?.ids?.includes(s.server_id) ??
-        this.batch?.id === s.server_id;
+      const queued = this.batch?.kind === "ping" && this.batch.ids?.includes(s.server_id) && !this.batch.running.has(s.server_id) && !this.batch.completed.has(s.server_id);
+      const active = this.batch?.kind === "ping"
+        ? this.batch.running.has(s.server_id)
+        : this.batch?.id === s.server_id;
       const checking = (kind: Batch) =>
         active &&
         (this.batch?.kind === kind ||
           (kind === "availability" && this.batch?.kind === "ping"));
-      const ping = checking("ping") && !this.batch?.pinged.has(s.server_id)
+      const ping = queued ? "ждёт" : checking("ping") && !this.batch?.pinged.has(s.server_id)
         ? frames[this.frame % 10]
         : s.ping_status === "failed"
           ? "ошибка"
@@ -964,14 +976,14 @@ export class App {
         : s.status === "failed"
           ? "ошибка"
           : (s.download_mbps?.toFixed(1) ?? "—");
-      const site = checking("availability") && !this.batch?.completed.has(s.server_id)
+      const site = queued ? "—" : checking("availability") && this.batch?.pinged.has(s.server_id) && s.ping_status === "ready" && !this.batch?.completed.has(s.server_id)
         ? frames[this.frame % 10]
         : s.availability === "ready"
           ? "да"
           : s.availability === "failed"
             ? "нет"
             : "—";
-      row.content = `${s.server_id === this.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)} ${cell(ping, 8)} ${cell(speed, 8)} ${cell(site, 7)} ${s.ping_status === "failed" || s.availability === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не пров."}`;
+      row.content = `${s.server_id === this.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)} ${cell(ping, 8)} ${cell(speed, 8)} ${cell(site, 7)} ${queued ? "в очереди" : active ? "проверка" : s.ping_status === "failed" || s.availability === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не пров."}`;
       row.fg =
         s.server_id === this.serverID
           ? p.accent

@@ -221,11 +221,27 @@ func TestCheckBatchStreamsPingBeforeSiteAndBeforeSlowPeer(t *testing.T) {
 		}, true)
 	}()
 	dec := json.NewDecoder(reader)
-	for _, stage := range []string{"ping", "complete"} {
-		var p picker.CheckProgress
-		if err := dec.Decode(&p); err != nil {
-			t.Fatal(err)
+	started := map[string]bool{}
+	nextResult := func() picker.CheckProgress {
+		for {
+			var p picker.CheckProgress
+			if err := dec.Decode(&p); err != nil {
+				t.Fatal(err)
+			}
+			if p.Stage != "start" {
+				if !started[p.ServerID] {
+					t.Fatal("measurement preceded worker start")
+				}
+				return p
+			}
+			if started[p.ServerID] || p.PingStatus != "untested" || p.LatencyMS != 0 {
+				t.Fatal("invalid worker start")
+			}
+			started[p.ServerID] = true
 		}
+	}
+	for _, stage := range []string{"ping", "complete"} {
+		p := nextResult()
 		if p.ServerID != ids[1] || p.Stage != stage || p.LatencyMS != 31 {
 			t.Fatalf("wrong event: %+v", p)
 		}
@@ -234,9 +250,9 @@ func TestCheckBatchStreamsPingBeforeSiteAndBeforeSlowPeer(t *testing.T) {
 		}
 	}
 	close(release)
-	var complete picker.CheckProgress
-	if err := dec.Decode(&complete); err != nil || complete.ServerID != ids[0] {
-		t.Fatal("slow peer result lost", err)
+	complete := nextResult()
+	if complete.ServerID != ids[0] || len(started) != 2 {
+		t.Fatal("slow peer result or start lost")
 	}
 	var final picker.BrowserResponse
 	if err := dec.Decode(&final); err != nil || len(final.Servers) != 2 {
