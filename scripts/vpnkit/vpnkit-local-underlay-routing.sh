@@ -2106,14 +2106,19 @@ canonical_helper_file() {
   canonical_regular_file "$HELPER_PATH" 755 0 || return 1
   [[ "$(sed -n '2p' -- "$HELPER_PATH" 2>/dev/null)" == "$MARKER" ]] || return 1
   if config_uses_destination_policy; then
-    # The persisted digest is not an ownership token by itself.  It must agree
-    # with both the exact trusted source being installed and the target bytes.
-    cmp -s "$HELPER_PATH" "$SCRIPT_SOURCE" || return 1
+    # Updates may replace an exact released helper. A root-owned config digest
+    # alone is insufficient: bind it to current source or reviewed release bytes.
     actual_digest=$(sha256sum -- "$HELPER_PATH" 2>/dev/null) || return 1
     actual_digest=${actual_digest%% *}
+    [[ "$CONFIG_HAS_HELPER_DIGEST" == 1 && "$HELPER_DIGEST" == "$actual_digest" ]] || return 1
     expected_digest=$(sha256sum -- "$SCRIPT_SOURCE" 2>/dev/null) || return 1
     expected_digest=${expected_digest%% *}
-    [[ "$CONFIG_HAS_HELPER_DIGEST" == 1 && "$HELPER_DIGEST" == "$expected_digest" && "$actual_digest" == "$expected_digest" ]] || return 1
+    if [[ "$actual_digest" != "$expected_digest" ]]; then
+      case "$actual_digest" in
+        099d5652258a2c7468f659221cb2cd4ac8abf3189eb2c46eff55852e2ff67ad8|8b2b5078df6910d5663f3259911fd052f4ba2701329ff67ff44a3e9897f69cda) ;;
+        *) return 1 ;;
+      esac
+    fi
   else
     # VERSION=1 has no digest field, so bind it to the immutable legacy bytes
     # rather than accepting a marker plus recognizable snippets.

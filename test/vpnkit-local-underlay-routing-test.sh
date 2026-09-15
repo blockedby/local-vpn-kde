@@ -1123,4 +1123,16 @@ chmod 0700 -- "$R4_STATE_DIR"
 bash "$HELPER" uninstall --yes >/dev/null 2>&1 || fail_test "R4 empty state-directory cleanup failed"
 [[ ! -e "$R4_STATE_DIR" ]] || fail_test "R4 empty state directory was not removed"
 
+# Exercise an actual byte-changing upgrade, not merely reinstalling one version.
+bash "$HELPER" install --yes >/dev/null 2>&1 || fail_test "upgrade baseline install failed"
+CANDIDATE="$TMP_DIR/next-underlay.sh"
+CURRENT_DIGEST=$(sha256sum "$HELPER")
+CURRENT_DIGEST=${CURRENT_DIGEST%% *}
+sed "s/099d5652258a2c7468f659221cb2cd4ac8abf3189eb2c46eff55852e2ff67ad8/$CURRENT_DIGEST/" "$HELPER" >"$CANDIDATE"
+chmod 755 "$CANDIDATE"
+bash "$CANDIDATE" install --yes >/dev/null 2>&1 || fail_test "known previous helper blocked upgrade"
+cmp -s "$CANDIDATE" "$INSTALLED_HELPER" || fail_test "upgrade did not install new helper bytes"
+bash "$CANDIDATE" verify >/dev/null 2>&1 || fail_test "upgraded helper failed verification"
+bash "$CANDIDATE" uninstall --yes >/dev/null 2>&1 || fail_test "upgraded helper cleanup failed"
+
 printf '%s\n' 'vpnkit-local-underlay-routing mock tests: PASS'
