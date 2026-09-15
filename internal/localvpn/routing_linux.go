@@ -295,9 +295,23 @@ func (c ContainerConfig) ipv6Policy(ctx context.Context) error {
 	_, _ = runtimeCommand(ctx, "ip6tables", "-t", "filter", "-N", "OVPN_IPV6_BLOCK")
 
 	// Install DROP before linking the chain, so new references never see an
-	// empty ACCEPT-equivalent chain during initial setup.
-	if _, err := runtimeCommand(ctx, "ip6tables", "-t", "filter", "-I", "OVPN_IPV6_BLOCK", "1", "-j", "DROP"); err != nil {
+	// empty ACCEPT-equivalent chain during initial setup. Keep repeated server
+	// switches idempotent instead of adding another identical DROP each time.
+	data, err := runtimeCommand(ctx, "ip6tables", "-t", "filter", "-S", "OVPN_IPV6_BLOCK")
+	if err != nil {
 		return err
+	}
+	first := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "-A ") {
+			first = line
+			break
+		}
+	}
+	if first != "-A OVPN_IPV6_BLOCK -j DROP" {
+		if _, err := runtimeCommand(ctx, "ip6tables", "-t", "filter", "-I", "OVPN_IPV6_BLOCK", "1", "-j", "DROP"); err != nil {
+			return err
+		}
 	}
 	for _, jump := range jumps {
 		if err := ensureRule(ctx, "ip6tables", "filter", jump[0], append(jump[1:], "-j", "OVPN_IPV6_BLOCK")...); err != nil {

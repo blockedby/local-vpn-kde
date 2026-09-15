@@ -181,6 +181,7 @@ func TestContainerDataPath(t *testing.T) {
 	// A DNS change exercises the same token/generation/health handshake used
 	// for server selection while the client's OpenVPN connection stays up.
 	before := must("exec", gateway, "cat", "/run/vpnkit/sing-box-generation")
+	ipv6Before := must("exec", gateway, "ip6tables", "-S", "OVPN_IPV6_BLOCK")
 	must("exec", gateway, "/usr/local/bin/local-vpn-kde", "dns-switch", "remote-dns-fallback")
 	after := must("exec", gateway, "cat", "/run/vpnkit/sing-box-generation")
 	if before == after {
@@ -212,6 +213,9 @@ func TestContainerDataPath(t *testing.T) {
 	must("exec", gateway, "/usr/local/bin/local-vpn-kde", "health")
 	if response := must("exec", client, "curl", "--noproxy", "*", "--fail", "--silent", "--max-time", "10", "http://"+targetIP+":8080/"); response != payload {
 		t.Fatal("client traffic did not recover after barrier removal")
+	}
+	if ipv6After := must("exec", gateway, "ip6tables", "-S", "OVPN_IPV6_BLOCK"); ipv6After != ipv6Before {
+		t.Fatal("runtime restarts accumulated IPv6 block rules")
 	}
 	t.Log("PASS: Go runtime, native PKI/configs, OpenVPN handshake, TUN data path, restart acknowledgement, fail-closed barrier, isolated Docker network")
 }
