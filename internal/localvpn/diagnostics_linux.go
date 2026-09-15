@@ -42,6 +42,7 @@ type attemptOutput struct {
 	head                     int
 	tail                     []byte
 	carry, reason, lastPhase string
+	phaseCarry               string
 	truncated, captureError  bool
 	progress                 func(string)
 }
@@ -60,7 +61,13 @@ func (w *attemptOutput) Write(p []byte) (int, error) {
 		}
 	}
 	if w.progress != nil {
-		for _, match := range phasePattern.FindAllStringSubmatch(text, -1) {
+		phaseText := w.phaseCarry + string(p)
+		end := strings.LastIndexByte(phaseText, '\n') + 1
+		w.phaseCarry = phaseText[end:]
+		if len(w.phaseCarry) > 256 {
+			w.phaseCarry = w.phaseCarry[len(w.phaseCarry)-256:]
+		}
+		for _, match := range phasePattern.FindAllStringSubmatch(phaseText[:end], -1) {
 			phase := match[1]
 			if phases[phase] && phase != w.lastPhase {
 				w.progress(phase)
