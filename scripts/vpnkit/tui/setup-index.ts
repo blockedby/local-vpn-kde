@@ -18,7 +18,7 @@ const authorize = async () => {
   app.setSuspended(true);
   renderer.suspend();
   try {
-    process.stdout.write("\nНужны права для настройки маршрутов. Пароль принимает sudo.\n");
+    process.stdout.write("\nВведите пароль администратора для настройки маршрутов.\n");
     return await new Promise<boolean>(resolve => {
       authChild = spawn("sudo", ["-v"], { stdio:"inherit" });
       authChild.on("error", () => resolve(false));
