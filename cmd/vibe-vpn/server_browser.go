@@ -665,9 +665,6 @@ func runBrowserSelect(cmd *cobra.Command, o *cliOptions, id string, deps browser
 	if !ok {
 		return writeBrowserFailure(cmd, "stale", catalog.Generation)
 	}
-	if !record.Result.OK && record.Result.Availability != "ready" {
-		return writeBrowserFailure(cmd, "failed", catalog.Generation)
-	}
 	if err := ctx.Err(); err != nil {
 		return writeBrowserContextFailure(cmd, ctx, catalog.Generation)
 	}

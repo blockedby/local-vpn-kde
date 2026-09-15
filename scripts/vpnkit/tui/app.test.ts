@@ -275,7 +275,7 @@ test("server table is sorted by name, keeps columns aligned and exposes three se
     t.mockInput.pressArrow("down");
     t.mockInput.pressEnter();
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("сначала выполните тест скорости");
+    expect(b.calls.at(-1)?.action).toBe("servers/select");
   } finally {
     await app.close();
   }
@@ -787,4 +787,21 @@ test("deferred subscription load does not replace text typed while busy", async 
     expect(t.captureCharFrame()).toContain("https://example.invalid/new");
     expect(b.calls.map(c => c.action)).toEqual(["status"]);
   } finally { finish(reply()); await settle(); await app.close(); }
+});
+
+test("any listed server can be selected without successful measurements", async () => {
+  for (const status of ["untested", "failed"] as const) {
+    const t = await createTestRenderer({ width: 100, height: 24 });
+    const b = new FakeBackend();
+    b.rows = [{ ...rows[0]!, status, ping_status: "failed", availability: "failed" }];
+    const app = new App(t.renderer, b);
+    try {
+      await app.perform("status");
+      t.mockInput.pressKey("v");
+      await settle();
+      t.mockInput.pressEnter();
+      await settle();
+      expect(b.calls.at(-1)).toEqual({ action: "servers/select", value: rows[0]!.server_id });
+    } finally { await app.close(); }
+  }
 });

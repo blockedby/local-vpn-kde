@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1519,4 +1520,36 @@ func writeTestConfig(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	return cfg
+}
+
+func TestBrowserSelectAcceptsUntestedAndFailedNodes(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		t.Run(fmt.Sprint(failed), func(t *testing.T) {
+			dir, cfg, catalog := browserFixture(t)
+			catalog = publishBrowserCatalogForTest(t, dir, browserPublicationProbe, func(c *picker.BrowserCatalog) {
+				c.Servers[0].Result.OK = false
+				if failed {
+					c.Servers[0].Result.Availability = "failed"
+					c.Servers[0].Result.PingStatus = "failed"
+				} else {
+					c.Servers[0].Result.Availability = "untested"
+					c.Servers[0].Result.PingStatus = "untested"
+				}
+			})
+			applied := false
+			deps := browserDependencies{recover: func(context.Context, config.Config) error { return nil }, apply: func(_ context.Context, c config.Config, r picker.NodeResult) error {
+				applied = true
+				return state.SaveCurrent(c.StateDir, state.Current{ServerID: r.ServerID, Generation: r.Generation})
+			}}
+			cmd := &cobra.Command{}
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			if err := runBrowserSelect(cmd, &cliOptions{configPath: cfg}, catalog.Servers[0].ID, deps); err != nil {
+				t.Fatalf("select: %v %s", err, out.String())
+			}
+			if !applied {
+				t.Fatal("selection blocked by measurement results")
+			}
+		})
+	}
 }

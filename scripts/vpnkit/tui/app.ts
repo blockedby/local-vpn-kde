@@ -513,14 +513,7 @@ export class App {
           return;
         }
         const s = this.servers.find((s) => s.server_id === this.serverID);
-        if (s) {
-          if (s.status !== "ready" && s.availability !== "ready")
-            this.notify(
-              "Для выбора сначала выполните тест скорости или доступности сайта.",
-              true,
-            );
-          else void this.perform("servers/select", s.server_id);
-        }
+        if (s) void this.perform("servers/select", s.server_id);
         return;
       }
     }
