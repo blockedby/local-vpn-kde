@@ -7,7 +7,7 @@ const phaseIndex: Record<string, number> = { "setup-assets": 2, "setup-underlay"
 const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const reasons: Record<string, string> = {
   "foreign-profile": "Профиль vpnkit-local уже существует. Принадлежность старой установке не подтверждена.",
-  "previous-profile-active": "Отключи предыдущий локальный VPN и повтори установку.",
+  "previous-profile-active": "Отключи локальный VPN перед обновлением профиля и повтори установку.",
   "underlay-install-failed": "Не удалось настроить системные маршруты. Повтори шаг; права будут запрошены заново.",
   "underlay-verify-failed": "Проверка системных маршрутов не прошла. Подробности в журнале установки.",
   "profile-import-failed": "Не удалось импортировать профиль KDE. Подробности в журнале установки.",

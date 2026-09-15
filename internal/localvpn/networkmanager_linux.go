@@ -468,6 +468,15 @@ func (n NetworkManager) importProfile(ctx context.Context, cap nmCapability, own
 	} else if ownership != "missing" && ownership != "stale" {
 		return errors.New("refusing foreign or invalid NetworkManager profile")
 	}
+	if old != "" {
+		active, err := n.active(ctx, old)
+		if err != nil {
+			return err
+		}
+		if active {
+			return ErrActiveNMMigration
+		}
+	}
 	before, err := n.inventory(ctx, false)
 	if err != nil {
 		return err
@@ -546,6 +555,15 @@ func (n NetworkManager) importProfile(ctx context.Context, cap nmCapability, own
 		}
 		if err = n.namedAllowlist(ctx, old, imported); err != nil {
 			return err
+		}
+	}
+	if old != "" {
+		active, err := n.active(ctx, old)
+		if err != nil {
+			return err
+		}
+		if active {
+			return ErrActiveNMMigration
 		}
 	}
 	if err = n.writeCapability(nmCapability{UUID: imported, Fingerprint: fingerprint}); err != nil {

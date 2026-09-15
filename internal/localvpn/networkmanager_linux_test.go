@@ -98,6 +98,8 @@ func TestNMRefreshRetainsNewProfileAfterOldDeletion(t *testing.T) {
 			n.command = func(_ context.Context, args ...string) (string, error) {
 				joined := strings.Join(args, " ")
 				switch {
+				case joined == "-t -f NAME,UUID,TYPE,DEVICE connection show --active":
+					return "", nil
 				case joined == "-t -f NAME,UUID,TYPE connection show":
 					if deleted && unreadable {
 						return "", errors.New("inventory unavailable")
@@ -237,5 +239,22 @@ func TestNMCancelAfterImportCleansCreatedProfile(t *testing.T) {
 	}
 	if err := n.importProfile(ctx, nmCapability{}, "missing"); err == nil || !deleted {
 		t.Fatalf("cleanup failed: deleted=%v err=%v", deleted, err)
+	}
+}
+
+func TestNMRefreshRefusesActiveProfileBeforeImport(t *testing.T) {
+	n := NetworkManager{Base: t.TempDir()}
+	os.MkdirAll(filepath.Dir(n.profilePath()), 0700)
+	os.WriteFile(n.profilePath(), []byte("client\ndev tun\nproto udp\nremote 127.0.0.1 21194\n"), 0600)
+	id := "11111111-1111-4111-8111-111111111111"
+	n.command = func(_ context.Context, args ...string) (string, error) {
+		if strings.Join(args, " ") == "-t -f NAME,UUID,TYPE,DEVICE connection show --active" {
+			return "vpnkit-local:" + id + ":vpn:tun0\n", nil
+		}
+		t.Fatal("active refresh reached mutation", args)
+		return "", nil
+	}
+	if err := n.importProfile(context.Background(), nmCapability{UUID: id, Fingerprint: strings.Repeat("0", 64)}, "owned"); !errors.Is(err, ErrActiveNMMigration) {
+		t.Fatal(err)
 	}
 }
