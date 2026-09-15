@@ -99,11 +99,19 @@ func TestContainerDataPath(t *testing.T) {
 		})
 		return id
 	}
-	runtimeBinary := filepath.Join(base, "local-vpn-kde.bin")
-	runtimeBuild := exec.Command("go", "build", "-o", runtimeBinary, "../../cmd/local-vpn-kde")
-	runtimeBuild.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if output, err := runtimeBuild.CombinedOutput(); err != nil {
-		t.Fatalf("runtime build: %v %s", err, output)
+	gatewayArgs := []string{}
+	useImageBinary := os.Getenv("LOCAL_VPN_CONTAINER_USE_IMAGE_BINARY") == "1"
+	// Artifact acceptance uses the image's binary and ENTRYPOINT unchanged.
+	// The default development loop can still mount a fresh binary into an
+	// existing dependencies image without rebuilding that image each time.
+	if !useImageBinary {
+		runtimeBinary := filepath.Join(base, "local-vpn-kde.bin")
+		runtimeBuild := exec.Command("go", "build", "-o", runtimeBinary, "../../cmd/local-vpn-kde")
+		runtimeBuild.Env = append(os.Environ(), "CGO_ENABLED=0")
+		if output, err := runtimeBuild.CombinedOutput(); err != nil {
+			t.Fatalf("runtime build: %v %s", err, output)
+		}
+		gatewayArgs = append(gatewayArgs, "--entrypoint", "/usr/local/bin/local-vpn-kde", "-v", runtimeBinary+":/usr/local/bin/local-vpn-kde:ro")
 	}
 	target := launch("target", "-e", "LOCAL_VPN_CONTAINER_TARGET=1", "-v", binary+":/acceptance:ro", "--entrypoint", "/acceptance", image, "-test.run=^TestContainerTarget$")
 	address := func(id string) string {
@@ -120,7 +128,11 @@ func TestContainerDataPath(t *testing.T) {
 		return ip
 	}
 	targetIP := address(target)
-	gateway := launch("gateway", "--entrypoint", "/usr/local/bin/local-vpn-kde", "-v", runtimeBinary+":/usr/local/bin/local-vpn-kde:ro", "--cap-add", "NET_ADMIN", "--device", "/dev/net/tun", "--sysctl", "net.ipv4.ip_forward=1", "-e", "VPNKIT_ROUTING_MODE=tun", "-e", "VPNKIT_IPV6_POLICY=block", "-e", "OVPN_CIDR=10.89.0.0/24", "-v", filepath.Join(base, "rendered/openvpn")+":/etc/openvpn:ro", "-v", filepath.Join(base, "rendered/sing-box")+":/etc/sing-box:ro", image, "container")
+	gatewayArgs = append(gatewayArgs, "--cap-add", "NET_ADMIN", "--device", "/dev/net/tun", "--sysctl", "net.ipv4.ip_forward=1", "-e", "VPNKIT_ROUTING_MODE=tun", "-e", "VPNKIT_IPV6_POLICY=block", "-e", "OVPN_CIDR=10.89.0.0/24", "-v", filepath.Join(base, "rendered/openvpn")+":/etc/openvpn:ro", "-v", filepath.Join(base, "rendered/sing-box")+":/etc/sing-box:ro", image)
+	if !useImageBinary {
+		gatewayArgs = append(gatewayArgs, "container")
+	}
+	gateway := launch("gateway", gatewayArgs...)
 	gatewayIP := address(gateway)
 	deadline := time.Now().Add(35 * time.Second)
 	for {
