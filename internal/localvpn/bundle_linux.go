@@ -2,6 +2,8 @@ package localvpn
 
 import (
 	"errors"
+	"io"
+	"os"
 	"sort"
 
 	"golang.org/x/sys/unix"
@@ -11,9 +13,47 @@ import (
 // operation lock. All versions are staged first, and a failed publication
 // restores only entries still pointing at this transaction's candidate inode.
 func writeBundle(dir int, values map[string][]byte) error {
-	return writeBundleChecked(dir, values, nil)
+	return writeBundleChecked(dir, values, bundleHooks{})
 }
-func writeBundleChecked(dir int, values map[string][]byte, afterPublish func() error) error {
+
+type bundleHooks struct{ beforePublish, afterPublish func() error }
+
+func bundleSnapshot(dir int, name string) ([]byte, *unix.Stat_t, error) {
+	fd, err := unix.Openat(dir, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
+	if errors.Is(err, unix.ENOENT) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	file := os.NewFile(uintptr(fd), name)
+	defer file.Close()
+	stat, err := privateInode(fd)
+	if err != nil {
+		return nil, nil, err
+	}
+	data, err := io.ReadAll(io.LimitReader(file, 16*1024*1024+1))
+	if err != nil || len(data) > 16*1024*1024 {
+		return nil, nil, errors.New("private bundle snapshot failed")
+	}
+	if !bundleOriginalMatches(dir, name, &stat) {
+		return nil, nil, errors.New("private bundle changed while reading")
+	}
+	return data, &stat, nil
+}
+
+func bundleOriginalMatches(dir int, name string, previous *unix.Stat_t) bool {
+	var current unix.Stat_t
+	err := unix.Fstatat(dir, name, &current, unix.AT_SYMLINK_NOFOLLOW)
+	if previous == nil {
+		return errors.Is(err, unix.ENOENT)
+	}
+	return err == nil && current.Dev == previous.Dev && current.Ino == previous.Ino &&
+		current.Size == previous.Size && current.Mode == previous.Mode && current.Uid == previous.Uid &&
+		current.Nlink == 1 && current.Mtim == previous.Mtim && current.Ctim == previous.Ctim
+}
+
+func writeBundleChecked(dir int, values map[string][]byte, hooks bundleHooks) error {
 	names := make([]string, 0, len(values))
 	for name := range values {
 		if !component(name) {
@@ -25,6 +65,7 @@ func writeBundleChecked(dir int, values map[string][]byte, afterPublish func() e
 	type change struct {
 		name      string
 		old, new  *privateStage
+		original  *unix.Stat_t
 		installed bool
 	}
 	changes := []*change{}
@@ -41,12 +82,13 @@ func writeBundleChecked(dir int, values map[string][]byte, afterPublish func() e
 	for _, name := range names {
 		c := &change{name: name}
 		changes = append(changes, c)
-		previous, err := readAt(dir, name)
-		if err != nil && !errors.Is(err, unix.ENOENT) {
+		previous, original, err := bundleSnapshot(dir, name)
+		if err != nil {
 			return err
 		}
-		if err == nil {
-			c.old, err = stagePrivate(dir, previous, 0600)
+		c.original = original
+		if original != nil {
+			c.old, err = stagePrivate(dir, previous, original.Mode&0777)
 			if err != nil {
 				return err
 			}
@@ -88,9 +130,16 @@ func writeBundleChecked(dir int, values map[string][]byte, afterPublish func() e
 		}
 		return unix.Fsync(dir)
 	}
+	if hooks.beforePublish != nil {
+		if err := hooks.beforePublish(); err != nil {
+			return err
+		}
+	}
 	for _, c := range changes {
 		var err error
-		if c.new == nil {
+		if !bundleOriginalMatches(dir, c.name, c.original) {
+			err = errors.New("private bundle changed before publication")
+		} else if c.new == nil {
 			err = unix.Unlinkat(dir, c.name, 0)
 			if errors.Is(err, unix.ENOENT) {
 				err = nil
@@ -109,8 +158,8 @@ func writeBundleChecked(dir int, values map[string][]byte, afterPublish func() e
 		c.installed = true
 	}
 	var publishError error
-	if afterPublish != nil {
-		publishError = afterPublish()
+	if hooks.afterPublish != nil {
+		publishError = hooks.afterPublish()
 	}
 	if publishError == nil {
 		publishError = unix.Fsync(dir)
