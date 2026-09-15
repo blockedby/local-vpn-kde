@@ -1633,7 +1633,7 @@ server_browser_command() {
   trap 'server_browser_forward_signal 143' TERM
   trap 'server_browser_forward_signal 129' HUP
 
-  # Only the helper's bounded, completed child stdout may cross this boundary;
+  # Only the helper's bounded final response and validated check progress cross this boundary;
   # all helper/worker diagnostics are discarded. The Docker client is merely
   # an attachment and is not trusted as the in-container process owner.
   server_browser_helper_exec "$cid" run "$token" "$operation" "$server_id" "$target_url" 2>/dev/null &

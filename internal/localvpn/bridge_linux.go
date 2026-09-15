@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/blockedby/local-vpn-kde/internal/picker"
 	"golang.org/x/sys/unix"
 	"io"
 	"math"
@@ -110,7 +111,7 @@ func (b *Bridge) Serve(ctx context.Context, input io.Reader, output io.Writer) e
 	encoder := json.NewEncoder(output)
 	for scanner.Scan() {
 		line := append([]byte(nil), scanner.Bytes()...)
-		reply, err := b.request(ctx, line, func(phase string) { _ = encoder.Encode(map[string]string{"event": "progress", "phase": phase}) })
+		reply, err := b.request(ctx, line, func(phase string) { _ = encoder.Encode(map[string]string{"event": "progress", "phase": phase}) }, func(p picker.CheckProgress) error { return encoder.Encode(p) })
 		if err != nil {
 			return err
 		}
@@ -120,7 +121,7 @@ func (b *Bridge) Serve(ctx context.Context, input io.Reader, output io.Writer) e
 	}
 	return scanner.Err()
 }
-func (b *Bridge) request(parent context.Context, line []byte, progress func(string)) (map[string]any, error) {
+func (b *Bridge) request(parent context.Context, line []byte, progress func(string), checkProgress func(picker.CheckProgress) error) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(parent, b.options.Timeout)
 	b.mu.Lock()
 	b.cancel = cancel
@@ -140,6 +141,7 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 	}
 	if !request.Progress {
 		progress = nil
+		checkProgress = nil
 	}
 	var value string
 	if len(request.Value) > 0 && string(request.Value) != "null" {
@@ -178,7 +180,14 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 			}
 			catalog := map[string]any{"status": "ok", "servers": []any{}}
 			if !b.options.Mock {
-				data, result, overflow := b.capture(ctx, args, 1048576)
+				var data []byte
+				var result ProcessResult
+				var overflow bool
+				if ids != nil {
+					data, result, overflow = b.captureChecks(ctx, args, ids, checkProgress)
+				} else {
+					data, result, overflow = b.capture(ctx, args, 1048576)
+				}
 				switch {
 				case overflow:
 					catalog = map[string]any{"status": "unavailable"}
@@ -457,4 +466,25 @@ func sanitizeCatalog(data []byte, ids []string) (map[string]any, error) {
 		result["server"] = safe
 	}
 	return result, nil
+}
+
+func (b *Bridge) captureChecks(ctx context.Context, args, ids []string, progress func(picker.CheckProgress) error) ([]byte, ProcessResult, bool) {
+	child, cancel := context.WithCancel(ctx)
+	defer cancel()
+	output := &boundedOutput{limit: 1048576, cancel: cancel}
+	stream := picker.NewCheckStream(ids, output, func(p picker.CheckProgress) error {
+		if ctx.Err() != nil || progress == nil {
+			return nil
+		}
+		if err := progress(p); err != nil {
+			cancel()
+			return err
+		}
+		return nil
+	})
+	result := RunProcess(child, b.options.Executable, args, append(os.Environ(), "VPNKIT_TUI_SUPERVISED=1"), stream, nil, b.options.Grace)
+	err := stream.Finish()
+	data, overflow := output.result()
+	// Cancellation keeps its classification even if the stream has no final row.
+	return data, result, overflow || (err != nil && result.Reason == "ok")
 }

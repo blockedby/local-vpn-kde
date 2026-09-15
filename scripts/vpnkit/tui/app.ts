@@ -79,6 +79,9 @@ export class App {
     ids?: string[];
     failed: number;
     target?: string;
+    pinged: Set<string>;
+    completed: Set<string>;
+    failures: Set<string>;
   };
   private cancelled = false;
   private closing = false;
@@ -218,6 +221,23 @@ export class App {
     this.footer = text(this.root, "", p.muted);
     backend.onProgress = (phase) => {
       this.phase = phases[phase] ?? "";
+      this.paint();
+    };
+    backend.onCheckProgress = (row) => {
+      const batch = this.batch;
+      if (!batch || batch.kind !== "ping" || this.cancelled || this.closing || !batch.ids?.includes(row.server_id) || batch.completed.has(row.server_id)) return;
+      const server = this.servers.find(s => s.server_id === row.server_id);
+      if (!server) return;
+      server.ping_status = row.ping_status;
+      server.latency_ms = row.ping_status === "ready" ? row.latency_ms : undefined;
+      batch.pinged.add(row.server_id);
+      if (row.stage === "complete") {
+        if (batch.target === this.target) server.availability = row.availability;
+        batch.completed.add(row.server_id);
+        if (row.ping_status !== "ready" || row.availability !== "ready") batch.failures.add(row.server_id);
+        batch.done = batch.completed.size;
+        batch.failed = batch.failures.size;
+      }
       this.paint();
     };
     renderer.keyInput.on("keypress", this.onKey);
@@ -746,6 +766,7 @@ export class App {
       total: this.servers.length,
       failed: 0,
       target: this.target,
+      pinged: new Set(), completed: new Set(), failures: new Set(),
     };
     if (!this.catalogLoaded || this.catalogStale) {
       const result = await this.perform(
@@ -787,10 +808,12 @@ export class App {
         if (!result?.ok) this.batch.failed++;
       } else {
         const measured = result?.catalog?.servers ?? [];
-        this.batch.done += measured.length;
-        this.batch.failed += measured.filter(
-          (s) => s.ping_status !== "ready" || s.availability !== "ready",
-        ).length;
+        for (const row of measured) {
+          this.batch.completed.add(row.server_id);
+          if (row.ping_status !== "ready" || row.availability !== "ready") this.batch.failures.add(row.server_id);
+        }
+        this.batch.done = this.batch.completed.size;
+        this.batch.failed = this.batch.failures.size;
       }
       this.paint();
       if (
@@ -813,7 +836,7 @@ export class App {
     this.notify(
       stoppedReason
         ? `${failure(stoppedReason, null)} Проверено: ${done}/${total}.`
-        : `${this.cancelled || this.closing ? "Остановлено" : "Завершено"}: ${done}/${total} · ошибок ${failed}. Результаты сохранены.`,
+        : `${this.cancelled || this.closing ? "Остановлено" : "Завершено"}: ${done}/${total} · ошибок ${failed}. ${kind !== "speed" && (this.cancelled || this.closing) ? "Показаны полученные результаты; проход не сохранён." : "Результаты сохранены."}`,
       failed > 0 || !!stoppedReason,
     );
     if (this.closing) await this.finishClose();
@@ -925,7 +948,7 @@ export class App {
         active &&
         (this.batch?.kind === kind ||
           (kind === "availability" && this.batch?.kind === "ping"));
-      const ping = checking("ping")
+      const ping = checking("ping") && !this.batch?.pinged.has(s.server_id)
         ? frames[this.frame % 10]
         : s.ping_status === "failed"
           ? "ошибка"
@@ -935,7 +958,7 @@ export class App {
         : s.status === "failed"
           ? "ошибка"
           : (s.download_mbps?.toFixed(1) ?? "—");
-      const site = checking("availability")
+      const site = checking("availability") && !this.batch?.completed.has(s.server_id)
         ? frames[this.frame % 10]
         : s.availability === "ready"
           ? "да"
@@ -954,7 +977,7 @@ export class App {
     if (this.batch) {
       const detail = this.batch.kind === "speed"
         ? `Тест скорости · ${this.batch.done}/${this.batch.total} · ${cell(this.servers.find((s) => s.server_id === this.batch?.id)?.display_name ?? "", 16).trim()}`
-        : `Ping → сайт · ${this.batch.total} серверов · ${Math.floor((Date.now() - this.started) / 1000)} с`;
+        : `Ping → сайт · ${this.batch.done}/${this.batch.total} · ${Math.floor((Date.now() - this.started) / 1000)} с`;
       this.progress.content = `${frames[this.frame % 10]} ${detail}${this.cancelled ? " · отмена…" : " · [k] отменить"}`;
     }
     else if (this.busy && this.busy !== "status")

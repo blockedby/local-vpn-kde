@@ -8,6 +8,7 @@ import {
   type Reply,
   type Status,
   type Server,
+  type CheckProgress,
 } from "./bridge";
 import { connection } from "./model";
 const initial: Status = {
@@ -47,6 +48,7 @@ class FakeBackend implements Backend {
   hold?: { action: Action; promise: Promise<Reply> };
   cancelled = 0;
   onProgress?: (phase: string) => void;
+  onCheckProgress?: (result: CheckProgress) => void;
   async request(action: Action, value?: string): Promise<Reply> {
     this.calls.push({ action, value });
     if (this.hold?.action === action) return this.hold.promise;
@@ -707,4 +709,41 @@ test("batch failure retains the actionable outdated backend explanation", async 
     expect(t.captureCharFrame()).toContain("Нужен обновлённый Docker-бэкенд");
     expect(t.captureCharFrame()).not.toContain("Результаты сохранены");
   } finally { await app.close(); }
+});
+
+
+test("ping and site render before batch completion and completed rows stop spinning", async () => {
+ const t = await createTestRenderer({ width:120, height:30 });
+ const b = new FakeBackend();
+ let finish!: (r: Reply) => void;
+ b.hold = { action:"servers/check-batch", promise:new Promise(r => finish=r) };
+ const app = new App(t.renderer,b);
+ try {
+  await app.perform("status");
+  t.mockInput.pressKey("v"); await settle();
+  t.mockInput.pressKey("p"); await settle();
+  const event: CheckProgress = { event:"server-check", server_id:rows[0].server_id, stage:"ping", ping_status:"ready", latency_ms:37, availability:"untested" };
+  b.onCheckProgress?.(event);
+  await t.renderOnce();
+  let row=t.captureCharFrame().split("\n").find(s=>s.includes("Tokyo"))!;
+  expect(row).toContain("37");
+  expect(row).not.toContain("да");
+  expect(t.captureCharFrame()).toContain("0/2");
+  b.onCheckProgress?.({...event,stage:"complete",availability:"ready"});
+  b.onCheckProgress?.({...event,stage:"complete",availability:"ready"});
+  await t.renderOnce();
+  row=t.captureCharFrame().split("\n").find(s=>s.includes("Tokyo"))!;
+  expect(row).toContain("37"); expect(row).toContain("да");
+  expect(row).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+  expect(t.captureCharFrame()).toContain("1/2");
+  t.mockInput.pressKey("d"); await t.renderOnce();
+  expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+  t.mockInput.pressKey("v"); await t.renderOnce();
+  expect(t.captureCharFrame()).toContain("37");
+  finish({...reply(),catalog:{status:"ok",servers:rows.map(s=>({...s,ping_status:"ready",availability:"ready",latency_ms:37}))}});
+  await settle(); await t.renderOnce();
+  expect(t.captureCharFrame()).toContain("2/2");
+  expect(t.captureCharFrame()).not.toContain("3/2");
+  expect(b.calls.filter(c=>c.action==="servers/check-batch")).toHaveLength(1);
+ } finally { finish(reply()); await settle(); await app.close(); }
 });

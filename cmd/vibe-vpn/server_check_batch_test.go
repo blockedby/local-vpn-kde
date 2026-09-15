@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -183,5 +184,65 @@ func TestCheckNodesRefillsWorkersWithoutWaitingForSlowPeer(t *testing.T) {
 		if n != 1 {
 			t.Fatalf("node %s checked %d times", id, n)
 		}
+	}
+}
+
+func TestCheckBatchStreamsPingBeforeSiteAndBeforeSlowPeer(t *testing.T) {
+	_, cfg, catalog := browserFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	release := make(chan struct{})
+	cmd := &cobra.Command{}
+	cmd.SetContext(ctx)
+	cmd.SetOut(writer)
+	done := make(chan error, 1)
+	ids := []string{catalog.Servers[0].ID, catalog.Servers[1].ID}
+	go func() {
+		defer writer.Close()
+		done <- runBrowserCheckBatch(cmd, &cliOptions{configPath: cfg}, ids, "https://example.com", func(ctx context.Context, _ config.Config, r picker.NodeResult, _ string) picker.NodeResult {
+			if r.Link == catalog.Servers[0].Result.Link {
+				select {
+				case <-release:
+				case <-ctx.Done():
+				}
+				r.PingStatus = "failed"
+				r.Availability = "untested"
+				r.PingMS = 0
+				return r
+			}
+			r.PingStatus = "ready"
+			r.PingMS = 31
+			r.Availability = "untested"
+			ctx.Value(checkProgressKey{}).(func(picker.NodeResult))(r)
+			r.Availability = "ready"
+			return r
+		}, true)
+	}()
+	dec := json.NewDecoder(reader)
+	for _, stage := range []string{"ping", "complete"} {
+		var p picker.CheckProgress
+		if err := dec.Decode(&p); err != nil {
+			t.Fatal(err)
+		}
+		if p.ServerID != ids[1] || p.Stage != stage || p.LatencyMS != 31 {
+			t.Fatalf("wrong event: %+v", p)
+		}
+		if stage == "ping" && p.Availability != "untested" {
+			t.Fatal("ping waited for site")
+		}
+	}
+	close(release)
+	var complete picker.CheckProgress
+	if err := dec.Decode(&complete); err != nil || complete.ServerID != ids[0] {
+		t.Fatal("slow peer result lost", err)
+	}
+	var final picker.BrowserResponse
+	if err := dec.Decode(&final); err != nil || len(final.Servers) != 2 {
+		t.Fatal("final catalog lost", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

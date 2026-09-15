@@ -19,7 +19,7 @@ func main() {
 }
 
 // dispatch intentionally emits no diagnostics. The only output channel is the
-// bounded stdout of a completed fixed vibe-vpn operation.
+// bounded final response and validated measurement progress of a fixed operation.
 func dispatch(args []string, supervisor *supervisor, stdout io.Writer) int {
 	if len(args) == 0 {
 		return exitUsage
@@ -37,7 +37,7 @@ func dispatch(args []string, supervisor *supervisor, stdout io.Writer) int {
 		if len(args) < 3 || len(args) > 5 || (len(args) == 5 && args[2] != "availability" && args[2] != "check-batch") {
 			return exitUsage
 		}
-		result, err := supervisor.run(args[1:])
+		result, err := supervisor.run(args[1:], stdout)
 		if err != nil {
 			return exitFailure
 		}

@@ -19,16 +19,24 @@ import (
 const serverCheckWorkers = 5
 const serverCheckLimit = 1000
 
+type checkProgressKey struct{}
+
 type serverCheckProbe func(context.Context, config.Config, picker.NodeResult, string) picker.NodeResult
 
 func checkNode(ctx context.Context, c config.Config, result picker.NodeResult, target string) picker.NodeResult {
 	result.PingMS, result.PingStatus, result.Availability = 0, "failed", "untested"
 	ping, err := (browserDependencies{tcpPing: true}).measure(ctx, c, result)
 	if err != nil || ctx.Err() != nil {
+		if emit, ok := ctx.Value(checkProgressKey{}).(func(picker.NodeResult)); ok {
+			emit(result)
+		}
 		return result
 	}
 	result.PingMS = max(1, int(ping.Seconds*1000+.5))
 	result.PingStatus = "ready"
+	if emit, ok := ctx.Value(checkProgressKey{}).(func(picker.NodeResult)); ok {
+		emit(result)
+	}
 	result.Availability = "failed"
 	if _, err := (browserDependencies{targetURL: target}).measure(ctx, c, result); err == nil {
 		result.Availability = "ready"
@@ -39,7 +47,7 @@ func checkNode(ctx context.Context, c config.Config, result picker.NodeResult, t
 // All sockets are reserved together to guarantee distinct ports within a batch.
 // Each probe reuses the existing temporary sing-box lifecycle, never the active
 // proxy's port or configuration. The sockets are released just before launch.
-func checkNodes(ctx context.Context, c config.Config, records []picker.BrowserRecord, target string, probe serverCheckProbe) ([]picker.NodeResult, error) {
+func checkNodes(ctx context.Context, c config.Config, records []picker.BrowserRecord, target string, probe serverCheckProbe, completed ...func(int, picker.NodeResult)) ([]picker.NodeResult, error) {
 	if len(records) == 0 || len(records) > serverCheckLimit {
 		return nil, fmt.Errorf("invalid batch size")
 	}
@@ -77,7 +85,14 @@ func checkNodes(ctx context.Context, c config.Config, records []picker.BrowserRe
 				if ctx.Err() != nil {
 					return
 				}
-				results[i] = probe(ctx, c, records[i].Result, target)
+				probeCtx := ctx
+				if emit, ok := ctx.Value(checkProgressKey{}).(func(int, picker.NodeResult)); ok {
+					probeCtx = context.WithValue(ctx, checkProgressKey{}, func(r picker.NodeResult) { emit(i, r) })
+				}
+				results[i] = probe(probeCtx, c, records[i].Result, target)
+				if ctx.Err() == nil && len(completed) > 0 {
+					completed[0](i, results[i])
+				}
 			}
 		}(workerConfig)
 	}
@@ -105,16 +120,19 @@ func addServerCheckBatchCommand(root *cobra.Command, o *cliOptions) {
 		if !jsonOut {
 			return fmt.Errorf("--json is required")
 		}
-		return runBrowserCheckBatch(cmd, o, strings.Split(ids, ","), target, checkNode)
+		stream, _ := cmd.Flags().GetBool("progress")
+		return runBrowserCheckBatch(cmd, o, strings.Split(ids, ","), target, checkNode, stream)
 	}}
 	cmd.Flags().String("server-id", "", "one to 1000 opaque IDs separated by commas")
 	cmd.Flags().String("url", "", "HTTPS availability target after successful TCP ping")
+	cmd.Flags().Bool("progress", false, "stream provisional measurement evidence")
 	cmd.Flags().Bool("json", false, "print bounded redacted results")
 	root.AddCommand(cmd)
 }
 
-func runBrowserCheckBatch(cmd *cobra.Command, o *cliOptions, ids []string, target string, probe serverCheckProbe) error {
-	ctx := browserCommandContext(cmd)
+func runBrowserCheckBatch(cmd *cobra.Command, o *cliOptions, ids []string, target string, probe serverCheckProbe, stream ...bool) error {
+	ctx, cancel := context.WithCancel(browserCommandContext(cmd))
+	defer cancel()
 	u, err := url.Parse(target)
 	if len(ids) == 0 || len(ids) > serverCheckLimit || err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || len(target) > 2048 {
 		return writeBrowserFailure(cmd, "unavailable", 0)
@@ -150,7 +168,22 @@ func runBrowserCheckBatch(cmd *cobra.Command, o *cliOptions, ids []string, targe
 		seen[id] = true
 		records = append(records, record)
 	}
-	results, err := checkNodes(ctx, c, records, target, probe)
+	var outputMu sync.Mutex
+	encoder := json.NewEncoder(cmd.OutOrStdout())
+	emit := func(id, stage string, r picker.NodeResult) {
+		if len(stream) == 0 || !stream[0] || ctx.Err() != nil {
+			return
+		}
+		outputMu.Lock()
+		defer outputMu.Unlock()
+		if err := encoder.Encode(picker.CheckProgress{Event: "server-check", ServerID: id, Stage: stage, PingStatus: r.PingStatus, LatencyMS: r.PingMS, Availability: r.Availability}); err != nil {
+			cancel()
+		}
+	}
+	// The worker's private record is never serialized; only its opaque ID and
+	// finite measurement fields can cross the live progress channel.
+	ctx = context.WithValue(ctx, checkProgressKey{}, func(i int, r picker.NodeResult) { emit(records[i].ID, "ping", r) })
+	results, err := checkNodes(ctx, c, records, target, probe, func(i int, r picker.NodeResult) { emit(records[i].ID, "complete", r) })
 	if err != nil {
 		return writeBrowserContextFailure(cmd, ctx, baseline.catalog.Generation)
 	}

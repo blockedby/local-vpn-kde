@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -139,5 +140,63 @@ func TestServerCheckQueueRequestBounds(t *testing.T) {
 		if n > 1000 && err == nil {
 			t.Fatal("oversized queue accepted")
 		}
+	}
+}
+
+func TestBridgeForwardsCheckProgressBeforeFinalAndDrainsCancellation(t *testing.T) {
+	for _, stop := range []bool{false, true} {
+		t.Run(fmt.Sprint(stop), func(t *testing.T) {
+			b := bridgeFixture(t, `{"container":"healthy"}`)
+			release := filepath.Join(t.TempDir(), "release")
+			t.Setenv("VPNKIT_CHECK_RELEASE", release)
+			id := "srv_" + strings.Repeat("a", 27)
+			script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' '{"event":"server-check","server_id":"%s","stage":"ping","ping_status":"ready","latency_ms":23,"availability":"untested","secret":"private-marker"}'
+while [ ! -e "$VPNKIT_CHECK_RELEASE" ]; do sleep 0.01; done
+printf '%%s\n' '{"schema":"vibe-vpn.server-browser.v2","status":"ok","servers":[{"server_id":"%s","display_name":"Fixture","ping_status":"ready","latency_ms":23,"availability":"ready"}]}'
+`, id, id)
+			if err := os.WriteFile(b.options.Executable, []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			value, _ := json.Marshal(map[string]any{"ids": []string{id}, "url": "https://example.com"})
+			request, _ := json.Marshal(map[string]any{"action": "servers/check-batch", "value": string(value), "progress": true})
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			reader, writer := io.Pipe()
+			defer reader.Close()
+			done := make(chan error, 1)
+			go func() { defer writer.Close(); done <- b.Serve(ctx, bytes.NewReader(append(request, '\n')), writer) }()
+			decoder := json.NewDecoder(reader)
+			var event map[string]any
+			if err := decoder.Decode(&event); err != nil {
+				t.Fatal(err)
+			}
+			if event["event"] != "server-check" || event["latency_ms"] != float64(23) || event["secret"] != nil {
+				t.Fatal("bad progress", event)
+			}
+			select {
+			case <-done:
+				t.Fatal("progress buffered until exit")
+			default:
+			}
+			if stop {
+				b.Cancel()
+			} else if err := os.WriteFile(release, []byte("go"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var final map[string]any
+			if err := decoder.Decode(&final); err != nil {
+				t.Fatal(err)
+			}
+			if stop && final["reason"] != "cancelled" {
+				t.Fatal("lost cancellation", final)
+			}
+			if !stop && final["ok"] != true {
+				t.Fatal("lost final result", final)
+			}
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

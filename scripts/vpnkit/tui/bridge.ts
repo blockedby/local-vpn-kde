@@ -49,10 +49,19 @@ export interface Reply {
   value?: string;
   catalog?: { status: string; servers?: Server[]; server?: Server };
 }
+export interface CheckProgress {
+  event: "server-check";
+  server_id: string;
+  stage: "ping" | "complete";
+  ping_status: "ready" | "failed";
+  latency_ms: number;
+  availability: "ready" | "failed" | "untested";
+}
 export interface Backend {
   request(action: Action, value?: string): Promise<Reply>;
   cancel?(): void;
   onProgress?: (phase: string) => void;
+  onCheckProgress?: (result: CheckProgress) => void;
   close(): Promise<void>;
 }
 
@@ -67,6 +76,7 @@ export class Bridge implements Backend {
   private closed = false;
   private cancelTimer?: ReturnType<typeof setInterval>;
   onProgress?: (phase: string) => void;
+  onCheckProgress?: (result: CheckProgress) => void;
   constructor(args: string[] = []) {
     const root = fileURLToPath(new URL("../../../", import.meta.url));
     this.child = spawn(
@@ -88,6 +98,15 @@ export class Bridge implements Backend {
         this.buffer = this.buffer.slice(newline + 1);
         try {
           const reply = JSON.parse(line);
+          if (reply.event === "server-check") {
+            if (!/^srv_[A-Za-z0-9_-]{27}$/.test(reply.server_id) ||
+                !["ping", "complete"].includes(reply.stage) ||
+                !["ready", "failed"].includes(reply.ping_status) ||
+                !["ready", "failed", "untested"].includes(reply.availability) ||
+                !Number.isInteger(reply.latency_ms) || reply.latency_ms < 0 || reply.latency_ms > 3600000) throw new Error();
+            if (this.pending) this.onCheckProgress?.(reply);
+            continue;
+          }
           if (reply.event === "progress" && typeof reply.phase === "string") {
             this.onProgress?.(reply.phase);
             continue;
@@ -149,6 +168,7 @@ export class Bridge implements Backend {
 
 export class DemoBackend implements Backend {
   onProgress?: (phase: string) => void;
+  onCheckProgress?: (result: CheckProgress) => void;
   private cancelled = false;
   status: Status = {
     vpn_state: "inactive",

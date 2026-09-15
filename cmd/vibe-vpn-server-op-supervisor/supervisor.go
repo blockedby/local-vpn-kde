@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/blockedby/local-vpn-kde/internal/picker"
 	"golang.org/x/sys/unix"
 )
 
@@ -468,7 +469,7 @@ type runResult struct {
 	exitCode int
 }
 
-func (supervisor *supervisor) run(args []string) (runResult, error) {
+func (supervisor *supervisor) run(args []string, progress ...io.Writer) (runResult, error) {
 	request, err := parseOperationRequest(args)
 	if err != nil {
 		return runResult{}, err
@@ -492,6 +493,13 @@ func (supervisor *supervisor) run(args []string) (runResult, error) {
 	command := exec.Command(supervisor.config.worker, workerArgv(supervisor.config, request)...)
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	command.Stdout = captured
+	var stream *picker.CheckStream
+	if request.operation == "check-batch" && len(progress) > 0 {
+		command.Args = append(command.Args, "--progress")
+		encoder := json.NewEncoder(progress[0])
+		stream = picker.NewCheckStream(strings.Split(request.serverID, ","), captured, func(p picker.CheckProgress) error { return encoder.Encode(p) })
+		command.Stdout = stream
+	}
 	command.Stderr = io.Discard
 	if supervisor.config.workerEnv != nil {
 		command.Env = append(os.Environ(), supervisor.config.workerEnv...)
@@ -590,6 +598,9 @@ func (supervisor *supervisor) run(args []string) (runResult, error) {
 		} else {
 			return runResult{}, waitErr
 		}
+	}
+	if stream != nil && stream.Finish() != nil {
+		return runResult{}, errors.New("invalid check stream")
 	}
 	output, overflow := captured.result()
 	if overflow {
