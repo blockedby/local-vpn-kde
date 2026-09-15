@@ -892,7 +892,7 @@ class StateAndStatusTests(unittest.TestCase):
                 self.assertTrue(reply["ok"])
                 self.assertEqual(runner.actions, [TUI.LifecycleAction.RETEST_SELECT])
 
-    def test_opentui_signals_wait_for_operation_before_destroying_renderer(self) -> None:
+    def test_opentui_signals_cancel_and_drain_before_destroying_renderer(self) -> None:
         import pty
         import select
         import shutil
@@ -909,8 +909,14 @@ class StateAndStatusTests(unittest.TestCase):
                 adapter = fixture / "fake-lifecycle"
                 adapter.write_text(
                     "#!/usr/bin/env python3\n"
-                    "import json, pathlib, sys, time\n"
+                    "import json, pathlib, signal, sys, time\n"
                     "root = pathlib.Path(__file__).parent\n"
+                    "def cancel(signum, frame):\n"
+                    " (root / 'cancelled').touch()\n"
+                    " time.sleep(0.15)\n"
+                    " (root / 'cleanup-complete').touch()\n"
+                    " sys.exit(0)\n"
+                    "signal.signal(signal.SIGTERM, cancel)\n"
                     "if sys.argv[1] == 'status':\n"
                     " print(json.dumps({'container': 'healthy', 'subscription': 'configured', "
                     "'networkmanager': {'configured': 'yes', 'active': 'no'}}))\n"
@@ -951,7 +957,9 @@ class StateAndStatusTests(unittest.TestCase):
                         drain()
                     drain()
                     self.assertEqual(process.poll(), 0)
-                    self.assertTrue((fixture / "completed").exists())
+                    self.assertTrue((fixture / "cancelled").exists())
+                    self.assertTrue((fixture / "cleanup-complete").exists())
+                    self.assertFalse((fixture / "completed").exists())
                     self.assertNotIn(b"TextBuffer is destroyed", output)
                     self.assertIn(b"\x1b[?1049l", output)
                 finally:
