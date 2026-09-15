@@ -419,7 +419,7 @@ test("mouse navigation works; non-primary clicks do not mutate", async () => {
     await app.close();
   }
 });
-test("quit drains in-flight work without destroying the renderer prematurely", async () => {
+test("quit cancels and drains in-flight work without destroying the renderer prematurely", async () => {
   const t = await createTestRenderer({ width: 80, height: 24 });
   const b = new FakeBackend();
   let finish!: (r: Reply) => void;
@@ -428,6 +428,9 @@ test("quit drains in-flight work without destroying the renderer prematurely", a
   await app.perform("status");
   const task = app.perform("start");
   await app.close();
+  expect(b.cancelled).toBe(1);
+  await app.close();
+  expect(b.cancelled).toBe(1);
   await t.renderOnce();
   expect(t.captureCharFrame()).toContain("Завершаем текущую операцию");
   finish(reply());

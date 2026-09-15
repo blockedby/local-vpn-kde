@@ -1008,6 +1008,8 @@ export class App {
     this.draft = "";
     this.input.value = "";
     if (this.busy || this.batch) {
+      this.cancelled = true;
+      this.backend.cancel?.();
       this.paint();
       return;
     }
@@ -1021,6 +1023,7 @@ export class App {
     this.renderer.keyInput.off("keypress", this.onKey);
     this.renderer.off("resize", this.paint);
     this.backend.onProgress = undefined;
+    this.backend.onCheckProgress = undefined;
     await this.backend.close();
     this.renderer.destroy();
   }
