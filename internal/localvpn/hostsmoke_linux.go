@@ -96,7 +96,13 @@ func HostSmoke(ctx context.Context, o SmokeOptions, output io.Writer) (err error
 		if err != nil {
 			return errors.New("IPv4 route lookup failed")
 		}
-		return route4Device(data, address, o.Device)
+		if err := route4Device(data, address, o.Device); err != nil {
+			if errors.Is(err, errNMNotReady) {
+				return errors.New("IPv4 route did not use the exact local VPN device")
+			}
+			return errors.New("IPv4 route lookup returned malformed output")
+		}
+		return nil
 	}
 	check = "route-policy"
 	ready, cancel := context.WithTimeout(ctx, o.Timeout)
@@ -126,7 +132,7 @@ func HostSmoke(ctx context.Context, o SmokeOptions, output io.Writer) (err error
 	for _, line := range strings.Split(strings.TrimSpace(string(resolved)), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
-			return errors.New("DNS hostname smoke returned no address")
+			return errors.New("DNS hostname smoke returned no addresses")
 		}
 		address, err := canonicalIPv4(fields[0])
 		if err != nil {

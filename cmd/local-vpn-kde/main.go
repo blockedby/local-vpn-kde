@@ -194,6 +194,10 @@ func main() {
 	if err := run(os.Args[1:]); err != nil {
 		if len(os.Args) > 1 && os.Args[1] == "networkmanager" {
 			fmt.Fprintln(os.Stderr, "NetworkManager:", err)
+		} else if len(os.Args) > 1 && os.Args[1] == "host-smoke" {
+			// HostSmoke returns a fixed diagnostic vocabulary, never raw tool
+			// output. Preserve these reasons for the private TUI classifier.
+			fmt.Fprintln(os.Stderr, err)
 		} else {
 			fmt.Fprintln(os.Stderr, "local VPN operation failed closed")
 		}

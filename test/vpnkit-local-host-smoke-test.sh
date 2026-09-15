@@ -195,6 +195,7 @@ for dns_mode in malformed empty; do
   fi
   [[ ! -s "$MOCK_PROBE_LOG" ]]
 done
+grep -Fq 'DNS hostname smoke returned no addresses' "$tmp/dns-empty.out"
 : >"$MOCK_PROBE_LOG"
 if MOCK_ROUTE_MODE=dns-uplink VPNKIT_LOCAL_SMOKE_TIMEOUT_SECONDS=2 \
     VPNKIT_LOCAL_SMOKE_DEVICE=tun7 bash "$script" >"$tmp/dns-uplink.out" 2>&1; then
@@ -202,6 +203,7 @@ if MOCK_ROUTE_MODE=dns-uplink VPNKIT_LOCAL_SMOKE_TIMEOUT_SECONDS=2 \
   exit 1
 fi
 [[ ! -s "$MOCK_PROBE_LOG" ]]
+grep -Fq 'IPv4 route did not use the exact local VPN device' "$tmp/dns-uplink.out"
 
 # IPv6 remains fail-closed even if the route command emits a reachable route
 # while returning an error, or if the echo command unexpectedly succeeds.
@@ -229,7 +231,7 @@ grep -Fxq 'host_smoke_failed_check=ipv6' "$tmp/ipv6-timeout.out"
 # Exact-device routing is required even when every application probe is
 # mocked successful. A different tun, ppp, or vpn device must fail closed.
 for bad_device in tun8 ppp0 vpn0 uplink0; do
-  if MOCK_ROUTE_DEVICE="$bad_device" VPNKIT_LOCAL_SMOKE_DEVICE=tun7 bash "$script" >/dev/null 2>&1; then
+  if MOCK_ROUTE_DEVICE="$bad_device" VPNKIT_LOCAL_SMOKE_DEVICE=tun7 VPNKIT_LOCAL_SMOKE_TIMEOUT_SECONDS=1 bash "$script" >/dev/null 2>&1; then
     echo "route accepted non-owned device: $bad_device" >&2
     exit 1
   fi
