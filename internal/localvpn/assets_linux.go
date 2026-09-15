@@ -34,6 +34,9 @@ func Assets(o AssetOptions) error {
 	if o.Port < 1 || o.Port > 65535 || o.CertificateDays < 1 || o.CertificateDays > 36500 {
 		return errors.New("invalid asset settings")
 	}
+	if err := validateSecretTree(o.Base, nil); err != nil {
+		return err
+	}
 	base, err := directory(o.Base, true, true)
 	if err != nil {
 		return err

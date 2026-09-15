@@ -33,6 +33,17 @@ func Render(o RenderOptions) error {
 	if o.Outbound == "direct-fixture" && (!o.Fixture || o.RuleSets != "local-fixture") {
 		return errors.New("direct outbound requires a local fixture")
 	}
+	if err := validateSecretTree(o.Base, func(path string) bool {
+		switch path {
+		case "rendered/sing-box/config.json", "rendered/sing-box/rule-sets/vpnkit-adblock.json",
+			"rendered/sing-box/rule-sets/vpnkit-dev-direct.json", "rendered/sing-box/rule-sets/geoip-ru.json",
+			"rendered/sing-box/rule-sets/geosite-category-ru.json", "rendered/vibe-vpn/config.yaml", "rendered/vibe-vpn/sub_url":
+			return true
+		}
+		return false
+	}); err != nil {
+		return err
+	}
 	base, err := directory(o.Base, true, true)
 	if err != nil {
 		return err

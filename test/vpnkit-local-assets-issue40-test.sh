@@ -27,8 +27,7 @@ require_absent() { ! grep -Fq -- "$1" "$2" || fail "unexpected text in $2"; }
 [[ -x "$script" ]] || fail "asset generator is not executable"
 [[ -r "$path_guard" ]] || fail "shared local path guard is missing"
 bash -n "$script" "$path_guard" || fail "asset/path-guard shell syntax is invalid"
-require_contains 'vpnkit_local_path_guard_validate_secret_root' "$script"
-require_contains 'vpnkit_local_path_guard_validate_secret_tree' "$script"
+(cd "$repo_root" && go build -o .build/local-vpn-kde.bin ./cmd/local-vpn-kde)
 require_file "$server_template"
 require_file "$client_template"
 

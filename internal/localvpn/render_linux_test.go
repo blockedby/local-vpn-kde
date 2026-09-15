@@ -50,7 +50,7 @@ func TestRenderPythonParity(t *testing.T) {
 					if err := Render(native); err != nil {
 						t.Fatal(err)
 					}
-					cmd := exec.Command(python, "../../scripts/vpnkit/vpnkit-render-local-kde-secure.py", native.Template, legacy, policy, mode, outbound, "true")
+					cmd := exec.Command(python, "../../test/fixtures/legacy-renderer.py", native.Template, legacy, policy, mode, outbound, "true")
 					cmd.Env = append(os.Environ(), "VPNKIT_LOCAL_TEST_FIXTURE=1", "VPNKIT_LOCAL_RENDER_RACE_HOOK=")
 					if output, err := cmd.CombinedOutput(); err != nil {
 						t.Fatalf("legacy renderer: %v %s", err, output)
@@ -193,5 +193,35 @@ func TestRenderRejectsInvalidOptions(t *testing.T) {
 		if err := Render(o); err == nil {
 			t.Fatal("invalid options accepted")
 		}
+	}
+}
+
+func TestRenderTreePreflightRejectsUnrelatedLinks(t *testing.T) {
+	for _, kind := range []string{"symlink", "hardlink"} {
+		t.Run(kind, func(t *testing.T) {
+			o := renderFixture(t)
+			outside := filepath.Join(t.TempDir(), "sentinel")
+			if err := os.WriteFile(outside, []byte("unchanged"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			link := os.Link
+			if kind == "symlink" {
+				link = os.Symlink
+			}
+			if err := link(outside, filepath.Join(o.Base, "unrelated")); err != nil {
+				t.Fatal(err)
+			}
+			if err := Render(o); err == nil {
+				t.Fatal("unsafe unrelated tree entry accepted")
+			}
+			entries, err := os.ReadDir(o.Base)
+			if err != nil || len(entries) != 1 {
+				t.Fatal("preflight rejection created output directories")
+			}
+			info, err := os.Stat(outside)
+			if err != nil || info.Mode().Perm() != 0644 {
+				t.Fatal("preflight rejection changed external permissions")
+			}
+		})
 	}
 }

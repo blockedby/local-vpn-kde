@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -63,7 +64,8 @@ func run(args []string) error {
 	policy := flags.String("policy", env("VPNKIT_LOCAL_POLICY", "strict"), "strict or smart")
 	rules := flags.String("rulesets", env("VPNKIT_RULESET_SOURCE_MODE", "remote"), "remote or local-fixture")
 	outbound := flags.String("outbound", env("VPNKIT_SELECTED_OUTBOUND_MODE", "subscription"), "subscription or direct-fixture")
-	allow := flags.Bool("allow-missing-subscription", env("VPNKIT_LOCAL_ALLOW_MISSING_SUBSCRIPTION", "false") == "true", "allow absent subscription for preparation")
+	allowValue := strings.ToLower(env("VPNKIT_LOCAL_ALLOW_MISSING_SUBSCRIPTION", "false"))
+	allow := flags.Bool("allow-missing-subscription", allowValue == "true" || allowValue == "1" || allowValue == "yes" || allowValue == "on", "allow absent subscription for preparation")
 	endpoint := flags.String("endpoint", env("VPNKIT_LOCAL_ENDPOINT", env("VPNKIT_LOCAL_HOST", "127.0.0.1")), "loopback endpoint")
 	portValue, err := strconv.Atoi(env("VPNKIT_LOCAL_PORT", env("VPNKIT_LOCAL_OPENVPN_PORT", "1194")))
 	if err != nil {

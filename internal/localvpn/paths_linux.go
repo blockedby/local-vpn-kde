@@ -2,12 +2,75 @@ package localvpn
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/unix"
 )
+
+// validateSecretTree is a read-only preflight. Actual reads and writes still
+// use held no-follow directory descriptors; this scan does not replace them.
+func validateSecretTree(base string, outputLink func(string) bool) error {
+	fd, err := directory(base, false, true)
+	if errors.Is(err, unix.ENOENT) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	remaining := 100000
+	var walk func(int, string, int) error
+	walk = func(fd int, prefix string, depth int) error {
+		file := os.NewFile(uintptr(fd), "private-directory")
+		defer file.Close()
+		if depth > 128 {
+			return errors.New("secret tree is too deep")
+		}
+		for {
+			names, err := file.Readdirnames(128)
+			if err != nil && !errors.Is(err, io.EOF) {
+				return err
+			}
+			for _, name := range names {
+				remaining--
+				if remaining < 0 || !component(name) {
+					return errors.New("secret tree is too large or invalid")
+				}
+				relative := filepath.Join(prefix, name)
+				var stat unix.Stat_t
+				if err := unix.Fstatat(fd, name, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+					return err
+				}
+				switch stat.Mode & unix.S_IFMT {
+				case unix.S_IFDIR:
+					child, err := childDirectory(fd, name, false, true)
+					if err != nil {
+						return err
+					}
+					if err = walk(child, relative, depth+1); err != nil {
+						return err
+					}
+				case unix.S_IFREG:
+					if stat.Nlink != 1 {
+						return errors.New("secret tree files must not be hard-linked")
+					}
+				case unix.S_IFLNK:
+					if outputLink == nil || !outputLink(relative) {
+						return errors.New("secret tree must not contain symlink entries")
+					}
+				default:
+					return errors.New("secret tree contains a non-regular entry")
+				}
+			}
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+		}
+	}
+	return walk(fd, "", 0)
+}
 
 // SecretRoot validates the local-only boundary without creating directories.
 func SecretRoot(repo, requested string, fixture bool) (string, error) {

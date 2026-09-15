@@ -541,6 +541,9 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 	if n.Timeout < time.Second || n.Timeout > 120*time.Second {
 		return errors.New("invalid NetworkManager timeout")
 	}
+	if err := validateSecretTree(n.Base, nil); err != nil {
+		return err
+	}
 	dir, lockErr := n.stateDir(true)
 	if lockErr != nil {
 		return lockErr
