@@ -428,6 +428,12 @@ if (( DRY_RUN == 1 )); then
   exit 0
 fi
 
+# Detailed subprocess output is consumed only by the supervised private log.
+exec 3>/dev/null
+if [[ "${VPNKIT_TUI_DIAGNOSTICS:-0}" == 1 && "${VPNKIT_TUI_SUPERVISED:-0}" == 1 ]]; then
+  exec 3>&2
+fi
+
 # The installer owns first-run preparation. Subscription entry belongs to the
 # interface and is not an installation prerequisite.
 NATIVE="$REPO_ROOT/.build/local-vpn-kde.bin"
@@ -435,7 +441,7 @@ printf 'vpnkit_phase=setup-assets\n'
 require_source_file "$NATIVE" 'native local VPN binary (run ./install.sh)'
 [[ -x "$NATIVE" ]] || die 'native local VPN binary is not executable; run ./install.sh' 20
 if ! "$NATIVE" prepare --repo "$REPO_ROOT" --secrets-dir "$BASE" \
-    --port "${VPNKIT_LOCAL_OPENVPN_PORT:-21194}" >/dev/null 2>&1; then
+    --port "${VPNKIT_LOCAL_OPENVPN_PORT:-21194}" >&3 2>&1; then
   die 'private local assets could not be prepared' 20
 fi
 require_directory "$BASE" 'local secret root' 700
@@ -461,10 +467,10 @@ install_underlay() {
     sudo -- "$UNDERLAY" install --yes
   fi
 }
-if ! install_underlay >/dev/null 2>&1; then
+if ! install_underlay >&3 2>&1; then
   die 'underlay installation failed; the helper should have rolled back its own transaction' 20
 fi
-if ! "$UNDERLAY" verify >/dev/null 2>&1; then
+if ! "$UNDERLAY" verify >&3 2>&1; then
   die 'underlay verification failed' 20
 fi
 printf 'underlay_install=verified\n'
@@ -475,7 +481,7 @@ PHASE=container-start
 printf '\n==> Build and start the localhost-only vpnkit container (NetworkManager is not managed here)\n'
 if ! VPNKIT_LOCAL_ENV_FILE=/dev/null VPNKIT_LOCAL_MANAGE_NETWORKMANAGER=false \
     VPNKIT_LOCAL_SECRETS_DIR="$BASE" VPNKIT_LOCAL_COMPOSE_PROJECT=vpnkit-local \
-    "$LIFECYCLE" start >/dev/null 2>&1; then
+    "$LIFECYCLE" start >&3 2>&1; then
   die 'local container start failed' 20
 fi
 printf 'container_start=complete\n'
@@ -497,6 +503,7 @@ printf '\n==> Import the owned NetworkManager profile without connecting it\n'
 if ! nm_import_output=$(VPNKIT_LOCAL_ENV_FILE=/dev/null VPNKIT_LOCAL_SECRETS_DIR="$BASE" \
     VPNKIT_LOCAL_PROFILE="$PROFILE" VPNKIT_LOCAL_NM_CONNECTION=vpnkit-local \
     "$NM_HELPER" import --yes 2>&1); then
+  printf '%s\n' "$nm_import_output" >&3
   case "$nm_import_output" in
     *networkmanager_failure=foreign-profile*) die 'A vpnkit-local profile already exists, but its previous installation ownership could not be verified.' 20 ;;
     *networkmanager_failure=previous-profile-active*) die 'Disconnect the previous local VPN before migrating its KDE profile.' 20 ;;

@@ -179,7 +179,13 @@ case "${1:-}" in
     printf '%s\n' 'command=plan' 'mutation=none' 'physical_uplink_table=ready'
     ;;
   verify) printf '%s\n' 'verify=ok' ;;
-  install) printf '%s\n' 'install=ok' ;;
+  install)
+    if [[ ${MOCK_UNDERLAY_FAIL:-0} == 1 ]]; then
+      printf '%s\n' 'private-install-diagnostic-sentinel' >&2
+      exit 1
+    fi
+    printf '%s\n' 'install=ok' ;;
+
   *) exit 2 ;;
 esac
 EOF_UNDERLAY
@@ -260,6 +266,21 @@ grep -Fq 'sudo -n -- ' "$MOCK_LOG" || fail 'UI installation could prompt for a p
 grep -Fq 'nm-helper import --yes' "$MOCK_LOG" || fail 'fresh install omitted profile import'
 ! grep -Fq 'lifecycle start' "$MOCK_LOG" || fail 'fresh install started gateway without subscription'
 ! grep -Fq 'nm-helper connect' "$MOCK_LOG" || fail 'fresh install connected the VPN'
+
+# Raw details reach only the supervised capture, not ordinary installer output.
+for supervised in 0 1; do
+  if MOCK_UNDERLAY_FAIL=1 VPNKIT_TUI_DIAGNOSTICS=1 VPNKIT_TUI_SUPERVISED="$supervised" \
+      "$FRESH_REPO/scripts/vpnkit/vpnkit-local-install.sh" --non-interactive \
+      >"$TMP/details-$supervised.out" 2>"$TMP/details-$supervised.err"; then
+    fail 'failed underlay install was accepted'
+  fi
+  ! grep -Fq 'private-install-diagnostic-sentinel' "$TMP/details-$supervised.out" || fail 'details leaked to public stdout'
+  if [[ "$supervised" == 1 ]]; then
+    grep -Fq 'private-install-diagnostic-sentinel' "$TMP/details-$supervised.err" || fail 'private capture lost underlying error'
+  else
+    ! grep -Fq 'private-install-diagnostic-sentinel' "$TMP/details-$supervised.err" || fail 'details leaked outside supervised capture'
+  fi
+done
 
 # Existing env files are checked before parsing. Exercise symlink, mode, and
 # hard-link rejection without touching the real repository's ignored config.

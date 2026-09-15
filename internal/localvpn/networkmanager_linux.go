@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -86,14 +87,22 @@ func (n NetworkManager) profilePath() string {
 	return filepath.Join(n.Base, "openvpn/client/vpnkit-local.ovpn")
 }
 func (n NetworkManager) call(ctx context.Context, args ...string) (string, error) {
+	var data string
+	var err error
 	if n.command != nil {
-		return n.command(ctx, args...)
+		data, err = n.command(ctx, args...)
+	} else {
+		var raw []byte
+		raw, err = hostCommand(ctx, "nmcli", args...)
+		data = string(raw)
 	}
-	data, err := hostCommand(ctx, "nmcli", args...)
 	if err != nil {
-		return string(data), errors.New("NetworkManager command failed")
+		if os.Getenv("VPNKIT_TUI_DIAGNOSTICS") == "1" && os.Getenv("VPNKIT_TUI_SUPERVISED") == "1" {
+			fmt.Fprintf(os.Stderr, "NetworkManager command diagnostic: %v\n%s\n", err, data)
+		}
+		return data, errors.New("NetworkManager command failed")
 	}
-	return string(data), nil
+	return data, nil
 }
 func (n NetworkManager) stateDir(create bool) (int, error) {
 	root, err := directory(n.Base, false, true)
