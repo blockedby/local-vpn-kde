@@ -18,7 +18,7 @@ from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = ROOT / "scripts" / "vpnkit" / "vpnkit_local_kde_tui.py"
+MODULE_PATH = ROOT / "test" / "fixtures" / "legacy-tui.py"
 SPEC = importlib.util.spec_from_file_location("vpnkit_local_kde_tui_issue40", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 TUI = importlib.util.module_from_spec(SPEC)

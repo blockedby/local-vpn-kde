@@ -9,13 +9,13 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// ExecUI validates the installed frontend and replaces this launcher with Bun.
-// The frontend starts the native JSON bridge from the same checkout.
-func ExecUI(repo string, args []string) error {
+// ValidateUI applies the same source checks to interactive and scriptable
+// launch modes. It does not require Bun or contact Docker/NetworkManager.
+func ValidateUI(repo string) error {
 	if os.Geteuid() == 0 {
 		return errors.New("run the interface as the desktop user")
 	}
-	for _, relative := range []string{"run.sh", ".build/local-vpn-kde.bin", "scripts/vpnkit/tui/index.ts", "scripts/vpnkit/tui/app.ts", "scripts/vpnkit/tui/model.ts", "scripts/vpnkit/tui/bridge.ts"} {
+	for _, relative := range []string{"run.sh", "scripts/vpnkit/vpnkit-local-tui.sh", "scripts/vpnkit/vpnkit-local.sh", ".build/local-vpn-kde.bin", "scripts/vpnkit/tui/index.ts", "scripts/vpnkit/tui/app.ts", "scripts/vpnkit/tui/model.ts", "scripts/vpnkit/tui/bridge.ts"} {
 		path := filepath.Join(repo, relative)
 		dir, err := directory(filepath.Dir(path), false, false)
 		if err != nil {
@@ -34,6 +34,15 @@ func ExecUI(repo string, args []string) error {
 		if st.Mode&0022 != 0 {
 			return errors.New("application source is writable by another user")
 		}
+	}
+	return nil
+}
+
+// ExecUI replaces this launcher with Bun. The frontend starts the native JSON
+// bridge from the same checkout.
+func ExecUI(repo string, args []string) error {
+	if err := ValidateUI(repo); err != nil {
+		return err
 	}
 	if _, err := os.Stat(filepath.Join(repo, "scripts/vpnkit/tui/node_modules/@opentui/core")); err != nil {
 		return errors.New("interface dependencies missing; run ./install.sh")

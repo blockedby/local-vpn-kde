@@ -156,13 +156,13 @@ NM_HELPER="$SCRIPT_DIR/vpnkit-local-networkmanager.sh"
 ASSETS="$SCRIPT_DIR/vpnkit-local-assets.sh"
 RENDERER="$SCRIPT_DIR/vpnkit-render-local-kde-configs.sh"
 HOST_SMOKE="$SCRIPT_DIR/vpnkit-local-host-smoke.sh"
-TUI="$SCRIPT_DIR/vpnkit_local_kde_tui.py"
+TUI="$SCRIPT_DIR/tui/index.ts"
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "missing command: $1" 10
 }
 
-for command_name in bash python3 docker nmcli ip sudo openssl realpath stat git; do
+for command_name in bash python3 docker nmcli ip sudo realpath stat git; do
   require_command "$command_name"
 done
 docker compose version >/dev/null 2>&1 || die 'Docker Compose plugin is unavailable' 10
@@ -223,19 +223,13 @@ require_source_file "$NM_HELPER" 'local NetworkManager helper'
 require_source_file "$ASSETS" 'local asset helper'
 require_source_file "$RENDERER" 'local config renderer'
 require_source_file "$HOST_SMOKE" 'local host smoke helper'
-require_owned_regular "$TUI" 'local Python TUI source'
+require_owned_regular "$TUI" 'local OpenTUI source'
 require_owned_regular "$ENV_EXAMPLE" 'tracked local env example'
 require_directory "$REPO_ROOT/config" 'config directory'
 
 bash -n "$SCRIPT_PATH" "$PATH_GUARD" "$LIFECYCLE" "$UNDERLAY" "$NM_HELPER" "$ASSETS" "$RENDERER" "$HOST_SMOKE" \
   >/dev/null 2>&1 || die 'tracked local shell sources are syntactically invalid' 20
-python3 - "$TUI" >/dev/null 2>&1 <<'PY' || die 'tracked Python TUI source is syntactically invalid' 20
-from pathlib import Path
-import sys
 
-source = Path(sys.argv[1])
-compile(source.read_text(encoding="utf-8"), str(source), "exec")
-PY
 
 # The installer deliberately ignores inherited VPNKIT_* control seams. Only
 # values from the checked local env file below are passed to the local flow;
@@ -583,7 +577,7 @@ start the gateway, and select a server. Existing work VPN connections are not
 selected or modified by this installer.
 
 TUI command:
-  scripts/vpnkit/vpnkit-local-tui.sh
+  ./run.sh
 READY
 
 PHASE=complete

@@ -47,6 +47,9 @@ func run(args []string) error {
 		root := filepath.Dir(filepath.Dir(binary))
 		for _, arg := range args[1:] {
 			if arg == "--status-json" || arg == "--test" || arg == "--help" || arg == "-h" {
+				if err := localvpn.ValidateUI(root); err != nil {
+					return err
+				}
 				forwarded := append([]string{"bridge", "--repo", root}, args[1:]...)
 				if arg == "--test" {
 					forwarded = append(forwarded, "--status-json")

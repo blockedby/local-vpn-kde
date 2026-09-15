@@ -34,7 +34,11 @@ for path in \
   scripts/vpnkit/vpnkit-local-assets.sh \
   scripts/vpnkit/vpnkit-render-local-kde-configs.sh \
   scripts/vpnkit/vpnkit-local-host-smoke.sh \
-  scripts/vpnkit/vpnkit_local_kde_tui.py \
+  run.sh \
+  scripts/vpnkit/tui/index.ts \
+  scripts/vpnkit/tui/app.ts \
+  scripts/vpnkit/tui/bridge.ts \
+  scripts/vpnkit/tui/model.ts \
   config/vpnkit-local.env.example; do
   mkdir -p "$FAKE_REPO/$(dirname -- "$path")"
   cp -p "$ROOT/$path" "$FAKE_REPO/$path"
@@ -116,24 +120,24 @@ export PATH="$MOCK_BIN:$PATH"
 "$FAKE_REPO/scripts/vpnkit/vpnkit-local-install.sh" --help >"$TMP/install-help"
 grep -Fq -- '--dry-run' "$TMP/install-help" || fail 'installer help omits dry-run'
 grep -Fq -- 'rollback' "$TMP/install-help" || fail 'installer help omits rollback guidance'
-"$FAKE_REPO/scripts/vpnkit/vpnkit-local-tui.sh" --help >"$TMP/tui-help"
-grep -Fq -- '--status-json' "$TMP/tui-help" || fail 'canonical TUI launcher did not pass help through'
+"$FAKE_REPO/scripts/vpnkit/vpnkit-local-tui.sh" --help >"$TMP/tui-help" 2>&1
+grep -Fq -- '-status-json' "$TMP/tui-help" || fail 'canonical TUI launcher did not pass help through'
 chmod 775 "$FAKE_REPO/scripts/vpnkit/vpnkit-local-tui.sh"
 if "$FAKE_REPO/scripts/vpnkit/vpnkit-local-tui.sh" --help >"$TMP/tui-mode.out" 2>&1; then
   fail 'group/other-writable launcher was accepted'
 fi
 chmod 755 "$FAKE_REPO/scripts/vpnkit/vpnkit-local-tui.sh"
-mv "$FAKE_REPO/scripts/vpnkit/vpnkit_local_kde_tui.py" "$TMP/tui-source"
-ln -s "$TMP/tui-source" "$FAKE_REPO/scripts/vpnkit/vpnkit_local_kde_tui.py"
+mv "$FAKE_REPO/scripts/vpnkit/tui/index.ts" "$TMP/tui-source"
+ln -s "$TMP/tui-source" "$FAKE_REPO/scripts/vpnkit/tui/index.ts"
 if "$FAKE_REPO/scripts/vpnkit/vpnkit-local-tui.sh" --help >"$TMP/tui-link.out" 2>&1; then
-  fail 'symlinked Python TUI source was accepted'
+  fail 'symlinked OpenTUI source was accepted'
 fi
-rm -f -- "$FAKE_REPO/scripts/vpnkit/vpnkit_local_kde_tui.py"
-mv "$TMP/tui-source" "$FAKE_REPO/scripts/vpnkit/vpnkit_local_kde_tui.py"
+rm -f -- "$FAKE_REPO/scripts/vpnkit/tui/index.ts"
+mv "$TMP/tui-source" "$FAKE_REPO/scripts/vpnkit/tui/index.ts"
 mkdir -p "$FAKE_REPO/secrets/vpnkit-local/vibe-vpn"
 chmod 700 "$FAKE_REPO/secrets/vpnkit-local" "$FAKE_REPO/secrets/vpnkit-local/vibe-vpn"
 tui_test_output=$("$FAKE_REPO/scripts/vpnkit/vpnkit-local-tui.sh" --test)
-grep -Fq '"schema": 1' <<<"$tui_test_output" || fail 'canonical launcher did not reach the TUI test mode'
+grep -Fq '"schema":1' <<<"$tui_test_output" || fail 'canonical launcher did not reach the TUI test mode'
 
 # Dry-run uses the tracked env example without creating the ignored local env
 # file. The underlay plan is exercised through fake ip/nmcli only; sudo and

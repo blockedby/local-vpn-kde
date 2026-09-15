@@ -44,7 +44,7 @@ func TestBridgeStatusPythonParity(t *testing.T) {
 	if err != nil {
 		t.Skip("Python migration oracle unavailable")
 	}
-	cmd := exec.Command(python, "../../scripts/vpnkit/vpnkit_local_kde_tui.py", "--bridge", "--lifecycle-executable", b.options.Executable)
+	cmd := exec.Command(python, "../../test/fixtures/legacy-tui.py", "--bridge", "--lifecycle-executable", b.options.Executable)
 	cmd.Env = append(os.Environ(), "VPNKIT_LOCAL_TEST_FIXTURE=1", "VPNKIT_LOCAL_SECRETS_DIR="+b.options.Base)
 	cmd.Stdin = strings.NewReader("{\"action\":\"status\"}\n")
 	legacy, err := cmd.Output()

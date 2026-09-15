@@ -889,5 +889,5 @@ run_stateful_lifecycle_case stable pass disconnect
 run_stateful_lifecycle_case stop-work-disappears fail stop
 ! grep -Fq 'COMPOSE_DOWN' "$stateful_root/docker.log"
 
-$repo_root/scripts/vpnkit/vpnkit_local_kde_tui.py --status-json --test | python3 -c 'import json,sys; assert json.load(sys.stdin)["routing_mode"]=="strict"'
+$repo_root/run.sh --status-json --test | python3 -c 'import json,sys; assert json.load(sys.stdin)["routing_mode"]=="strict"'
 printf 'vpnkit local lifecycle tests passed\n'
