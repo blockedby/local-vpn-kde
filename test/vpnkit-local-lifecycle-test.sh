@@ -24,9 +24,7 @@ lifecycle="$repo_root/scripts/vpnkit/vpnkit-local.sh"
 renderer="$repo_root/scripts/vpnkit/vpnkit-render-local-kde-configs.sh"
 assets="$repo_root/scripts/vpnkit/vpnkit-local-assets.sh"
 
-bash -n "$lifecycle" "$renderer" "$assets" "$repo_root/docker/vpnkit/entrypoint.sh" "$repo_root/docker/vpnkit/setup-routing.sh" "$repo_root/docker/vpnkit/vpnkit-healthcheck.sh"
-grep -Fq 'vibe-vpn --config "$VIBE_VPN_CONFIG" pick --max "$VPNKIT_BOOTSTRAP_MAX_NODES"' "$repo_root/docker/vpnkit/entrypoint.sh" || \
-grep -Fq 'vibe-vpn --config "$VIBE_VPN_CONFIG" pick --restart-async --max "$VPNKIT_BOOTSTRAP_MAX_NODES"' "$repo_root/docker/vpnkit/entrypoint.sh"
+bash -n "$lifecycle" "$renderer" "$assets"
 grep -Fq 'wait_for_retest_runtime' "$lifecycle"
 grep -Fq 'SINGBOX_GENERATION_FILE' "$lifecycle"
 grep -Fq 'prior policy/runtime was restored' "$lifecycle"
@@ -37,14 +35,8 @@ grep -Fq 'VPNKIT_LOCAL_SMOKE_DEVICE="$NM_DEVICE" bash "$HOST_SMOKE"' "$lifecycle
 active_capture_line=$(grep -n 'capture_active_vpn_identities "$snapshot"' "$lifecycle" | head -1 | cut -d: -f1)
 compose_up_line=$(grep -n 'stack_attempted=true' "$lifecycle" | head -1 | cut -d: -f1)
 [[ -n "$active_capture_line" && -n "$compose_up_line" && "$active_capture_line" -lt "$compose_up_line" ]]
-bootstrap_line=$(grep -n 'vibe-vpn --config "$VIBE_VPN_CONFIG" pick' "$repo_root/docker/vpnkit/entrypoint.sh" | cut -d: -f1)
-singbox_line=$(grep -n '^start_singbox$' "$repo_root/docker/vpnkit/entrypoint.sh" | head -1 | cut -d: -f1)
-barrier_line=$(grep -n -- '--install-fail-closed-barrier' "$repo_root/docker/vpnkit/entrypoint.sh" | tail -1 | cut -d: -f1)
-openvpn_line=$(grep -n '^openvpn --config "$OPENVPN_CONFIG"' "$repo_root/docker/vpnkit/entrypoint.sh" | cut -d: -f1)
-routing_line=$(grep -n '^/usr/local/bin/setup-routing.sh$' "$repo_root/docker/vpnkit/entrypoint.sh" | tail -1 | cut -d: -f1)
-[[ -n "$bootstrap_line" && -n "$singbox_line" && -n "$barrier_line" && -n "$openvpn_line" && -n "$routing_line" && "$singbox_line" -lt "$bootstrap_line" && "$barrier_line" -lt "$openvpn_line" && "$openvpn_line" -lt "$routing_line" ]]
-grep -Fq 'OPENVPN_FAIL_CLOSED_CHAIN' "$repo_root/docker/vpnkit/setup-routing.sh"
-grep -Fq 'fail_closed_barrier_absent' "$repo_root/docker/vpnkit/vpnkit-healthcheck.sh"
+# Container ordering, real readiness, restart acknowledgement, and blocked
+# routing are exercised by TestContainerDataPath in internal/localvpn.
 
 # Production and arbitrary project identities are rejected before even a
 # mocked Docker probe.

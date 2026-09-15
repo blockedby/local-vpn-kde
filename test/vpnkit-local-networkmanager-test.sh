@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-helper="$root/scripts/vpnkit/vpnkit-local-networkmanager.sh"
+helper="${VPNKIT_NM_TEST_HELPER:-$root/scripts/vpnkit/vpnkit-local-networkmanager.sh}"
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/secrets/openvpn/client" "$tmp/profiles"
 printf '%s\n' 'client' 'dev tun' 'proto udp' 'remote 127.0.0.1 21194' >"$tmp/secrets/openvpn/client/vpnkit-local.ovpn"
@@ -340,6 +340,9 @@ cmp -s "$tmp/legacy-uuid.snapshot" "$tmp/secrets/state/networkmanager-uuid"
 cmp -s "$tmp/legacy-fingerprint.snapshot" "$tmp/secrets/state/networkmanager-profile-fingerprint"
 ! grep -Eq 'connection (import|modify|up|down|delete)' "$tmp/log"
 
+# Shell-specific mv fault injection is retained for the legacy adapter. The
+# native writer's equivalent is TestNMLegacyMigrationFailurePreservesCapability.
+if [[ -z "${VPNKIT_NM_TEST_HELPER:-}" ]]; then
 # An injected atomic-commit failure must not consume or rewrite the valid
 # legacy pair, and neither import nor status may report success afterward.
 rm -f -- "$tmp/secrets/state/networkmanager-state" "$MOCK_FAILURE_MARKER"
@@ -365,6 +368,8 @@ cmp -s "$tmp/legacy-fingerprint.snapshot" "$tmp/secrets/state/networkmanager-pro
 ! grep -Eq 'connection (import|modify|up|down|delete)' "$tmp/log"
 rm -f -- "$MOCK_FAILURE_MARKER"
 $helper status >/dev/null
+
+fi
 
 # Partial and drifted legacy pairs are rejected before the import/refresh path.
 rm -f -- "$tmp/secrets/state/networkmanager-state" "$tmp/secrets/state/networkmanager-profile-fingerprint"
@@ -530,7 +535,7 @@ run_refresh_failure import
 run_refresh_failure post-import
 run_refresh_failure post-import-no-output
 run_refresh_failure rename
-run_refresh_failure state-commit
+if [[ -z "${VPNKIT_NM_TEST_HELPER:-}" ]]; then run_refresh_failure state-commit; fi
 run_refresh_failure cleanup
 unset MOCK_FAIL_STEP
 rm -f -- "$MOCK_FAILURE_MARKER"

@@ -68,13 +68,10 @@ export class Bridge implements Backend {
   private cancelTimer?: ReturnType<typeof setInterval>;
   onProgress?: (phase: string) => void;
   constructor(args: string[] = []) {
+    const root = fileURLToPath(new URL("../../../", import.meta.url));
     this.child = spawn(
-      "python3",
-      [
-        fileURLToPath(new URL("../vpnkit_local_kde_tui.py", import.meta.url)),
-        "--bridge",
-        ...args,
-      ],
+      fileURLToPath(new URL("../../../.build/local-vpn-kde.bin", import.meta.url)),
+      ["bridge", "--repo", root, ...args],
       { stdio: "pipe" },
     );
     this.child.stderr.resume();

@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Install the bounded local issue-40 vpnkit flow for the current worktree.
 #
-# This wrapper owns orchestration only.  The lifecycle adapter and Python TUI
-# remain the implementation boundary: the wrapper prepares a safe local env,
-# installs the host underlay, starts the container without NetworkManager, and
-# imports the owned profile without activating it.
+# This wrapper prepares the private environment and native assets, installs
+# the host underlay, and imports the owned profile without activating it.
+# Gateway startup is deferred until a subscription exists.
 set -Eeuo pipefail
 umask 077
 
@@ -22,7 +21,8 @@ Prepare and install the local CachyOS/KDE vpnkit flow from the current
 worktree. Run as the normal desktop user, not root. The normal flow:
   1. validates/creates config/vpnkit-local.local.env with mode 0600;
   2. shows the redacted underlay plan and installs it through sudo;
-  3. starts only the bounded local Docker container stack;
+  3. prepares private assets and starts the local Docker stack only when a
+     subscription already exists;
   4. imports the owned NetworkManager profile named vpnkit-local, but never
      connects it; and
   5. prints only redacted status markers.
@@ -33,8 +33,8 @@ Options:
                      not attempted.
   -h, --help         Show this help without probing or mutating the host.
 
-Before the normal flow, enter the subscription through:
-  scripts/vpnkit/vpnkit-local-tui.sh
+Run ./install.sh first, then ./run.sh to enter your subscription.
+The installer prepares private files even when no subscription exists.
 
 Bounded rollback/uninstall (run each only when needed):
   scripts/vpnkit/vpnkit-local-networkmanager.sh disconnect --yes
@@ -379,8 +379,8 @@ validate_integer VPNKIT_LOCAL_NM_CONNECT_TIMEOUT_SECONDS "${VPNKIT_LOCAL_NM_CONN
 case "${VPNKIT_BOOTSTRAP_PICK_ON_START:-true}" in true|false) ;; *) die 'local env bootstrap selection setting is invalid' 20 ;; esac
 
 # Source the shared read-only guard after the env contract is fixed. The
-# canonical local root may be missing during dry-run; normal setup requires it
-# to have been prepared by the TUI/subscription flow.
+# canonical local root may be missing on the first install; native preparation
+# creates it after read-only validation.
 # shellcheck disable=SC1090
 . "$PATH_GUARD"
 BASE="$REPO_ROOT/secrets/vpnkit-local"
@@ -432,17 +432,23 @@ if (( DRY_RUN == 1 )); then
   exit 0
 fi
 
-if [[ ! -d "$BASE" || -L "$BASE" ]]; then
-  die 'local subscription is not configured; run scripts/vpnkit/vpnkit-local-tui.sh first' 20
+# The installer owns first-run preparation. Subscription entry belongs to the
+# interface and is not an installation prerequisite.
+NATIVE="$REPO_ROOT/.build/local-vpn-kde.bin"
+require_source_file "$NATIVE" 'native local VPN binary (run ./install.sh)'
+[[ -x "$NATIVE" ]] || die 'native local VPN binary is not executable; run ./install.sh' 20
+if ! "$NATIVE" prepare --repo "$REPO_ROOT" --secrets-dir "$BASE" \
+    --port "${VPNKIT_LOCAL_OPENVPN_PORT:-21194}" >/dev/null 2>&1; then
+  die 'private local assets could not be prepared' 20
 fi
 require_directory "$BASE" 'local secret root' 700
-if [[ ! -d "$BASE/vibe-vpn" || -L "$BASE/vibe-vpn" ]]; then
-  die 'local subscription is not configured; run scripts/vpnkit/vpnkit-local-tui.sh first' 20
-fi
 require_directory "$BASE/vibe-vpn" 'local subscription directory' 700
 SUBSCRIPTION="$BASE/vibe-vpn/sub_url"
-require_owned_regular "$SUBSCRIPTION" 'local subscription file' 600
-[[ -s "$SUBSCRIPTION" ]] || die 'local subscription is not configured; run scripts/vpnkit/vpnkit-local-tui.sh first' 20
+SUBSCRIPTION_READY=0
+if [[ -e "$SUBSCRIPTION" || -L "$SUBSCRIPTION" ]]; then
+  require_owned_regular "$SUBSCRIPTION" 'local subscription file' 600
+  [[ ! -s "$SUBSCRIPTION" ]] || SUBSCRIPTION_READY=1
+fi
 
 PHASE=underlay-plan
 printf '\n==> Underlay plan (redacted)\n'
@@ -458,6 +464,7 @@ if ! "$UNDERLAY" verify >/dev/null 2>&1; then
 fi
 printf 'underlay_install=verified\n'
 
+if (( SUBSCRIPTION_READY == 1 )); then
 PHASE=container-start
 printf '\n==> Build and start the localhost-only vpnkit container (NetworkManager is not managed here)\n'
 if ! VPNKIT_LOCAL_ENV_FILE=/dev/null VPNKIT_LOCAL_MANAGE_NETWORKMANAGER=false \
@@ -466,6 +473,10 @@ if ! VPNKIT_LOCAL_ENV_FILE=/dev/null VPNKIT_LOCAL_MANAGE_NETWORKMANAGER=false \
   die 'local container start failed' 20
 fi
 printf 'container_start=complete\n'
+
+else
+  printf 'container_start=deferred-until-subscription\n'
+fi
 
 # Revalidate the generated profile before handing it to the owned NM adapter.
 # The profile itself is never read into output and is never printed.
@@ -567,9 +578,9 @@ cat <<'READY'
 READY FOR MANUAL CHECK
 
 KDE profile name: vpnkit-local
-The profile is imported but NOT connected. Activate "vpnkit-local" yourself
-from KDE Network settings. Existing work VPN connections are not selected or
-modified by this installer.
+The profile is imported but NOT connected. Run ./run.sh, enter your subscription,
+start the gateway, and select a server. Existing work VPN connections are not
+selected or modified by this installer.
 
 TUI command:
   scripts/vpnkit/vpnkit-local-tui.sh

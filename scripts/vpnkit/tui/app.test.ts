@@ -431,7 +431,7 @@ test("quit drains in-flight work without destroying the renderer prematurely", a
   finish(reply());
   await task;
 });
-test("actual mock Python bridge supports new actions and bounded catalog responses", async () => {
+test("actual native Go bridge supports new actions and bounded catalog responses", async () => {
   const b = new Bridge(["--test"]);
   try {
     expect((await b.request("status")).status.vpn_state).toBe("unknown");

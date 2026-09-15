@@ -22,7 +22,7 @@ services:
       net.ipv4.conf.all.rp_filter: "0"
       net.ipv4.conf.default.rp_filter: "0"
     healthcheck:
-      test: ["CMD", "/usr/local/bin/vpnkit-healthcheck.sh"]
+      test: ["CMD", "/usr/local/bin/local-vpn-kde", "health"]
       interval: 10s
       timeout: 5s
       retries: 6

@@ -4,7 +4,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/vibe-vpn ./cmd/vibe-vpn \
- && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/vibe-vpn-server-op-supervisor ./cmd/vibe-vpn-server-op-supervisor
+ && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/vibe-vpn-server-op-supervisor ./cmd/vibe-vpn-server-op-supervisor \
+ && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/local-vpn-kde ./cmd/local-vpn-kde
 
 FROM debian:bookworm-slim
 ARG SING_BOX_VERSION=1.13.11
@@ -22,7 +23,6 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g; s|http://security.
  && rm -rf /var/lib/apt/lists/* /tmp/sing-box.tar.gz "/tmp/sing-box-${SING_BOX_VERSION}-linux-amd64"
 COPY --from=vibe-vpn-builder /out/vibe-vpn /usr/local/bin/vibe-vpn
 COPY --from=vibe-vpn-builder /out/vibe-vpn-server-op-supervisor /usr/local/bin/vibe-vpn-server-op-supervisor
-COPY docker/vpnkit/entrypoint.sh docker/vpnkit/setup-routing.sh docker/vpnkit/vpnkit-healthcheck.sh docker/vpnkit/dns-failover-watchdog.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/setup-routing.sh /usr/local/bin/vpnkit-healthcheck.sh /usr/local/bin/dns-failover-watchdog.sh /usr/local/bin/vibe-vpn /usr/local/bin/vibe-vpn-server-op-supervisor \
- && install -d -m 0755 /etc/vibe-vpn /var/lib/vibe-vpn /var/log/vibe-vpn
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+COPY --from=vibe-vpn-builder /out/local-vpn-kde /usr/local/bin/local-vpn-kde
+RUN install -d -m 0755 /etc/vibe-vpn /var/lib/vibe-vpn /var/log/vibe-vpn
+ENTRYPOINT ["/usr/local/bin/local-vpn-kde", "container"]

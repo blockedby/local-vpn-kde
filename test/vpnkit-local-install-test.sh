@@ -44,6 +44,9 @@ done
   git init -q
 )
 chmod 700 "$FAKE_REPO/secrets"
+cp -a "$ROOT/config/openvpn" "$ROOT/config/sing-box" "$FAKE_REPO/config/"
+(cd "$ROOT" && go build -o "$FAKE_REPO/.build/local-vpn-kde.bin" ./cmd/local-vpn-kde)
+
 
 MOCK_BIN="$TMP/bin"
 MOCK_LOG="$TMP/mock.log"
@@ -232,6 +235,25 @@ grep -Fq 'sudo -- ' "$MOCK_LOG" || fail 'normal flow did not invoke sudo underla
 grep -Fq 'lifecycle start' "$MOCK_LOG" || fail 'normal flow did not invoke lifecycle start'
 grep -Fq 'nm-helper import --yes' "$MOCK_LOG" || fail 'normal flow did not import NetworkManager profile'
 ! grep -Fq 'nm-helper connect' "$MOCK_LOG" || fail 'normal flow auto-connected NetworkManager profile'
+
+# Fresh install must create every private directory without a subscription,
+# generate the importable profile, and defer Docker start until UI setup.
+FRESH_REPO="$TMP/fresh-repo"
+cp -a "$DEFAULT_REPO" "$FRESH_REPO"
+rm -rf -- "$FRESH_REPO/secrets"
+: >"$MOCK_LOG"
+fresh_output=$("$FRESH_REPO/scripts/vpnkit/vpnkit-local-install.sh" 2>"$TMP/fresh.err") || {
+  cat "$TMP/fresh.err" >&2
+  fail 'fresh installer required subscription or manual directories'
+}
+grep -Fq 'container_start=deferred-until-subscription' <<<"$fresh_output" || fail 'fresh install did not defer backend start'
+[[ -d "$FRESH_REPO/secrets/vpnkit-local/vibe-vpn" ]] || fail 'fresh install omitted the subscription directory'
+[[ "$(stat -c '%a' -- "$FRESH_REPO/secrets/vpnkit-local/vibe-vpn")" == 700 ]] || fail 'fresh subscription directory is not private'
+[[ -s "$FRESH_REPO/secrets/vpnkit-local/openvpn/client/vpnkit-local.ovpn" ]] || fail 'fresh install omitted profile generation'
+[[ ! -e "$FRESH_REPO/secrets/vpnkit-local/vibe-vpn/sub_url" ]] || fail 'installer invented a subscription'
+grep -Fq 'nm-helper import --yes' "$MOCK_LOG" || fail 'fresh install omitted profile import'
+! grep -Fq 'lifecycle start' "$MOCK_LOG" || fail 'fresh install started gateway without subscription'
+! grep -Fq 'nm-helper connect' "$MOCK_LOG" || fail 'fresh install connected the VPN'
 
 # Existing env files are checked before parsing. Exercise symlink, mode, and
 # hard-link rejection without touching the real repository's ignored config.

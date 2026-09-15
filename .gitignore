@@ -19,6 +19,7 @@ generated/
 *.qr.png
 # Dependencies, builds and caches
 node_modules/
+.build/
 __pycache__/
 *.pyc
 /vibe-vpn
