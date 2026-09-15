@@ -34,8 +34,8 @@
   "route": {
     "default_domain_resolver": "direct-dns",
     "rules": [
-      { "protocol": "dns", "action": "hijack-dns" },
       { "inbound": ["vpnkit-tun-in", "vpnkit-socks-in"], "action": "sniff", "timeout": "1s" },
+      { "protocol": "dns", "action": "hijack-dns" },
       { "rule_set": "vpnkit-adblock", "outbound": "block-out" },
       { "rule_set": "vpnkit-dev-direct", "outbound": "direct-out" },
       { "rule_set": "geoip-ru", "outbound": "direct-out" },

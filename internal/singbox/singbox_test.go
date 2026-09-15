@@ -43,10 +43,10 @@ func TestDockerTemplateRoutingInvariants(t *testing.T) {
 	if len(rules) < 5 {
 		t.Fatalf("route.rules length = %d, want DNS hijack rules, sniff rule, plus RU direct rules", len(rules))
 	}
-	assertDNSHijackRule(t, rules[0].(map[string]any), "protocol", "dns")
+	assertDNSHijackRule(t, rules[1].(map[string]any), "protocol", "dns")
 	sniffIdx := assertRouteSniffRule(t, rules, []string{"vpnkit-tun-in", "vpnkit-socks-in"})
-	if sniffIdx != 1 {
-		t.Fatalf("sniff rule index = %d, want immediately after DNS hijack rules", sniffIdx)
+	if sniffIdx != 0 {
+		t.Fatalf("sniff rule index = %d, want before protocol-based DNS hijack", sniffIdx)
 	}
 
 	geoIPIdx := findDirectRuleSetRule(rules, "geoip-ru")
