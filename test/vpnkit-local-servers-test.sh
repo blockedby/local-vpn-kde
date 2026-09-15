@@ -243,6 +243,8 @@ export VPNKIT_LOCAL_SECRETS_DIR="$tmp/secrets"
 export VPNKIT_LOCAL_COMPOSE_PROJECT=vpnkit-local-test-server
 export VPNKIT_LOCAL_MANAGE_NETWORKMANAGER=false
 export VPNKIT_LOCAL_TEST_FIXTURE=1
+# Operator settings must never redirect this fixture into live state.
+export VPNKIT_LOCAL_ENV_FILE=/dev/null
 
 bash -n "$lifecycle"
 server_id="srv_$(printf 'A%.0s' {1..27})"
