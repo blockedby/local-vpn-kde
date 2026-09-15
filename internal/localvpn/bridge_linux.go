@@ -195,6 +195,16 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 					catalog = map[string]any{"status": "canceled"}
 				case result.Reason == "timeout":
 					catalog = map[string]any{"status": "timeout"}
+				case result.Reason == "failed":
+					// Failed probes still return a bounded, valid catalog response.
+					parsed, parseErr := sanitizeCatalog(data, ids)
+					catalog = map[string]any{"status": "unavailable"}
+					if parseErr == nil {
+						switch parsed["status"] {
+						case "failed", "stale", "canceled", "recovery_required", "backend-outdated":
+							catalog = parsed
+						}
+					}
 				case result.Reason != "ok":
 					catalog = map[string]any{"status": "unavailable"}
 				default:

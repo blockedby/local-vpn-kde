@@ -774,6 +774,9 @@ export class App {
       return;
     }
     this.cancelled = false;
+    this.notice = "";
+    this.noticeAttempt = "";
+    this.error = false;
     // Batch owns the command lane, including discovery, so navigation cannot enqueue mutations.
     this.batch = {
       kind,

@@ -200,3 +200,27 @@ printf '%%s\n' '{"schema":"vibe-vpn.server-browser.v2","status":"ok","servers":[
 		})
 	}
 }
+
+func TestBridgeKeepsFailedMeasurementFromNonzeroExit(t *testing.T) {
+	b := bridgeFixture(t, `{}`)
+	id := "srv_" + strings.Repeat("a", 27)
+	for _, status := range []string{"failed", "ok"} {
+		script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\n' '%s'\nexit 1\n", `{"schema":"vibe-vpn.server-browser.v2","status":"`+status+`","server":{"server_id":"`+id+`","status":"failed"}}`)
+		if err := os.WriteFile(b.options.Executable, []byte(script), 0700); err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		if err := b.Serve(context.Background(), strings.NewReader(`{"action":"servers/speed","value":"`+id+`"}`+"\n"), &out); err != nil {
+			t.Fatal(err)
+		}
+		var reply map[string]any
+		json.Unmarshal(out.Bytes(), &reply)
+		want := "failed"
+		if status == "ok" {
+			want = "unavailable"
+		}
+		if reply["reason"] != want {
+			t.Fatalf("reason=%v want=%s", reply["reason"], want)
+		}
+	}
+}

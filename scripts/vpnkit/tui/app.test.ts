@@ -853,3 +853,23 @@ test("only assigned workers spin while remaining servers wait in the queue", asy
   expect(lines.find(s=>s.includes("Node 5"))).toContain("проверка");
  } finally { finish(reply()); await settle(); await app.close(); }
 });
+
+test("speed batch continues after one failed server and clears the previous error", async () => {
+ const t=await createTestRenderer({width:110,height:30});
+ const b=new FakeBackend(); const original=b.request.bind(b);let probes=0;
+ b.request=async(action,value)=>{
+  if(action==="servers/speed" && probes++===0) {
+   b.calls.push({action,value});
+   return {...reply(),ok:false,reason:"failed",catalog:{status:"failed",server:{...rows[0]!,server_id:value!,status:"failed"}}};
+  }
+  return original(action,value);
+ };
+ const app=new App(t.renderer,b);
+ try {
+  await app.perform("status");t.mockInput.pressKey("v");await settle();
+  t.mockInput.pressKey("t");await settle();await t.renderOnce();
+  expect(b.calls.filter(c=>c.action==="servers/speed")).toHaveLength(2);
+  expect(t.captureCharFrame()).toContain("2/2");
+  expect(t.captureCharFrame()).not.toContain("Служба управления недоступна");
+ }finally{await app.close();}
+});
