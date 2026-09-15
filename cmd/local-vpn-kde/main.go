@@ -26,6 +26,19 @@ func env(name, fallback string) string {
 	return fallback
 }
 func run(args []string) error {
+	if len(args) > 0 && args[0] == "host-smoke" {
+		if len(args) != 1 {
+			return fmt.Errorf("host-smoke takes no arguments")
+		}
+		opts, err := localvpn.SmokeEnvironment()
+		if err != nil {
+			fmt.Fprintln(os.Stdout, "host_smoke_failed_check=inputs")
+			return err
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer cancel()
+		return localvpn.HostSmoke(ctx, opts, os.Stdout)
+	}
 	if len(args) > 0 && args[0] == "ui" {
 		binary, err := os.Executable()
 		if err != nil {

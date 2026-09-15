@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 script="$root/scripts/vpnkit/vpnkit-local-host-smoke.sh"
+(cd "$root" && go build -o .build/local-vpn-kde.bin ./cmd/local-vpn-kde)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/vpnkit-local-host-smoke.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
@@ -40,6 +41,7 @@ if [[ "$*" == '-4 route get '* ]]; then
   exit 0
 fi
 if [[ "$*" == '-6 route get '* ]]; then
+  if [[ "${MOCK_IPV6_ROUTE_STALL:-0}" == 1 ]]; then exec sleep 60; fi
   case "${MOCK_IPV6_ROUTE_MODE:-none}" in
     reachable) printf '%s dev uplink0 src 2001:db8::2\n' "$target"; exit 0 ;;
     reachable-error) printf '%s dev uplink0 src 2001:db8::2\n' "$target"; exit 2 ;;
@@ -71,6 +73,10 @@ set -Eeuo pipefail
 printf 'curl %s\n' "$*" >>"${MOCK_PROBE_LOG:?}"
 # Ignore per-user curl config and proxies: they can bypass the tested route.
 [[ "${1:-}" == -q && "${2:-}" == --noproxy && "${3:-}" == '*' ]] || exit 90
+# The hostname probe must use the exact addresses whose routes were checked.
+if [[ "${!#}" == https://example.com/ ]]; then
+  [[ " $* " == *' --resolve example.com:443:93.184.216.34 '* ]] || exit 91
+fi
 exit "${MOCK_CURL_STATUS:-0}"
 EOF
 cat >"$tmp/bin/ping" <<'EOF'
@@ -211,6 +217,14 @@ if MOCK_PING6_STATUS=0 VPNKIT_LOCAL_SMOKE_TIMEOUT_SECONDS=2 \
   echo 'host smoke accepted successful IPv6 ping' >&2
   exit 1
 fi
+
+# A timed-out negative probe is inconclusive, never evidence of IPv6 blocking.
+if MOCK_IPV6_ROUTE_STALL=1 VPNKIT_LOCAL_SMOKE_TIMEOUT_SECONDS=1 \
+    VPNKIT_LOCAL_SMOKE_DEVICE=tun7 bash "$script" >"$tmp/ipv6-timeout.out" 2>&1; then
+  echo 'host smoke accepted a stalled IPv6 route probe' >&2
+  exit 1
+fi
+grep -Fxq 'host_smoke_failed_check=ipv6' "$tmp/ipv6-timeout.out"
 
 # Exact-device routing is required even when every application probe is
 # mocked successful. A different tun, ppp, or vpn device must fail closed.

@@ -100,32 +100,39 @@ func hostRoutes(ctx context.Context, device string) error {
 		if err != nil {
 			return errNMNotReady
 		}
-		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-		if len(lines) > 2 || len(lines) == 2 && strings.TrimSpace(lines[1]) != "cache" {
-			return errors.New("ambiguous IPv4 route")
+		if err := route4Device(data, address, device); err != nil {
+			return err
 		}
-		fields := strings.Fields(lines[0])
-		if len(fields) < 3 || fields[0] != address {
-			return errors.New("invalid IPv4 route")
-		}
-		found := ""
-		for i, field := range fields {
-			if field == "unreachable" || field == "prohibit" || field == "blackhole" || field == "throw" {
-				return errNMNotReady
-			}
-			if field == "dev" {
-				if found != "" || i+1 >= len(fields) {
-					return errors.New("ambiguous route device")
-				}
-				found = fields[i+1]
-			}
-		}
-		if found == "" {
-			return errors.New("route device missing")
-		}
-		if found != device {
+	}
+	return nil
+}
+
+func route4Device(data []byte, address, device string) error {
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) > 2 || len(lines) == 2 && strings.TrimSpace(lines[1]) != "cache" {
+		return errors.New("ambiguous IPv4 route")
+	}
+	fields := strings.Fields(lines[0])
+	if len(fields) < 3 || fields[0] != address {
+		return errors.New("invalid IPv4 route")
+	}
+	found := ""
+	for i, field := range fields {
+		if field == "unreachable" || field == "prohibit" || field == "blackhole" || field == "throw" {
 			return errNMNotReady
 		}
+		if field == "dev" {
+			if found != "" || i+1 >= len(fields) {
+				return errors.New("ambiguous route device")
+			}
+			found = fields[i+1]
+		}
+	}
+	if found == "" {
+		return errors.New("route device missing")
+	}
+	if found != device {
+		return errNMNotReady
 	}
 	return nil
 }
