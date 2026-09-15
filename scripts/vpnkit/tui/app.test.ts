@@ -167,7 +167,7 @@ test("navigation and diagnostics Back are immediate during a held mutation", asy
     await task;
     await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Enter сохранить");
-    expect(b.calls.map((c) => c.action)).toEqual(["status", "start"]);
+    expect(b.calls.map((c) => c.action)).toEqual(["status", "start", "subscription/read"]);
   } finally {
     finish(reply());
     await settle();
@@ -749,4 +749,42 @@ test("ping and site render before batch completion and completed rows stop spinn
   expect(t.captureCharFrame()).not.toContain("3/2");
   expect(b.calls.filter(c=>c.action==="servers/check-batch")).toHaveLength(1);
  } finally { finish(reply()); await settle(); await app.close(); }
+});
+
+test("subscription opened during status loads on the first visit after status completes", async () => {
+  const t = await createTestRenderer({ width: 100, height: 24 });
+  const b = new FakeBackend();
+  let finish!: (r: Reply) => void;
+  b.hold = { action: "status", promise: new Promise((r) => (finish = r)) };
+  const app = new App(t.renderer, b);
+  try {
+    const task = app.perform("status");
+    t.mockInput.pressKey("c");
+    await settle();
+    expect(b.calls.map(c => c.action)).toEqual(["status"]);
+    finish(reply());
+    await task;
+    await t.renderOnce();
+    expect(b.calls.map(c => c.action)).toEqual(["status", "subscription/read"]);
+    expect(t.captureCharFrame()).toContain("https://example.invalid/saved");
+  } finally { finish(reply()); await settle(); await app.close(); }
+});
+
+test("deferred subscription load does not replace text typed while busy", async () => {
+  const t = await createTestRenderer({ width: 100, height: 24 });
+  const b = new FakeBackend();
+  let finish!: (r: Reply) => void;
+  b.hold = { action: "status", promise: new Promise((r) => (finish = r)) };
+  const app = new App(t.renderer, b);
+  try {
+    const task = app.perform("status");
+    t.mockInput.pressKey("c");
+    await settle();
+    await t.mockInput.pasteBracketedText("https://example.invalid/new");
+    finish(reply());
+    await task;
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("https://example.invalid/new");
+    expect(b.calls.map(c => c.action)).toEqual(["status"]);
+  } finally { finish(reply()); await settle(); await app.close(); }
 });

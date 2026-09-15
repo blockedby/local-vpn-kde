@@ -105,6 +105,7 @@ export class App {
   private editorRevision = 0;
   private navigationRevision = 0;
   private loadedSubscription = false;
+  private pendingSubscriptionRevision?: number;
   private draft = "";
   private timer?: ReturnType<typeof setInterval>;
   private poll?: ReturnType<typeof setInterval>;
@@ -258,6 +259,14 @@ export class App {
   private ready() {
     return (this.status?.gateway_state ?? this.status?.vpn_state) === "healthy";
   }
+  private async loadPendingSubscription() {
+    if (this.busy || this.batch || this.closing || this.disposed) return;
+    const revision = this.pendingSubscriptionRevision;
+    this.pendingSubscriptionRevision = undefined;
+    if (revision !== undefined && revision === this.editorRevision &&
+        this.screen === "subscription" && !this.loadedSubscription)
+      await this.perform("subscription/read");
+  }
   private notify(text: string, error = false) {
     this.notice = text;
     this.noticeAttempt = "";
@@ -273,8 +282,10 @@ export class App {
     this.navigationRevision++;
     if (screen === "subscription") {
       this.input.value = this.draft;
-      if (!this.loadedSubscription && !this.busy && !this.batch)
-        void this.perform("subscription/read");
+      if (!this.loadedSubscription) {
+        this.pendingSubscriptionRevision = this.editorRevision;
+        void this.loadPendingSubscription();
+      }
     }
     if (screen === "target") this.input.value = this.target;
     this.paint();
@@ -747,6 +758,7 @@ export class App {
         );
       }
     }
+    await this.loadPendingSubscription();
     return reply;
   }
   private async runBatch(kind: Batch) {
@@ -840,6 +852,7 @@ export class App {
       failed > 0 || !!stoppedReason,
     );
     if (this.closing) await this.finishClose();
+    else await this.loadPendingSubscription();
   }
   private cancel() {
     if (!this.busy && !this.batch) return;
