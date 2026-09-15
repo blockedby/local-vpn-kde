@@ -1211,5 +1211,101 @@ class OpenTuiBridgeExtensionsTests(unittest.TestCase):
             self.assertNotIn("private-value",result.stdout)
 
 
+
+class OpenTuiSetupTerminalTests(unittest.TestCase):
+    def test_setup_hands_terminal_to_sudo_and_resumes(self):
+        import fcntl
+        import pty
+        import select
+        import shutil
+        import signal
+        import struct
+        import termios
+
+        bun = shutil.which("bun")
+        dependencies = ROOT / "scripts/vpnkit/tui/node_modules"
+        if not bun or not dependencies.exists():
+            self.skipTest("installed OpenTUI dependencies required")
+        with tempfile.TemporaryDirectory(prefix="vpnkit-local-setup-") as temp:
+            root = Path(temp)
+            ui = root / "scripts/vpnkit/tui"
+            ui.mkdir(parents=True)
+            for name in ("setup-index.ts", "setup.ts", "setup-backend.ts", "model.ts"):
+                shutil.copyfile(ROOT / "scripts/vpnkit/tui" / name, ui / name)
+            (ui / "node_modules").symlink_to(dependencies, target_is_directory=True)
+            (root / ".build").mkdir()
+            binary = root / ".build/local-vpn-kde.bin"
+            binary.write_text("#!/usr/bin/env python3\n"
+                "import json,os,pathlib,sys\n"
+                "if sys.argv[1] == 'ui':\n print('app-open-fixture'); raise SystemExit(0)\n"
+                "assert 'VPNKIT_LOCAL_SECRETS_DIR' not in os.environ\n"
+                "action=sys.argv[sys.argv.index('--action')+1]\n"
+                "if action=='install':\n"
+                " assert pathlib.Path(os.environ['SETUP_AUTH_MARKER']).read_text()=='ok'\n"
+                " print(json.dumps({'event':'progress','phase':'setup-profile'}))\n"
+                "print(json.dumps({'event':'result','ok':True,'reason':'ok'}))\n")
+            binary.chmod(0o700)
+            mock_bin = root / "bin"
+            mock_bin.mkdir()
+            sudo = mock_bin / "sudo"
+            sudo.write_text("#!/usr/bin/env bash\nset -euo pipefail\n"
+                "[[ $1 == -v && -t 0 && -t 1 ]]\n"
+                "trap 'stty echo' EXIT\nstty -echo\n"
+                "printf 'fixture-password: '\nread -r password\n"
+                "[[ $password == harmless-fixture-password ]]\n"
+                "printf ok >\"$SETUP_AUTH_MARKER\"\nprintf '\\n'\n")
+            sudo.chmod(0o700)
+            pid, master = pty.fork()
+            if pid == 0:
+                os.chdir(root)
+                env = {**os.environ, "TERM":"xterm-256color", "PATH":str(mock_bin)+":"+os.environ["PATH"],
+                       "SETUP_AUTH_MARKER":str(root / "authorized"), "VPNKIT_LOCAL_SECRETS_DIR":"/not-the-current-installation"}
+                os.execve(bun, [bun, str(ui / "setup-index.ts")], env)
+            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH",24,80,0,0))
+            transcript = bytearray()
+            reaped = False
+
+            def until(text):
+                wanted = text.encode()
+                deadline = time.monotonic() + 10
+                while wanted not in transcript and time.monotonic() < deadline:
+                    if select.select([master], [], [], .05)[0]:
+                        try:
+                            data = os.read(master, 65536)
+                        except OSError:
+                            break
+                        if not data:
+                            break
+                        transcript.extend(data)
+                self.assertIn(wanted, transcript, "setup terminal transition did not complete")
+
+            try:
+                until("Начать установку")
+                os.write(master, b"\r")
+                until("fixture-password: ")
+                os.write(master, b"harmless-fixture-password\n")
+                until("Открыть программу")
+                self.assertNotIn(b"harmless-fixture-password", transcript)
+                self.assertNotIn(b"TextBuffer is destroyed", transcript)
+                os.write(master, b"\r")
+                until("app-open-fixture")
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    child, status = os.waitpid(pid, os.WNOHANG)
+                    if child:
+                        reaped = True
+                        self.assertEqual(os.waitstatus_to_exitcode(status), 0)
+                        break
+                    time.sleep(.02)
+                self.assertTrue(reaped, "setup launcher did not exit after the app")
+            finally:
+                if not reaped:
+                    try:
+                        os.killpg(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    os.waitpid(pid, 0)
+                os.close(master)
+
 if __name__ == "__main__":
     unittest.main()

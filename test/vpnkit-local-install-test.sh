@@ -217,6 +217,7 @@ cat >"$MOCK_BIN/sudo" <<'EOF_SUDO_MUTATION_MOCK'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 printf 'sudo %s\n' "$*" >>"$MOCK_LOG"
+[[ "${1:-}" == -n ]] && shift
 [[ "${1:-}" == -- ]] && shift
 "$@"
 EOF_SUDO_MUTATION_MOCK
@@ -246,11 +247,12 @@ FRESH_REPO="$TMP/fresh-repo"
 cp -a "$DEFAULT_REPO" "$FRESH_REPO"
 rm -rf -- "$FRESH_REPO/secrets"
 : >"$MOCK_LOG"
-fresh_output=$("$FRESH_REPO/scripts/vpnkit/vpnkit-local-install.sh" 2>"$TMP/fresh.err") || {
+fresh_output=$("$FRESH_REPO/scripts/vpnkit/vpnkit-local-install.sh" --non-interactive 2>"$TMP/fresh.err") || {
   cat "$TMP/fresh.err" >&2
   fail 'fresh installer required subscription or manual directories'
 }
 grep -Fq 'container_start=deferred-until-subscription' <<<"$fresh_output" || fail 'fresh install did not defer backend start'
+grep -Fq 'sudo -n -- ' "$MOCK_LOG" || fail 'UI installation could prompt for a password in its captured output'
 [[ -d "$FRESH_REPO/secrets/vpnkit-local/vibe-vpn" ]] || fail 'fresh install omitted the subscription directory'
 [[ "$(stat -c '%a' -- "$FRESH_REPO/secrets/vpnkit-local/vibe-vpn")" == 700 ]] || fail 'fresh subscription directory is not private'
 [[ -s "$FRESH_REPO/secrets/vpnkit-local/openvpn/client/vpnkit-local.ovpn" ]] || fail 'fresh install omitted profile generation'
