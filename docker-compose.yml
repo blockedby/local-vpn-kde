@@ -1,5 +1,6 @@
 services:
   vpnkit:
+    image: local-vpn-kde:latest
     build:
       context: .
       dockerfile: docker/vpnkit/Dockerfile
