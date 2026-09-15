@@ -971,7 +971,7 @@ export class App {
           : s.availability === "failed"
             ? "нет"
             : "—";
-      row.content = `${s.server_id === this.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)} ${cell(ping, 8)} ${cell(speed, 8)} ${cell(site, 7)} ${s.status === "ready" || s.availability === "ready" ? "готов" : s.status === "failed" || s.availability === "failed" || s.ping_status === "failed" ? "ошибка" : "не пров."}`;
+      row.content = `${s.server_id === this.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)} ${cell(ping, 8)} ${cell(speed, 8)} ${cell(site, 7)} ${s.ping_status === "failed" || s.availability === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не пров."}`;
       row.fg =
         s.server_id === this.serverID
           ? p.accent

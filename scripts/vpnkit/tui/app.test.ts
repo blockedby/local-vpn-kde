@@ -805,3 +805,25 @@ test("any listed server can be selected without successful measurements", async 
     } finally { await app.close(); }
   }
 });
+
+test("failed current ping overrides an earlier successful speed result", async () => {
+  const t = await createTestRenderer({ width: 110, height: 24 });
+  const b = new FakeBackend();
+  const app = new App(t.renderer,b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v");
+    await settle();
+    await app.perform("servers/speed",rows[0]!.server_id);
+    let finish!: (r: Reply) => void;
+    b.hold = { action: "servers/check-batch", promise: new Promise(r => finish=r) };
+    t.mockInput.pressKey("a");
+    await settle();
+    b.onCheckProgress?.({ event:"server-check",server_id:rows[0]!.server_id,stage:"complete",ping_status:"failed",latency_ms:0,availability:"untested" });
+    await t.renderOnce();
+    const row = t.captureCharFrame().split("\n").find(line => line.includes("Tokyo"))!;
+    expect(row).toContain("50.0");
+    expect(row).toMatch(/ошибка\s*$/);
+    finish(reply()); await settle();
+  } finally { await app.close(); }
+});
