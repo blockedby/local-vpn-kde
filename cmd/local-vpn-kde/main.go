@@ -132,6 +132,12 @@ func run(args []string) error {
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 		defer cancel()
 		manager := localvpn.NetworkManager{Base: selected, Timeout: time.Duration(seconds) * time.Second}
+		if filepath.Base(root) == "local-vpn-kde" {
+			previous := filepath.Join(filepath.Dir(root), "vibe-practicum-vpn")
+			if path, err := localvpn.SecretRoot(previous, "secrets/vpnkit-local", false); err == nil {
+				manager.MigrationBase = path
+			}
+		}
 		return manager.Run(ctx, *action, *yes, os.Stdout)
 	case "bridge":
 		executable := *adapter
@@ -193,6 +199,12 @@ func run(args []string) error {
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		if len(os.Args) > 1 && os.Args[1] == "networkmanager" {
+			if errors.Is(err, localvpn.ErrForeignNMProfile) {
+				fmt.Fprintln(os.Stderr, "networkmanager_failure=foreign-profile")
+			}
+			if errors.Is(err, localvpn.ErrActiveNMMigration) {
+				fmt.Fprintln(os.Stderr, "networkmanager_failure=previous-profile-active")
+			}
 			fmt.Fprintln(os.Stderr, "NetworkManager:", err)
 		} else if len(os.Args) > 1 && os.Args[1] == "host-smoke" {
 			// HostSmoke returns a fixed diagnostic vocabulary, never raw tool

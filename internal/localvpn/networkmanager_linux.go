@@ -27,10 +27,59 @@ type nmCapability struct {
 }
 type nmConnection struct{ Name, UUID, Type, Service, Data, Device string }
 type NetworkManager struct {
-	Base    string
-	Timeout time.Duration
-	command func(context.Context, ...string) (string, error)
-	persist func(int, map[string][]byte) error
+	Base          string
+	MigrationBase string
+	Timeout       time.Duration
+	command       func(context.Context, ...string) (string, error)
+	persist       func(int, map[string][]byte) error
+}
+
+var ErrForeignNMProfile = errors.New("existing vpnkit-local profile belongs to another installation; ownership migration could not be verified")
+var ErrActiveNMMigration = errors.New("disconnect the previous local VPN before migrating its profile")
+
+// migrateOwnership reads the previous installation without changing it. A name
+// alone never authorizes adoption: require its private capability, matching
+// source fingerprint, the exact live UUID and a proven local OpenVPN profile.
+func (n NetworkManager) migrateOwnership(ctx context.Context) error {
+	if n.MigrationBase == "" || n.MigrationBase == n.Base {
+		return ErrForeignNMProfile
+	}
+	if err := validateSecretTree(n.MigrationBase, nil); err != nil {
+		return ErrForeignNMProfile
+	}
+	previous := NetworkManager{Base: n.MigrationBase, command: n.command}
+	cap, err := previous.readCapability()
+	if err != nil || cap.UUID == "" {
+		return ErrForeignNMProfile
+	}
+	fingerprint, err := previous.profileFingerprint()
+	if err != nil || cap.Fingerprint != fingerprint {
+		return ErrForeignNMProfile
+	}
+	profile, err := n.connection(ctx, cap.UUID)
+	if err != nil || profile.Name != "vpnkit-local" {
+		return ErrForeignNMProfile
+	}
+	if err := n.namedAllowlist(ctx, cap.UUID, ""); err != nil {
+		return ErrForeignNMProfile
+	}
+	active, err := n.active(ctx, cap.UUID)
+	if err != nil {
+		return ErrForeignNMProfile
+	}
+	if active {
+		return ErrActiveNMMigration
+	}
+	// Recheck the read-only evidence before publishing the new capability.
+	current, err := previous.readCapability()
+	if err != nil || current != cap {
+		return ErrForeignNMProfile
+	}
+	if fingerprint, err := previous.profileFingerprint(); err != nil || fingerprint != cap.Fingerprint {
+		return ErrForeignNMProfile
+	}
+	cap.Legacy = false
+	return n.writeCapability(cap)
 }
 
 func (n NetworkManager) profilePath() string {
@@ -560,6 +609,15 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 	cap, ownership, err := n.assess(ctx, checkSource)
 	if err != nil {
 		return err
+	}
+	if action == "import" && ownership == "foreign" {
+		if err = n.migrateOwnership(ctx); err != nil {
+			return err
+		}
+		cap, ownership, err = n.assess(ctx, false)
+		if err != nil {
+			return err
+		}
 	}
 	if action == "plan" || action == "status" {
 		configured, active, device := "no", "no", "none"

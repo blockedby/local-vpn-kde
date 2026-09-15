@@ -139,3 +139,73 @@ func TestNMRefreshRetainsNewProfileAfterOldDeletion(t *testing.T) {
 		})
 	}
 }
+
+func TestNMPreviousInstallationMigration(t *testing.T) {
+	for _, scenario := range []string{"valid", "wrong-uuid", "changed-profile", "active"} {
+		t.Run(scenario, func(t *testing.T) {
+			old := NetworkManager{Base: t.TempDir()}
+			n := NetworkManager{Base: t.TempDir(), MigrationBase: old.Base}
+			for _, manager := range []NetworkManager{old, n} {
+				if err := os.MkdirAll(filepath.Dir(manager.profilePath()), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(manager.profilePath(), []byte("client\ndev tun\nproto udp\nremote 127.0.0.1 21194\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			id := "11111111-1111-4111-8111-111111111111"
+			fingerprint, err := old.profileFingerprint()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cap := nmCapability{UUID: id, Fingerprint: fingerprint}
+			if err = old.writeCapability(cap); err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "changed-profile" {
+				if err := os.WriteFile(old.profilePath(), []byte("changed"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			mutations := 0
+			n.command = func(_ context.Context, args ...string) (string, error) {
+				joined := strings.Join(args, " ")
+				switch joined {
+				case "-t -f NAME,UUID,TYPE connection show":
+					return "vpnkit-local:" + id + ":vpn\n", nil
+				case "-t -f NAME,UUID,TYPE,DEVICE connection show --active":
+					if scenario == "active" {
+						return "vpnkit-local:" + id + ":vpn:tun0\n", nil
+					}
+					return "", nil
+				case "-t -f connection.id,connection.uuid,connection.type,vpn.service-type,vpn.data connection show uuid " + id:
+					if scenario == "wrong-uuid" {
+						return "", errors.New("UUID absent")
+					}
+					return "vpnkit-local:" + id + ":vpn:org.freedesktop.NetworkManager.openvpn:remote = 127.0.0.1:21194\n", nil
+				default:
+					mutations++
+					return "", errors.New("unexpected NetworkManager mutation")
+				}
+			}
+			var out bytes.Buffer
+			err = n.Run(context.Background(), "import", true, &out)
+			if (err == nil) != (scenario == "valid") {
+				t.Fatalf("unexpected migration result: %v", err)
+			}
+			got, err := n.readCapability()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "valid" && got != cap || scenario != "valid" && got.UUID != "" {
+				t.Fatal("incorrect ownership migration")
+			}
+			if unchanged, err := old.readCapability(); err != nil || unchanged != cap {
+				t.Fatal("previous installation was modified")
+			}
+			if mutations != 0 {
+				t.Fatal("migration modified a NetworkManager profile")
+			}
+		})
+	}
+}

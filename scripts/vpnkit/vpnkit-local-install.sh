@@ -481,9 +481,13 @@ require_owned_regular "$PROFILE" 'generated local OpenVPN profile' 600
 
 PHASE=networkmanager-import
 printf '\n==> Import the owned NetworkManager profile without connecting it\n'
-if ! VPNKIT_LOCAL_ENV_FILE=/dev/null VPNKIT_LOCAL_SECRETS_DIR="$BASE" \
+if ! nm_import_output=$(VPNKIT_LOCAL_ENV_FILE=/dev/null VPNKIT_LOCAL_SECRETS_DIR="$BASE" \
     VPNKIT_LOCAL_PROFILE="$PROFILE" VPNKIT_LOCAL_NM_CONNECTION=vpnkit-local \
-    "$NM_HELPER" import --yes >/dev/null 2>&1; then
+    "$NM_HELPER" import --yes 2>&1); then
+  case "$nm_import_output" in
+    *networkmanager_failure=foreign-profile*) die 'A vpnkit-local profile already exists, but its previous installation ownership could not be verified.' 20 ;;
+    *networkmanager_failure=previous-profile-active*) die 'Disconnect the previous local VPN before migrating its KDE profile.' 20 ;;
+  esac
   die 'NetworkManager profile import failed' 20
 fi
 printf 'networkmanager_import=complete\nprofile_activation=manual\n'
