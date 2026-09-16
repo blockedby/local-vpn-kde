@@ -93,6 +93,21 @@ func TestRenderPythonParity(t *testing.T) {
 							if err = json.Unmarshal(b, &bv); err != nil {
 								return err
 							}
+							if relative == "rendered/sing-box/config.json" {
+								// The intentional post-migration DNS fix is checked before
+								// removing that one difference from the legacy comparison.
+								for _, value := range bv.(map[string]any)["dns"].(map[string]any)["servers"].([]any) {
+									server := value.(map[string]any)
+									if server["tag"] == "direct-dns" {
+										continue
+									}
+									tls := server["tls"].(map[string]any)
+									if !reflect.DeepEqual(tls["alpn"], []any{"http/1.1"}) {
+										t.Fatal("DNS transport must avoid HTTP/2 over gRPC")
+									}
+									delete(tls, "alpn")
+								}
+							}
 							if !reflect.DeepEqual(av, bv) {
 								t.Errorf("JSON parity mismatch: %s", relative)
 							}

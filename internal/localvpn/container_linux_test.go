@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +17,32 @@ import (
 	"testing"
 	"time"
 )
+
+func fixtureDNSReply(query []byte) []byte {
+	// Fixed A-record fixture. Preserve the question and answer it with
+	// a compressed owner name pointing at its offset in the DNS header.
+	if len(query) < 17 || query[4] != 0 || query[5] != 1 {
+		return nil
+	}
+	end := 12
+	for end < len(query) && query[end] != 0 {
+		if query[end] > 63 {
+			end = len(query)
+			break
+		}
+		end += int(query[end]) + 1
+	}
+	end += 5
+	if end > len(query) {
+		return nil
+	}
+	data := append([]byte(nil), query[:end]...)
+	data[2], data[3] = 0x81, 0x80
+	data[6], data[7] = 0, 1
+	data[8], data[9], data[10], data[11] = 0, 0, 0, 0
+	data = append(data, 0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 192, 0, 2, 42)
+	return data
+}
 
 // This helper is executed only inside the disposable target container. Its
 // network has no external gateway, so a host VPN cannot carry test traffic.
@@ -36,31 +64,47 @@ func TestContainerTarget(t *testing.T) {
 			if err != nil {
 				return
 			}
-			// Fixed A-record fixture. Preserve the question and answer it with
-			// a compressed owner name pointing at its offset in the DNS header.
-			if n < 17 || buf[4] != 0 || buf[5] != 1 {
+			data := fixtureDNSReply(buf[:n])
+			if data == nil {
 				continue
 			}
-			end := 12
-			for end < n && buf[end] != 0 {
-				if buf[end] > 63 {
-					end = n
-					break
-				}
-				end += int(buf[end]) + 1
-			}
-			end += 5
-			if end > n {
-				continue
-			}
-			data := append([]byte(nil), buf[:end]...)
-			data[2], data[3] = 0x81, 0x80
-			data[6], data[7] = 0, 1
-			data[8], data[9], data[10], data[11] = 0, 0, 0, 0
-			data = append(data, 0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 192, 0, 2, 42)
 			udp.WriteTo(data, peer)
 		}
 	}()
+	if os.Getenv("LOCAL_VPN_CONTAINER_GRPC_TARGET") == "1" {
+		cfg := `{"inbounds":[{"type":"vless","listen":"0.0.0.0","listen_port":8443,"users":[{"uuid":"11111111-1111-4111-8111-111111111111"}],"transport":{"type":"grpc","service_name":"dns-lab"}}],"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}`
+		path := filepath.Join(t.TempDir(), "grpc.json")
+		if err := os.WriteFile(path, []byte(cfg), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("/usr/local/bin/sing-box", "run", "-c", path)
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { cmd.Process.Kill(); cmd.Wait() }()
+		tlsServer := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			query, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+			if err != nil {
+				http.Error(w, "bad query", 400)
+				return
+			}
+			answer := fixtureDNSReply(query)
+			if answer == nil {
+				http.Error(w, "bad DNS", 400)
+				return
+			}
+			w.Header().Set("Content-Type", "application/dns-message")
+			w.Write(answer)
+		}))
+		tlsServer.Listener.Close()
+		tlsServer.Listener, err = net.Listen("tcp", ":8444")
+		if err != nil {
+			t.Fatal(err)
+		}
+		tlsServer.EnableHTTP2 = true
+		tlsServer.StartTLS()
+		defer tlsServer.Close()
+	}
 	server := &http.Server{Addr: ":8080", ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("local-vpn-isolated-target\n")) })}
 	if err := server.ListenAndServe(); err != nil {
 		t.Fatal(err)
@@ -71,18 +115,29 @@ func TestContainerDNSProbe(t *testing.T) {
 	if os.Getenv("LOCAL_VPN_CONTAINER_DNS_PROBE") != "1" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
 	resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, network, "8.8.8.8:53")
 	}}
-	addresses, err := resolver.LookupIP(ctx, "ip4", "dns-probe.example")
-	if err != nil || len(addresses) != 1 || addresses[0].String() != "192.0.2.42" {
-		t.Fatal("DNS through OpenVPN was not intercepted by the configured resolver")
+	for i := 0; i < 12; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		addresses, err := resolver.LookupIP(ctx, "ip4", fmt.Sprintf("dns-probe-%d.example", i))
+		cancel()
+		if err != nil || len(addresses) != 1 || addresses[0].String() != "192.0.2.42" {
+			t.Fatalf("DNS query %d through OpenVPN failed", i)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
 func TestContainerDataPath(t *testing.T) {
+	if os.Getenv("LOCAL_VPN_CONTAINER_TEST") != "1" {
+		t.Skip("set LOCAL_VPN_CONTAINER_TEST=1 to run disposable Docker acceptance")
+	}
+	for _, grpc := range []bool{false, true} {
+		t.Run(fmt.Sprintf("grpc=%v", grpc), func(t *testing.T) { testContainerDataPath(t, grpc) })
+	}
+}
+func testContainerDataPath(t *testing.T, grpc bool) {
 	if os.Getenv("LOCAL_VPN_CONTAINER_TEST") != "1" {
 		t.Skip("set LOCAL_VPN_CONTAINER_TEST=1 to run disposable Docker acceptance")
 	}
@@ -167,7 +222,7 @@ func TestContainerDataPath(t *testing.T) {
 		}
 		gatewayArgs = append(gatewayArgs, "--entrypoint", "/usr/local/bin/local-vpn-kde", "-v", runtimeBinary+":/usr/local/bin/local-vpn-kde:ro")
 	}
-	target := launch("target", "-e", "LOCAL_VPN_CONTAINER_TARGET=1", "-v", binary+":/acceptance:ro", "--entrypoint", "/acceptance", image, "-test.run=^TestContainerTarget$")
+	target := launch("target", "-e", fmt.Sprintf("LOCAL_VPN_CONTAINER_GRPC_TARGET=%d", map[bool]int{true: 1, false: 0}[grpc]), "-e", "LOCAL_VPN_CONTAINER_TARGET=1", "-v", binary+":/acceptance:ro", "--entrypoint", "/acceptance", image, "-test.run=^TestContainerTarget$")
 	address := func(id string) string {
 		t.Helper()
 		raw := must("inspect", "--format", "{{json .NetworkSettings.Networks}}", id)
@@ -192,7 +247,31 @@ func TestContainerDataPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	dns := rendered["dns"].(map[string]any)
+	dnsALPN := dns["servers"].([]any)[0].(map[string]any)["tls"].(map[string]any)["alpn"]
 	dns["servers"] = []any{map[string]any{"type": "udp", "tag": "remote-dns", "server": targetIP, "server_port": 5353}, map[string]any{"type": "udp", "tag": "remote-dns-fallback", "server": targetIP, "server_port": 5353}, map[string]any{"type": "local", "tag": "direct-dns"}}
+	if grpc {
+		for _, value := range rendered["outbounds"].([]any) {
+			o := value.(map[string]any)
+			if o["tag"] == "selected-native-out" {
+				o["type"] = "vless"
+				o["server"] = targetIP
+				o["server_port"] = 8443
+				o["uuid"] = "11111111-1111-4111-8111-111111111111"
+				o["transport"] = map[string]any{"type": "grpc", "service_name": "dns-lab"}
+			}
+		}
+		for _, value := range dns["servers"].([]any) {
+			d := value.(map[string]any)
+			if d["tag"] == "direct-dns" {
+				continue
+			}
+			d["type"] = "https"
+			d["server_port"] = 8444
+			d["path"] = "/dns-query"
+			d["tls"] = map[string]any{"enabled": true, "insecure": true, "alpn": dnsALPN}
+			d["detour"] = "selected-native-out"
+		}
+	}
 	configBytes, err = json.Marshal(rendered)
 	if err != nil {
 		t.Fatal(err)

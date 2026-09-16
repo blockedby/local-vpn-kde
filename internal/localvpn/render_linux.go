@@ -207,6 +207,8 @@ func buildConfig(template []byte, o RenderOptions) ([]byte, error) {
 	if !ok {
 		return nil, errors.New("missing DNS servers")
 	}
+	// HTTP/2 DoH reuses a gRPC stream whose request context can be canceled.
+	// HTTP/1.1 keeps DNS connections independent while preserving TLS and detour.
 	for _, spec := range []struct{ tag, ip, host string }{{"remote-dns", "1.1.1.1", "cloudflare-dns.com"}, {"remote-dns-fallback", "8.8.8.8", "dns.google"}} {
 		found := false
 		for _, value := range servers {
@@ -215,7 +217,7 @@ func buildConfig(template []byte, o RenderOptions) ([]byte, error) {
 				continue
 			}
 			found = true
-			for k, v := range (object{"type": "https", "server": spec.ip, "server_port": 443, "path": "/dns-query", "tls": object{"enabled": true, "server_name": spec.host}}) {
+			for k, v := range (object{"type": "https", "server": spec.ip, "server_port": 443, "path": "/dns-query", "tls": object{"enabled": true, "server_name": spec.host, "alpn": []string{"http/1.1"}}}) {
 				server[k] = v
 			}
 			if o.Outbound == "direct-fixture" {
