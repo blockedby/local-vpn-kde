@@ -1,19 +1,22 @@
 # Local VPN KDE
 
-Локальный VPN для KDE: шлюз в Docker, подключение через NetworkManager/OpenVPN и терминальный интерфейс OpenTUI. Проверяет ping и доступность сайта по 5 серверов одновременно; скорость — отдельным тестом.
+A Docker VPN gateway for KDE, with NetworkManager integration and a terminal UI. Choose servers, check ping and website availability, and measure download speed.
 
-**Требования:** Linux с KDE, Docker Compose, NetworkManager с поддержкой OpenVPN, Go (для сборки), Python 3, Bun 1.3+ и `sudo` для настройки маршрутов.
+## Install
 
-## Первый запуск
+Linux x86-64 with KDE: Ubuntu 24.04+, Debian 13+, Fedora, or Arch/CachyOS. You need internet access and administrator privileges through sudo or Polkit.
 
 ```bash
-cd ~/code/tools/local-vpn-kde
+git clone https://github.com/blockedby/local-vpn-kde.git
+cd local-vpn-kde
 ./install.sh
 ./run.sh
 ```
 
-Откроется установщик OpenTUI с этапами и прогрессом. Он соберёт Docker-образ, подготовит приватные файлы, настроит маршруты и импортирует профиль KDE. Запускай от обычного пользователя, без `sudo`: пароль установщик запросит через системный терминал.
+Run as your regular user, **without sudo**. The installer requests administrator access when needed, installs dependencies (including Go, Bun, Docker Compose, and OpenVPN), builds the app, and configures the KDE profile. Install Git through your system package manager first if it is missing.
 
-Подписку заполни в меню программы, затем запусти шлюз и выбери сервер. Без подписки установщик подготовит всё для запуска, но шлюз запускать не будет. VPN автоматически не подключается.
+In the app, open **Subscription** (Подписка), paste your subscription URL, start the gateway, and select a server. Connect the VPN manually.
 
-Для дальнейшей работы достаточно `./run.sh`. Подписка, ключи и журналы хранятся в `secrets/` и не попадают в Git.
+Use `./run.sh` for subsequent launches. To update, run `git pull` followed by `./install.sh`.
+
+Subscriptions, keys, and logs stay in the gitignored `secrets/` directory.
