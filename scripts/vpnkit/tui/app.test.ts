@@ -873,3 +873,60 @@ test("speed batch continues after one failed server and clears the previous erro
   expect(t.captureCharFrame()).not.toContain("Служба управления недоступна");
  }finally{await app.close();}
 });
+
+test("speed batch pings each server before downloading and skips unreachable servers", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  const original = b.request.bind(b);
+  let firstID = "";
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "servers/ping" && !firstID) {
+      firstID = value!;
+      return { ...result, ok: false, reason: "failed",
+        catalog: { status: "failed", server: {
+          ...result.catalog!.server!, ping_status: "failed", latency_ms: undefined,
+        } } };
+    }
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v"); await settle();
+    t.mockInput.pressKey("t"); await settle();
+    await t.renderOnce();
+    const measurements = b.calls.filter(c =>
+      c.action === "servers/ping" || c.action === "servers/speed");
+    expect(measurements.map(c => c.action)).toEqual([
+      "servers/ping", "servers/ping", "servers/speed",
+    ]);
+    expect(measurements[2]!.value).toBe(measurements[1]!.value);
+    expect(measurements[2]!.value).not.toBe(firstID);
+    expect(b.calls.some(c => c.action === "servers/check-batch")).toBe(false);
+    expect(t.captureCharFrame()).toContain("2/2");
+    expect(t.captureCharFrame()).toContain("ошибок 1");
+    const failedRow = t.captureCharFrame().split("\n").find(line => line.includes("Amsterdam"))!;
+    expect(failedRow).toContain("ошибка");
+    expect(failedRow).not.toContain("40.0");
+    expect(failedRow).not.toContain("50.0");
+  } finally { await app.close(); }
+});
+
+test("cancelling the speed preflight never starts a download", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  let finish!: (r: Reply) => void;
+  b.hold = { action: "servers/ping", promise: new Promise(r => { finish = r; }) };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v"); await settle();
+    t.mockInput.pressKey("t"); await settle();
+    t.mockInput.pressKey("k");
+    finish({ ...reply(), ok: false, reason: "cancelled" });
+    await settle();
+    expect(b.calls.filter(c => c.action === "servers/ping")).toHaveLength(1);
+    expect(b.calls.some(c => c.action === "servers/speed")).toBe(false);
+  } finally { finish(reply()); await settle(); await app.close(); }
+});

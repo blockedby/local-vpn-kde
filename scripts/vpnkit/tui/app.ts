@@ -816,11 +816,26 @@ export class App {
       if (this.cancelled || this.closing) break;
       this.batch.id = id;
       this.batch.ids = group;
-      const result = await this.perform(
-        kind === "speed" ? "servers/speed" : "servers/check-batch",
-        kind === "speed" ? id : JSON.stringify({ ids: group, url: target }),
-        true,
-      );
+      let result: Reply | undefined;
+      if (kind === "speed") {
+        // A fresh TCP ping gates each download; cached reachability is not enough.
+        this.servers = this.servers.map((server) => server.server_id === id
+          ? { ...server, status: "untested", download_mbps: undefined,
+              download_seconds: undefined, downloaded_bytes: undefined }
+          : server);
+        result = await this.perform("servers/ping", id, true);
+        if (this.cancelled || this.closing) break;
+        if (result?.ok && result.catalog?.server?.ping_status === "ready") {
+          this.batch.pinged.add(id!);
+          result = await this.perform("servers/speed", id, true);
+        } else if (result?.ok) {
+          result = { ...result, ok: false, reason: "failed" };
+        }
+      } else {
+        result = await this.perform(
+          "servers/check-batch", JSON.stringify({ ids: group, url: target }), true,
+        );
+      }
       if (this.cancelled) break;
       if (kind === "speed") {
         this.batch.done++;
@@ -969,12 +984,12 @@ export class App {
         active &&
         (this.batch?.kind === kind ||
           (kind === "availability" && this.batch?.kind === "ping"));
-      const ping = queued ? "ждёт" : checking("ping") && !this.batch?.pinged.has(s.server_id)
+      const ping = queued ? "ждёт" : (checking("ping") || checking("speed")) && !this.batch?.pinged.has(s.server_id)
         ? frames[this.frame % 10]
         : s.ping_status === "failed"
           ? "ошибка"
           : (s.latency_ms?.toString() ?? "—");
-      const speed = checking("speed")
+      const speed = checking("speed") && this.batch?.pinged.has(s.server_id)
         ? frames[this.frame % 10]
         : s.status === "failed"
           ? "ошибка"
