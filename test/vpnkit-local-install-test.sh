@@ -34,6 +34,7 @@ for path in \
   scripts/vpnkit/vpnkit-local-assets.sh \
   scripts/vpnkit/vpnkit-render-local-kde-configs.sh \
   scripts/vpnkit/vpnkit-local-host-smoke.sh \
+  scripts/vpnkit/vpnkit-local-dependencies.sh \
   run.sh \
   scripts/vpnkit/tui/index.ts \
   scripts/vpnkit/tui/app.ts \

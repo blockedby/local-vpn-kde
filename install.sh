@@ -10,10 +10,12 @@ for arg in "$@"; do
   esac
 done
 (( EUID != 0 )) || { echo 'Run ./install.sh as your desktop user, without sudo.' >&2; exit 3; }
-command -v go >/dev/null || { echo 'Go is required to build the application.' >&2; exit 10; }
-command -v bun >/dev/null || { echo 'Bun is required.' >&2; exit 10; }
-command -v docker >/dev/null || { echo 'Docker with Compose is required.' >&2; exit 10; }
 [[ -t 0 && -t 1 ]] || { echo 'Запусти ./install.sh в обычном терминале.' >&2; exit 2; }
+. scripts/vpnkit/vpnkit-local-dependencies.sh
+vpnkit_dependency_path
+vpnkit_install_dependencies
+vpnkit_docker_group_session "$PWD/install.sh" "$@"
+docker info >/dev/null || { echo 'Docker недоступен после настройки.' >&2; exit 10; }
 printf 'Подготавливаем установщик…\n'
 bootstrap_log=$(mktemp "${TMPDIR:-/tmp}/local-vpn-kde-setup.XXXXXX")
 trap 'rm -f -- "$bootstrap_log"' EXIT
