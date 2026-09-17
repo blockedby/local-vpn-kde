@@ -20,3 +20,9 @@ In the app, open **Subscription** (Подписка), paste your subscription UR
 Use `./run.sh` for subsequent launches. To update, run `git pull` followed by `./install.sh`.
 
 Subscriptions, keys, and logs stay in the gitignored `secrets/` directory.
+
+## Container smoke test
+
+Run `test/vpnkit-local-install-container-test.sh` to test the real installer on a clean Debian container without Go or Bun, then check the subscription, ping, speed, website access, and VPN connection. It uses a separate Docker daemon and temporary network rules through the physical uplink; it does not connect the host VPN.
+
+Requires Docker, the `local-vpn-kde:latest` image, and an existing physical underlay routing table (default `51840`). Supply `VPNKIT_LAB_SUBSCRIPTION_URL` or `VPNKIT_LAB_SUBSCRIPTION_FILE`, or use the saved subscription. Run with `--help` for network overrides. Private logs stay in `secrets/install-lab/`. The smoke test tries the selected server first, with up to five candidates. KDE desktop interaction is not covered.
