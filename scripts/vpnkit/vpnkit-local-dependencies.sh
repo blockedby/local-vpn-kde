@@ -118,6 +118,11 @@ vpnkit_install_dependencies() {
       pacman) vpnkit_as_root pacman -S --needed "${packages[@]}" ;;
       dnf) vpnkit_as_root dnf install -y "${packages[@]}" ;;
     esac || return
+    # Package file watches can reload D-Bus policy before postinst creates
+    # its service accounts (notably polkitd). Reload once after configuration.
+    if systemctl is-active --quiet dbus; then
+      vpnkit_as_root systemctl reload dbus || return
+    fi
   fi
   vpnkit_go_ready || { vpnkit_dependency_error 'В репозиториях системы слишком старый Go: нужен Go 1.22+. Используй Ubuntu 24.04+, Debian 13+ или актуальную Fedora/Arch.'; return 10; }
   vpnkit_bun_ready || vpnkit_install_bun || return
