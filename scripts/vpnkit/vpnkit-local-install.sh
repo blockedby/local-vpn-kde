@@ -468,7 +468,7 @@ install_underlay() {
   fi
 }
 if ! install_underlay >&3 2>&1; then
-  die 'underlay installation failed; the helper should have rolled back its own transaction' 20
+  die 'underlay installation failed; check the routing service before retrying' 20
 fi
 if ! "$UNDERLAY" verify >&3 2>&1; then
   die 'underlay verification failed' 20

@@ -2115,7 +2115,7 @@ canonical_helper_file() {
     expected_digest=${expected_digest%% *}
     if [[ "$actual_digest" != "$expected_digest" ]]; then
       case "$actual_digest" in
-        099d5652258a2c7468f659221cb2cd4ac8abf3189eb2c46eff55852e2ff67ad8|8b2b5078df6910d5663f3259911fd052f4ba2701329ff67ff44a3e9897f69cda) ;;
+        8b4f2b079be25f610698a7c36acb00b5d1f71424adc2937a7af8fadb94f725e6|099d5652258a2c7468f659221cb2cd4ac8abf3189eb2c46eff55852e2ff67ad8|8b2b5078df6910d5663f3259911fd052f4ba2701329ff67ff44a3e9897f69cda) ;;
         *) return 1 ;;
       esac
     fi
@@ -2539,7 +2539,10 @@ install_action() {
   fi
   if (( install_failed == 0 )); then
     systemctl reset-failed "$SERVICE_NAME" >/dev/null 2>&1 || true
-    systemctl enable --now "$SERVICE_NAME" >/dev/null 2>&1 || install_failed=1
+    # The unit acquires this same mutation lock. Queue its start while the
+    # transaction is protected, then wait only after committing and unlocking.
+    # Routes have already been applied synchronously by runtime_refresh above.
+    systemctl enable --now "$SERVICE_NAME" --no-block >/dev/null 2>&1 || install_failed=1
   fi
   if (( install_failed == 0 )); then
     install_test_failpoint after-service-enable || install_failed=1
@@ -2563,6 +2566,10 @@ install_action() {
   TRANSACTION_ACTIVE=0
   trap - EXIT INT TERM HUP
   release_mutation_lock
+  # A post-commit service failure must not restore an old snapshot over a
+  # newer concurrent transaction. Keep the installed fail-closed routes and
+  # report failure so installation can be retried.
+  systemctl start "$SERVICE_NAME" >/dev/null 2>&1 || fail "routing service failed after installation; installed rules retained" 20
   printf '%s\n' "install complete; routing hooks are installed (values redacted)"
 }
 
