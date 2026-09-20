@@ -275,7 +275,7 @@ func (a Autostart) Run(ctx context.Context) (runErr error) {
 	run := a.lifecycle
 	if run == nil {
 		run = func(ctx context.Context, args []string) error {
-			b := &Bridge{options: BridgeOptions{Base: a.Base, Executable: filepath.Join(a.Repo, "scripts/vpnkit/vpnkit-local.sh"), Grace: 5 * time.Second}}
+			b := &Bridge{options: BridgeOptions{Base: a.Base, Executable: filepath.Join(a.Repo, "scripts/vpnkit/vpnkit-local.sh"), Grace: 31 * time.Second}}
 			result, _ := b.lifecycle(ctx, "autostart", args, func(string) {})
 			if result.Reason != "ok" {
 				return errors.New("autostart lifecycle failed; inspect private diagnostics")
