@@ -9,6 +9,8 @@ import {
 import type { Action, Backend, Reply, Server, Status } from "./bridge";
 import { connection, failure, palette as p } from "./model";
 
+import { speedometer } from "./speedometer";
+
 type Screen =
   | "home"
   | "servers"
@@ -126,6 +128,12 @@ export class App {
   private notification: TextRenderable;
   private footer: TextRenderable;
 
+  private gauge: TextRenderable;
+  private homeTesting = false;
+  private homeSpeed?: number;
+  private homeSpeedAt = 0;
+  private homeSpeedLabel = "[t] Проверить скорость выбранного сервера";
+
   constructor(
     private renderer: CliRenderer,
     private backend: Backend,
@@ -165,6 +173,7 @@ export class App {
     });
     this.root.add(this.content);
     this.summary = text(this.content, "", p.muted, 2);
+    this.summary.minHeight = 0;
     this.controls = new BoxRenderable(renderer, {
       flexDirection: "column",
       flexShrink: 0,
@@ -187,6 +196,8 @@ export class App {
       this.controlRows.push(row);
       this.controlLabels.push(text(row));
     }
+    this.gauge = text(this.content, "", p.accent, 14);
+    this.gauge.marginTop = 1;
     this.tableHeader = text(this.content, "", p.accent);
     for (let i = 0; i < 100; i++) {
       const row = text(this.content);
@@ -354,6 +365,7 @@ export class App {
                   },
             ]
           : []),
+        { key: "t", label: "Тест скорости", run: () => void this.testHomeSpeed() },
         { key: "v", label: "Серверы", run: () => this.open("servers") },
         { key: "c", label: "Подписка", run: () => this.open("subscription") },
         { key: "d", label: "Диагностика", run: () => this.open("diagnostics") },
@@ -648,7 +660,7 @@ export class App {
     insideBatch = false,
   ): Promise<Reply | undefined> {
     if (this.closing || this.disposed) return;
-    if ((this.batch && !insideBatch) || this.busy) {
+    if (((this.batch || this.homeTesting) && !insideBatch) || this.busy) {
       if (
         this.busy === "status" &&
         action !== "status" &&
@@ -681,7 +693,16 @@ export class App {
         this.status = reply.status;
         this.checked = Date.now();
       }
+      const previousMeasurements = this.homeTesting && action === "servers/list"
+        ? new Map(this.servers.map(row => [row.server_id, row])) : undefined;
       this.updateCatalog(reply, action);
+      if (previousMeasurements) this.servers = this.servers.map(row => {
+        const previous = previousMeasurements.get(row.server_id);
+        return previous ? { ...row, status: previous.status, ping_status: previous.ping_status,
+          latency_ms: previous.latency_ms, availability: previous.availability,
+          download_mbps: previous.download_mbps, download_seconds: previous.download_seconds,
+          downloaded_bytes: previous.downloaded_bytes } : row;
+      });
       if (action === "subscription/read" && reply.ok) {
         this.loadedSubscription = true;
         if (revision === this.editorRevision) {
@@ -710,7 +731,7 @@ export class App {
       ) {
         const done: Partial<Record<Action, string>> = {
           "backend/start": "Docker готов. Можно проверять серверы.",
-          start: "VPN подключён.",
+          start: "",
           disconnect: "VPN отключён. Docker работает.",
           stop: "Docker и VPN остановлены.",
           "servers/list": "Список загружен.",
@@ -764,8 +785,46 @@ export class App {
     await this.loadPendingSubscription();
     return reply;
   }
+  private async testHomeSpeed() {
+    if (this.busy || this.batch || this.homeTesting) return;
+    if (!this.ready()) { this.notify("Сначала запустите Docker.", true); return; }
+    this.homeTesting = true;
+    this.cancelled = false;
+    this.homeSpeed = undefined;
+    this.notice = "";
+    this.noticeAttempt = "";
+    this.error = false;
+    this.homeSpeedLabel = "Определяем выбранный сервер…";
+    try {
+      const list = await this.perform("servers/list", undefined, true);
+      if (this.cancelled || this.closing) return;
+      if (!list?.ok) throw new Error("Не удалось загрузить серверы.");
+      const server = list.catalog?.servers?.find(row => row.selected);
+      if (!server) throw new Error("Сначала выберите сервер в списке.");
+      this.homeSpeedLabel = `Ping · ${server.display_name}`;
+      const ping = await this.perform("servers/ping", server.server_id, true);
+      if (this.cancelled || this.closing) return;
+      if (!ping?.ok || ping.catalog?.server?.ping_status !== "ready") throw new Error("Сервер недоступен: ping не прошёл.");
+      this.homeSpeedLabel = `Измеряем · ${server.display_name} · 3 с`;
+      const result = await this.perform("servers/speed", server.server_id, true);
+      if (this.cancelled || this.closing) return;
+      const mbps = result?.catalog?.server?.download_mbps;
+      if (!result?.ok || mbps === undefined || !Number.isFinite(mbps) || mbps < 0) throw new Error("Не удалось измерить скорость.");
+      this.homeSpeed = mbps;
+      this.homeSpeedAt = Date.now();
+      this.homeSpeedLabel = `${server.display_name} · средняя скорость`;
+    } catch (error) {
+      this.homeSpeedLabel = error instanceof Error ? error.message : "Ошибка измерения.";
+      this.notify(this.homeSpeedLabel, true);
+    } finally {
+      if (this.cancelled) this.homeSpeedLabel = "Тест отменён";
+      this.homeTesting = false;
+      this.paint();
+    }
+  }
+
   private async runBatch(kind: Batch) {
-    if (this.busy || this.batch) {
+    if (this.busy || this.batch || this.homeTesting) {
       this.notify("Дождитесь завершения или отмените текущую операцию [k].");
       return;
     }
@@ -914,7 +973,7 @@ export class App {
       running: "проверяется",
     };
     this.facts.content = cell(
-      `Docker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"} · Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"} · Подписка: ${this.status?.subscription === "configured" ? "есть" : "нет"}`,
+      `Docker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"} · Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}`,
       width,
     );
     const editor = this.screen === "subscription" || this.screen === "target";
@@ -950,7 +1009,16 @@ export class App {
           ? "Подписку можно настроить до запуска Docker."
           : this.status.subscription !== "configured"
             ? "Добавьте подписку, затем откройте серверы."
-            : "Проверки и выбор серверов доступны без подключения VPN.";
+            : "";
+    this.summary.visible = this.screen !== "home" || !!this.summary.content;
+    if (!this.summary.visible) this.summary.height = 0;
+    const compactGauge = this.renderer.height < 31 || width < 47;
+    this.gauge.visible = this.screen === "home";
+    this.gauge.height = this.gauge.visible ? (compactGauge ? 4 : 14) : 0;
+    this.gauge.marginTop = this.gauge.visible ? 1 : 0;
+    this.gauge.fg = this.homeSpeed === undefined ? p.accent : p.green;
+    const ease = Math.min(1, (Date.now() - this.homeSpeedAt) / 450);
+    this.gauge.content = speedometer(this.homeSpeed, (this.homeSpeed ?? 0) * (1 - (1 - ease) ** 3), compactGauge) + "\n" + cell(this.homeSpeedLabel, width).trimEnd();
     if (this.screen === "subscription")
       this.summary.content =
         this.busy === "subscription/read"

@@ -930,3 +930,41 @@ test("cancelling the speed preflight never starts a download", async () => {
     expect(b.calls.some(c => c.action === "servers/speed")).toBe(false);
   } finally { finish(reply()); await settle(); await app.close(); }
 });
+
+test("home speedometer measures the selected server after ping and removes redundant labels", async () => {
+  const t = await createTestRenderer({ width: 90, height: 35 });
+  const b = new FakeBackend();
+  b.rows = rows.map((s, i) => ({ ...s, selected: i === 1 }));
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("t"); await settle(); await t.renderOnce();
+    expect(b.calls.filter(c => c.action.startsWith("servers/")).map(c => c.action)).toEqual(["servers/list", "servers/ping", "servers/speed"]);
+    expect(b.calls.find(c => c.action === "servers/speed")?.value).toBe(rows[1]!.server_id);
+    const frame = t.captureCharFrame();
+    expect(frame).toContain("50.0 Мбит/с");
+    expect(frame).not.toContain("Подписка: есть");
+    expect(frame).not.toContain("Проверки и выбор серверов");
+
+  } finally { await app.close(); }
+});
+
+test("home speed test skips download after failed ping and allows navigation", async () => {
+  const t = await createTestRenderer({ width: 60, height: 24 });
+  const b = new FakeBackend();
+  b.rows = rows.map((s, i) => ({ ...s, selected: i === 0 }));
+  let finish!: (r: Reply) => void;
+  b.hold = { action: "servers/ping", promise: new Promise(r => { finish = r; }) };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("t"); await settle();
+    t.mockInput.pressKey("d"); await t.renderOnce();
+    expect(t.captureCharFrame()).not.toContain("СКОРОСТЬ СЕРВЕРА");
+    finish({ ...reply(), ok: false, reason: "failed" }); await settle();
+    expect(b.calls.some(c => c.action === "servers/speed")).toBe(false);
+    t.mockInput.pressEscape(); await Bun.sleep(60); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("— Мбит/с");
+    expect(t.captureCharFrame()).toContain("q выход");
+  } finally { finish(reply()); await settle(); await app.close(); }
+});
