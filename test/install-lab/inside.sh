@@ -68,3 +68,79 @@ done
 (( passed )) || { echo 'FAIL no candidate completed smoke checks'; exit 1; }
 sudo -u tester -H scripts/vpnkit/vpnkit-local.sh start
 echo 'PASS VPN connection and DNS smoke inside lab'
+if [[ ! -f internal/localvpn/autostart_linux.go ]]; then
+  echo 'SKIP autostart: selected release predates this feature'
+  exit 0
+fi
+
+# Exercise the real user manager only inside the disposable lab. Restarting it
+# simulates a new login and proves default.target activation, without --now.
+lab_uid=$(id -u tester)
+user_command() {
+  sudo -u tester -H env XDG_RUNTIME_DIR="/run/user/$lab_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$lab_uid/bus" "$@"
+}
+autostart() { user_command .build/local-vpn-kde.bin autostart --repo "$PWD" --action "$1"; }
+assert_runtime() {
+  sudo -u tester -H scripts/vpnkit/vpnkit-local.sh status --json > /tmp/lab-runtime.json
+  python3 - "$1" "$2" <<'PY'
+import json,sys
+s=json.load(open('/tmp/lab-runtime.json'))
+assert s['container']==sys.argv[1], 'gateway state mismatch'
+assert s['networkmanager']['active']==sys.argv[2], 'VPN state mismatch'
+PY
+}
+assert_selection() {
+  sudo -u tester -H scripts/vpnkit/vpnkit-local.sh servers list > /tmp/lab-autostart-catalog.json
+  python3 - <<'PY'
+import json
+s=json.load(open('/tmp/lab-autostart-catalog.json'))
+selected=[r['server_id'] for r in s['servers'] if r.get('selected')]
+assert selected==json.load(open('/tmp/lab-autostart-selected.json')), 'selected server changed'
+PY
+}
+await_login_service() {
+  local state
+  for ((i=0;i<180;i++)); do
+    state=$(user_command systemctl --user show local-vpn-kde-autostart.service --property=ActiveState --value)
+    case "$state" in
+      active) return 0 ;;
+      failed) echo 'FAIL login autostart service'; return 1 ;;
+    esac
+    sleep 2
+  done
+  echo 'FAIL login autostart service timeout'; return 1
+}
+sudo -u tester -H scripts/vpnkit/vpnkit-local.sh servers list > /tmp/lab-autostart-catalog.json
+python3 - <<'PY'
+import json
+s=json.load(open('/tmp/lab-autostart-catalog.json'))
+selected=[r['server_id'] for r in s['servers'] if r.get('selected')]
+assert len(selected)==1
+json.dump(selected,open('/tmp/lab-autostart-selected.json','w'))
+PY
+systemctl start "user@$lab_uid.service"
+autostart off
+assert_runtime healthy yes
+sudo -u tester -H scripts/vpnkit/vpnkit-local.sh stop
+assert_runtime absent no
+autostart gateway
+assert_runtime absent no
+systemctl restart "user@$lab_uid.service"
+await_login_service
+assert_runtime healthy no
+assert_selection
+echo 'PASS login gateway autostart; no immediate start; selection preserved'
+autostart connect
+assert_runtime healthy no
+systemctl restart "user@$lab_uid.service"
+await_login_service
+assert_runtime healthy yes
+assert_selection
+# Lifecycle start performs its ordinary DNS smoke before reporting success.
+echo 'PASS login VPN autoconnect and DNS smoke; selection preserved'
+autostart off
+assert_runtime healthy yes
+if user_command systemctl --user is-enabled --quiet local-vpn-kde-autostart.service; then
+  echo 'FAIL autostart service remains enabled'; exit 1
+fi
+echo 'PASS disabling autostart preserves running VPN'
