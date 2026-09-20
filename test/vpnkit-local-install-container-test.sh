@@ -10,6 +10,7 @@ Runs a disposable Debian/systemd/nested-Docker installation and subscription smo
 Requires Docker, local-vpn-kde:latest, and an existing physical underlay table.
 VPNKIT_LAB_UNDERLAY_TABLE (default 51840), VPNKIT_LAB_SUBNET (172.30.190.0/24),
 VPNKIT_LAB_ADDRESS (172.30.190.2), VPNKIT_LAB_RULE_PRIORITY (990; also uses 991).
+Optional VPNKIT_LAB_RELEASE_ARCHIVE tests a locally built release archive.
 Supply VPNKIT_LAB_SUBSCRIPTION_URL or VPNKIT_LAB_SUBSCRIPTION_FILE;
 otherwise uses the saved local subscription. Never prints credentials.
 Temporarily adds source rules for the test subnet; removes them on exit.
@@ -80,10 +81,18 @@ assert os.path.exists("/sys/class/net/"+r["dev"]+"/device")
 '
 echo 'PASS physical underlay route'
 docker run -d --name "$prefix" --hostname install-lab --privileged --cgroupns private --network "$network" --ip "$address" --dns 8.8.8.8 --tmpfs /run --tmpfs /run/lock "$image" >> "$log"
-git ls-files -co --exclude-standard -z | tar --null -T - -cf "$private/source.tar"
+if [[ -n ${VPNKIT_LAB_RELEASE_ARCHIVE:-} ]]; then
+  mkdir "$private/release-source"
+  tar -xzf "$VPNKIT_LAB_RELEASE_ARCHIVE" --strip-components=1 -C "$private/release-source"
+  mkdir -p "$private/release-source/test"
+  cp -a test/install-lab "$private/release-source/test/"
+  tar -C "$private/release-source" -cf "$private/source.tar" .
+else
+  git ls-files -co --exclude-standard -z | tar --null -T - -cf "$private/source.tar"
+fi
 docker exec "$prefix" mkdir -p /home/tester/local-vpn-kde
-docker cp "$private/source.tar" "$prefix:/tmp/source.tar"
-docker exec "$prefix" bash -c 'tar -xf /tmp/source.tar -C /home/tester/local-vpn-kde; rm /tmp/source.tar; chown -R tester:tester /home/tester/local-vpn-kde'
+docker cp "$private/source.tar" "$prefix:/root/lab-source.tar"
+docker exec "$prefix" bash -ec 'tar -xf /root/lab-source.tar -C /home/tester/local-vpn-kde; rm /root/lab-source.tar; chown -R tester:tester /home/tester/local-vpn-kde'
 for ((i=0;i<30;i++)); do
   if docker exec "$prefix" systemctl show --property=SystemState --value 2>/dev/null | grep -Eq 'running|degraded'; then break; fi
   sleep 1
