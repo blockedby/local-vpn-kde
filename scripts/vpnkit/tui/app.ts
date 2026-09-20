@@ -171,6 +171,7 @@ export class App {
       flexDirection: "column",
       flexGrow: 1,
       minHeight: 0,
+      overflow: "hidden",
       marginTop: 1,
     });
     this.root.add(this.content);
@@ -367,7 +368,7 @@ export class App {
                   },
             ]
           : []),
-        { key: "t", label: this.inlineSpeed() ? `Тест скорости · ${this.homeTesting ? "… · " : ""}${this.homePing === undefined ? "—" : Math.round(this.homePing)}ms, ${this.homeSpeed === undefined ? "—" : (this.homeSpeed / 8.388608).toFixed(1)} MiB/s` : "Тест скорости", run: () => void this.testHomeSpeed() },
+        { key: "t", label: this.inlineSpeed() ? `Тест скорости · ${this.homeTesting ? `${frames[this.frame % 10]} ${this.busy === "servers/ping" ? "ping" : this.busy === "servers/speed" ? "замер" : "подготовка"} · ` : ""}${this.homePing === undefined ? "—" : Math.round(this.homePing)}ms, ${this.homeSpeed === undefined ? "—" : (this.homeSpeed / 8.388608).toFixed(1)} MiB/s` : "Тест скорости", run: () => void this.testHomeSpeed() },
         { key: "v", label: "Серверы", run: () => this.open("servers") },
         { key: "c", label: "Подписка", run: () => this.open("subscription") },
         { key: "d", label: "Диагностика", run: () => this.open("diagnostics") },
@@ -1000,7 +1001,7 @@ export class App {
           ? p.edge
           : p.base;
       this.controlLabels[i].content = items[i]
-        ? `[${items[i].key}] ${items[i].label}`
+        ? cell(`[${items[i].key}] ${items[i].label}`, width).trimEnd()
         : "";
     });
     this.summary.height = this.screen === "diagnostics" ? 6 : 2;
@@ -1108,6 +1109,12 @@ export class App {
           ? `\nПопытка: ${this.noticeAttempt}`
           : "");
     this.notification.fg = this.error ? p.red : p.muted;
+    const inlineProgress = this.screen === "home" && this.inlineSpeed() && this.homeTesting;
+    this.progress.visible = this.progress.chunks.some(chunk => chunk.text.length > 0) && !inlineProgress;
+    this.progress.height = this.progress.visible ? 1 : 0;
+    const hasNotice = this.closing || !!this.notice;
+    this.notification.visible = hasNotice;
+    this.notification.height = hasNotice ? 2 : 0;
     this.footer.content = editor
       ? "Esc назад · Ctrl+C выход"
       : this.screen === "servers"

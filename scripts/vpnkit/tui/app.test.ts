@@ -964,6 +964,12 @@ test("home speed test skips download after failed ping and allows navigation", a
   try {
     await app.perform("status");
     t.mockInput.pressKey("t"); await settle();
+    t.resize(60, 14); await t.renderOnce();
+    const narrow = t.captureCharFrame();
+    expect(narrow).toContain("[m] Режим:");
+    expect(narrow).toContain("[z] Остановить Docker");
+    expect(narrow).not.toContain("выполняется");
+    expect(narrow).toContain("ping");
     t.mockInput.pressKey("d"); await t.renderOnce();
     expect(t.captureCharFrame()).not.toContain("СКОРОСТЬ СЕРВЕРА");
     finish({ ...reply(), ok: false, reason: "failed" }); await settle();
