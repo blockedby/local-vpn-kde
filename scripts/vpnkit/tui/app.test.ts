@@ -1098,3 +1098,51 @@ test("quit drains both selection and measurement before closing backend", async 
   finishSelect(reply()); await switching;
   expect(closed).toBe(true);
 });
+
+test("autostart is opt-in, keeps gateway/connect consistent and never starts VPN immediately", async () => {
+  const t = await createTestRenderer({ width: 90, height: 28 });
+  const b = new FakeBackend();
+  let options = { gateway: false, connect: false };
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "autostart/set") options = JSON.parse(value!);
+    if (action.startsWith("autostart/")) result.autostart = { ...options };
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("a"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("При входе в KDE");
+    expect(t.captureCharFrame()).toContain("Подключать VPN: нет");
+    expect(b.calls.some(call => call.action === "autostart/set")).toBe(false);
+    t.mockInput.pressKey("a"); await settle();
+    expect(options).toEqual({ gateway: true, connect: true });
+    t.mockInput.pressKey("g"); await settle();
+    expect(options).toEqual({ gateway: false, connect: false });
+    t.resize(60, 18); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Запускать шлюз: нет");
+    expect(b.calls.some(call => ["start", "backend/start", "stop", "disconnect"].includes(call.action))).toBe(false);
+  } finally { await app.close(); }
+});
+
+test("failed autostart save requires rereading authoritative settings", async () => {
+  const t = await createTestRenderer({ width: 90, height: 28 });
+  const b = new FakeBackend();
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "autostart/read") result.autostart = { gateway: false, connect: false };
+    if (action === "autostart/set") return { ...result, ok: false, reason: "autostart-unavailable" };
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("a"); await settle();
+    t.mockInput.pressKey("a"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Загрузить настройки");
+    expect(t.captureCharFrame()).not.toContain("Подключать VPN: да");
+  } finally { await app.close(); }
+});

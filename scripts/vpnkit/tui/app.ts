@@ -6,13 +6,14 @@ import {
   type CliRenderer,
   type KeyEvent,
 } from "@opentui/core";
-import type { Action, Backend, Reply, Server, Status } from "./bridge";
+import type { Action, Backend, Reply, Server, Status, AutostartOptions } from "./bridge";
 import { connection, failure, palette as p } from "./model";
 
 import { StyledText, t } from "@opentui/core";
 import { speedometer } from "./speedometer";
 
 type Screen =
+  | "autostart"
   | "home"
   | "servers"
   | "subscription"
@@ -22,6 +23,8 @@ type Screen =
 type Batch = "ping" | "speed" | "availability";
 type Item = { key: string; label: string; run: () => void };
 const names: Partial<Record<Action, string>> = {
+  "autostart/read": "Читаем настройки автозапуска",
+  "autostart/set": "Сохраняем автозапуск",
   "backend/start": "Запускаем Docker",
   start: "Подключаем VPN",
   disconnect: "Отключаем VPN",
@@ -71,6 +74,7 @@ export function cell(text: string, width: number) {
 
 export class App {
   private status?: Status;
+  private autostart?: AutostartOptions;
   private screen: Screen = "home";
   private tasks = new Map<string, { action: Action; measurement: boolean; started: number; phase: string }>();
   private nextTask = 0;
@@ -329,6 +333,7 @@ export class App {
         void this.loadPendingSubscription();
       }
     }
+    if (screen === "autostart") void this.perform("autostart/read");
     if (screen === "target") this.input.value = this.target;
     this.paint();
     if (
@@ -390,6 +395,7 @@ export class App {
         { key: "v", label: "Серверы", run: () => this.open("servers") },
         { key: "c", label: "Подписка", run: () => this.open("subscription") },
         { key: "d", label: "Диагностика", run: () => this.open("diagnostics") },
+        { key: "a", label: "Автозапуск", run: () => this.open("autostart") },
         {
           key: "m",
           label: `Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}`,
@@ -410,6 +416,13 @@ export class App {
             ]
           : []),
       ];
+    if (this.screen === "autostart") {
+      if (!this.autostart) return [{ key: "u", label: "Загрузить настройки", run: run("autostart/read") }];
+      return [
+        { key: "g", label: `Запускать шлюз: ${this.autostart.gateway ? "да" : "нет"}`, run: () => void this.perform("autostart/set", JSON.stringify({ gateway: !this.autostart!.gateway, connect: false })) },
+        { key: "a", label: `Подключать VPN: ${this.autostart.connect ? "да" : "нет"}`, run: () => void this.perform("autostart/set", JSON.stringify({ gateway: this.autostart!.gateway || !this.autostart!.connect, connect: !this.autostart!.connect })) },
+      ];
+    }
     if (this.screen === "diagnostics")
       return [
         { key: "u", label: "Обновить диагностику", run: run("diagnostics") },
@@ -705,10 +718,12 @@ export class App {
     let reply: Reply | undefined;
     try {
       reply = await this.backend.request(action, value, requestID);
-      if (!action.startsWith("servers/") && action !== "subscription/read") {
+      if (!action.startsWith("servers/") && !action.startsWith("autostart/") && action !== "subscription/read") {
         this.status = reply.status;
         this.checked = Date.now();
       }
+      if (reply.ok && reply.autostart) this.autostart = reply.autostart;
+      if (!reply.ok && action === "autostart/set") this.autostart = undefined;
       const previousMeasurements = this.homeTesting && action === "servers/list"
         ? new Map(this.servers.map(row => [row.server_id, row])) : undefined;
       const currentSelection = this.servers.find(row => row.selected)?.server_id;
@@ -730,7 +745,7 @@ export class App {
         }
       }
       if (!reply.ok && !insideBatch) {
-        this.notice = failure(reply.reason, reply.code);
+        this.notice = reply.reason === "autostart-unavailable" ? "Не удалось настроить автозапуск. Проверьте пользовательскую службу systemd." : failure(reply.reason, reply.code);
         this.noticeAttempt = [
           "start",
           "backend/start",
@@ -749,6 +764,8 @@ export class App {
         !insideBatch
       ) {
         const done: Partial<Record<Action, string>> = {
+          "autostart/read": "",
+          "autostart/set": "Сохранено. Настройка применяется при следующем входе в KDE.",
           "backend/start": "Docker готов. Можно проверять серверы.",
           start: "",
           disconnect: "VPN отключён. Docker работает.",
@@ -780,7 +797,7 @@ export class App {
         }
       }
     } catch {
-      if (!action.startsWith("servers/")) this.status = undefined;
+      if (!action.startsWith("servers/") && !action.startsWith("autostart/")) this.status = undefined;
       this.notify(failure("backend-unavailable", null), true);
     } finally {
       this.tasks.delete(requestID);
@@ -1046,6 +1063,11 @@ export class App {
     this.gauge.content = new StyledText([...dial.chunks,
       ...t`\n${cell(this.homeSpeedLabel, width).trimEnd()}${this.homeSpeedAt ? `\nПоследний замер: ${new Date(this.homeSpeedAt).toLocaleTimeString("ru-RU", { hour12: false })}` : ""}`.chunks,
     ]);
+    if (this.screen === "autostart") {
+      const results: Record<string, string> = { ready: "выполнен", failed: "ошибка, откройте диагностику", "prerequisites-unavailable": "Docker или сеть не готовы", cancelled: "отменён", disabled: "отключён", running: "выполняется" };
+      this.summary.height = 3;
+      this.summary.content = `При входе в KDE\nОтключение автозапуска не отключает работающий VPN.\nПоследний запуск: ${results[this.autostart?.last_result ?? ""] ?? "не выполнялся"}`;
+    }
     if (this.screen === "subscription")
       this.summary.content =
         this.busy === "subscription/read"

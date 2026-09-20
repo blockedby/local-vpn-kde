@@ -17,6 +17,8 @@ Run as your regular user, **without sudo**. The installer requests administrator
 
 In the app, open **Subscription** (Подписка), paste your subscription URL, start the gateway, and select a server. Connect the VPN manually.
 
+Optional: open **Autostart** (Автозапуск) to start the gateway at KDE login and optionally connect the VPN. Settings apply on the next login; disabling autostart leaves the current connection running. The terminal UI does not open automatically. Docker may also restart an already-running gateway through its existing restart policy.
+
 Use `./run.sh` for subsequent launches. To update, run `git pull` followed by `./install.sh`.
 
 Subscriptions, keys, and logs stay in the gitignored `secrets/` directory.

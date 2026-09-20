@@ -2,6 +2,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 export type Action =
+  | "autostart/read"
+  | "autostart/set"
   | "status"
   | "subscription"
   | "subscription/read"
@@ -41,7 +43,9 @@ export interface Server {
   download_seconds?: number;
   downloaded_bytes?: number;
 }
+export interface AutostartOptions { gateway: boolean; connect: boolean; last_result?: string }
 export interface Reply {
+  autostart?: AutostartOptions;
   ok: boolean;
   reason: string;
   code: number | null;
@@ -180,6 +184,7 @@ export class DemoBackend implements Backend {
     networkmanager_active: "no",
     diagnostics: "not-run",
   };
+  private autostart = { gateway: false, connect: false };
   private subscription = "https://example.invalid/subscription";
   servers: Server[] = [
     "Helsinki",
@@ -242,7 +247,9 @@ export class DemoBackend implements Backend {
         code: 0,
         status: { ...this.status },
       };
-      if (action === "subscription/read") reply.value = this.subscription;
+      if (action === "autostart/set") this.autostart = JSON.parse(value!);
+    if (action === "autostart/read" || action === "autostart/set") reply.autostart = { ...this.autostart };
+    if (action === "subscription/read") reply.value = this.subscription;
       if (action === "servers/list" || action === "servers/refresh")
         reply.catalog = { status: "ok", servers: structuredClone(this.servers) };
       if (action === "servers/check-batch") {
