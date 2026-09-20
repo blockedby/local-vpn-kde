@@ -452,3 +452,29 @@ func TestBridgeConcurrentStatusRepliesRemainWholeAndCorrelated(t *testing.T) {
 		t.Fatal("extra replies")
 	}
 }
+
+func TestBridgeAutostartRejectsInvalidSettingsWithoutSystemMutation(t *testing.T) {
+	b, err := NewBridge(BridgeOptions{Mock: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := strings.NewReader("{\"action\":\"autostart/read\"}\n{\"action\":\"autostart/set\",\"value\":\"{\\\"connect\\\":true,\\\"gateway\\\":false}\"}\n")
+	var output bytes.Buffer
+	if err := b.Serve(context.Background(), input, &output); err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(&output)
+	var read, invalid map[string]any
+	if err := decoder.Decode(&read); err != nil {
+		t.Fatal(err)
+	}
+	if err := decoder.Decode(&invalid); err != nil {
+		t.Fatal(err)
+	}
+	if read["ok"] != true || read["autostart"].(map[string]any)["gateway"] != false {
+		t.Fatal(read)
+	}
+	if invalid["ok"] != false || invalid["reason"] != "invalid-request" {
+		t.Fatal(invalid)
+	}
+}

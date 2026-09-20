@@ -21,10 +21,10 @@ import (
 )
 
 type BridgeOptions struct {
-	Base, Executable, Mode string
-	Mock                   bool
-	Timeout, Grace         time.Duration
-	keepTerminal           bool
+	Base, Executable, Mode, Repo string
+	Mock                         bool
+	Timeout, Grace               time.Duration
+	keepTerminal                 bool
 }
 type Bridge struct {
 	options     BridgeOptions
@@ -333,6 +333,26 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 	switch request.Action {
 	case "status":
 		b.refresh(ctx)
+	case "autostart/read", "autostart/set":
+		a := Autostart{Repo: b.options.Repo, Base: b.options.Base}
+		var options AutostartOptions
+		var err error
+		if request.Action == "autostart/set" {
+			if json.Unmarshal([]byte(value), &options) != nil || (options.Connect && !options.Gateway) {
+				invalid()
+				break
+			}
+			if !b.options.Mock {
+				err = a.Configure(ctx, options)
+			}
+		} else if !b.options.Mock {
+			options, err = a.Status(ctx)
+		}
+		if err != nil {
+			reply["ok"], reply["reason"] = false, "autostart-unavailable"
+		} else {
+			reply["autostart"] = options
+		}
 	case "subscription/read":
 		text, err := ReadSubscription(b.options.Base)
 		if err != nil {

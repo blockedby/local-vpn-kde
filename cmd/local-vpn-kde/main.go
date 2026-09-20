@@ -112,6 +112,26 @@ func run(args []string) error {
 		return err
 	}
 	switch args[0] {
+	case "autostart":
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer cancel()
+		a := localvpn.Autostart{Repo: root, Base: selected}
+		var opts localvpn.AutostartOptions
+		switch *action {
+		case "status":
+			opts, err = a.Status(ctx)
+		case "gateway", "connect", "off":
+			opts = localvpn.AutostartOptions{Gateway: *action != "off", Connect: *action == "connect"}
+			err = a.Configure(ctx, opts)
+		case "run":
+			return a.Run(ctx)
+		default:
+			return fmt.Errorf("invalid autostart action")
+		}
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(opts)
 	case "setup":
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 		defer cancel()
@@ -152,7 +172,7 @@ func run(args []string) error {
 		if seconds, e := strconv.ParseFloat(os.Getenv("VPNKIT_LOCAL_COMPENSATION_TIMEOUT_SECONDS"), 64); e == nil && seconds >= 1 && seconds <= 3600 {
 			grace = time.Duration((seconds + 1) * float64(time.Second))
 		}
-		bridge, e := localvpn.NewBridge(localvpn.BridgeOptions{Base: selected, Executable: executable, Mode: *mode, Mock: *mock, Grace: grace})
+		bridge, e := localvpn.NewBridge(localvpn.BridgeOptions{Repo: root, Base: selected, Executable: executable, Mode: *mode, Mock: *mock, Grace: grace})
 		if e != nil {
 			return e
 		}
