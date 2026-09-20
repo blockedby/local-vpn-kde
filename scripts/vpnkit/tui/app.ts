@@ -9,6 +9,7 @@ import {
 import type { Action, Backend, Reply, Server, Status } from "./bridge";
 import { connection, failure, palette as p } from "./model";
 
+import { StyledText, t } from "@opentui/core";
 import { speedometer } from "./speedometer";
 
 type Screen =
@@ -1012,13 +1013,16 @@ export class App {
             : "";
     this.summary.visible = this.screen !== "home" || !!this.summary.content;
     if (!this.summary.visible) this.summary.height = 0;
-    const compactGauge = this.renderer.height < 31 || width < 47;
+    const compactGauge = this.renderer.height < 25 || width < 29;
     this.gauge.visible = this.screen === "home";
-    this.gauge.height = this.gauge.visible ? (compactGauge ? 4 : 14) : 0;
+    this.gauge.height = this.gauge.visible ? (compactGauge ? 4 : 11) + (this.homeSpeedAt ? 1 : 0) : 0;
     this.gauge.marginTop = this.gauge.visible ? 1 : 0;
     this.gauge.fg = this.homeSpeed === undefined ? p.accent : p.green;
     const ease = Math.min(1, (Date.now() - this.homeSpeedAt) / 450);
-    this.gauge.content = speedometer(this.homeSpeed, (this.homeSpeed ?? 0) * (1 - (1 - ease) ** 3), compactGauge) + "\n" + cell(this.homeSpeedLabel, width).trimEnd();
+    const dial = speedometer(this.homeSpeed, (this.homeSpeed ?? 0) * (1 - (1 - ease) ** 3), compactGauge);
+    this.gauge.content = new StyledText([...dial.chunks,
+      ...t`\n${cell(this.homeSpeedLabel, width).trimEnd()}${this.homeSpeedAt ? `\nПоследний замер: ${new Date(this.homeSpeedAt).toLocaleTimeString("ru-RU", { hour12: false })}` : ""}`.chunks,
+    ]);
     if (this.screen === "subscription")
       this.summary.content =
         this.busy === "subscription/read"

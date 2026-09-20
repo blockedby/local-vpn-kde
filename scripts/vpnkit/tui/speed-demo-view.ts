@@ -38,6 +38,8 @@ export class SpeedDemoView {
   private status: TextRenderable;
   private needle = 0;
   private last = 0;
+  private completedAt?: string;
+  private timestamp: TextRenderable;
   constructor(private renderer: CliRenderer) {
     const root = new BoxRenderable(renderer,{width:"100%",height:"100%",justifyContent:"center",alignItems:"center",backgroundColor:"#080e1a"});
     renderer.root.add(root);
@@ -57,6 +59,7 @@ export class SpeedDemoView {
     this.chart = text("",cyan);
     this.progress = text("",green);
     this.status = text("", "#edf6ff");
+    this.timestamp = text("Последний замер: —",muted);
     text("Enter — ещё раз · Esc — выход",muted);
     this.render(0);
   }
@@ -69,7 +72,9 @@ export class SpeedDemoView {
     const elapsed = Math.max(0,Math.min(9000,ms));
     if (ms < this.last) { this.needle = 0; this.last = 0; }
     this.needle += (demoSpeed(elapsed)-this.needle)*(1-Math.exp(-Math.max(0,ms-this.last)/140));
+    if (elapsed === 9000 && this.last < 9000) this.completedAt = new Date().toLocaleTimeString("ru-RU", { hour12: false });
     this.last = ms;
+    this.timestamp.content = `Последний замер: ${this.completedAt ?? "—"}`;
     this.gauge.content = dial(width,rows,this.needle);
     this.digits.text = demoSpeed(elapsed).toFixed(1);
     const cells = Math.min(34,width), completed = Math.floor(elapsed/9000*cells);
