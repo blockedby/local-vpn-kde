@@ -132,6 +132,7 @@ export class App {
   private gauge: TextRenderable;
   private homeTesting = false;
   private homeSpeed?: number;
+  private homePing?: number;
   private homeSpeedAt = 0;
   private homeSpeedLabel = "[t] Проверить скорость выбранного сервера";
 
@@ -366,7 +367,7 @@ export class App {
                   },
             ]
           : []),
-        { key: "t", label: "Тест скорости", run: () => void this.testHomeSpeed() },
+        { key: "t", label: this.inlineSpeed() ? `Тест скорости · ${this.homeTesting ? "… · " : ""}${this.homePing === undefined ? "—" : Math.round(this.homePing)}ms, ${this.homeSpeed === undefined ? "—" : (this.homeSpeed / 8.388608).toFixed(1)} MiB/s` : "Тест скорости", run: () => void this.testHomeSpeed() },
         { key: "v", label: "Серверы", run: () => this.open("servers") },
         { key: "c", label: "Подписка", run: () => this.open("subscription") },
         { key: "d", label: "Диагностика", run: () => this.open("diagnostics") },
@@ -786,12 +787,16 @@ export class App {
     await this.loadPendingSubscription();
     return reply;
   }
+  private inlineSpeed() {
+    return this.renderer.width < 70 || this.renderer.height < 25;
+  }
   private async testHomeSpeed() {
     if (this.busy || this.batch || this.homeTesting) return;
     if (!this.ready()) { this.notify("Сначала запустите Docker.", true); return; }
     this.homeTesting = true;
     this.cancelled = false;
     this.homeSpeed = undefined;
+    this.homePing = undefined;
     this.notice = "";
     this.noticeAttempt = "";
     this.error = false;
@@ -806,6 +811,7 @@ export class App {
       const ping = await this.perform("servers/ping", server.server_id, true);
       if (this.cancelled || this.closing) return;
       if (!ping?.ok || ping.catalog?.server?.ping_status !== "ready") throw new Error("Сервер недоступен: ping не прошёл.");
+      this.homePing = ping.catalog?.server?.latency_ms;
       this.homeSpeedLabel = `Измеряем · ${server.display_name} · 3 с`;
       const result = await this.perform("servers/speed", server.server_id, true);
       if (this.cancelled || this.closing) return;
@@ -1014,7 +1020,7 @@ export class App {
     this.summary.visible = this.screen !== "home" || !!this.summary.content;
     if (!this.summary.visible) this.summary.height = 0;
     const compactGauge = this.renderer.height < 25 || width < 29;
-    this.gauge.visible = this.screen === "home";
+    this.gauge.visible = this.screen === "home" && !this.inlineSpeed();
     this.gauge.height = this.gauge.visible ? (compactGauge ? 4 : 11) + (this.homeSpeedAt ? 1 : 0) : 0;
     this.gauge.marginTop = this.gauge.visible ? 1 : 0;
     this.gauge.fg = this.homeSpeed === undefined ? p.accent : p.green;

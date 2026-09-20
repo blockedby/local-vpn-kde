@@ -945,6 +945,11 @@ test("home speedometer measures the selected server after ping and removes redun
     expect(frame).toContain("50.0 Мбит/с");
     expect(frame).not.toContain("Подписка: есть");
     expect(frame).not.toContain("Проверки и выбор серверов");
+    t.resize(60, 24); await t.renderOnce();
+    expect(t.captureCharFrame()).not.toContain("СКОРОСТЬ СЕРВЕРА");
+    expect(t.captureCharFrame()).toContain("24ms, 6.0 MiB/s");
+    t.resize(90, 35); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("СКОРОСТЬ СЕРВЕРА");
 
   } finally { await app.close(); }
 });
@@ -964,7 +969,7 @@ test("home speed test skips download after failed ping and allows navigation", a
     finish({ ...reply(), ok: false, reason: "failed" }); await settle();
     expect(b.calls.some(c => c.action === "servers/speed")).toBe(false);
     t.mockInput.pressEscape(); await Bun.sleep(60); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("— Мбит/с");
+    expect(t.captureCharFrame()).toContain("— MiB/s");
     expect(t.captureCharFrame()).toContain("q выход");
   } finally { finish(reply()); await settle(); await app.close(); }
 });
