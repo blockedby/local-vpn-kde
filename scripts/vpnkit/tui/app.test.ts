@@ -135,6 +135,8 @@ test("compact home has state-specific actions, no stale generic hints or refresh
     await app.perform("status");
     await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Отключить VPN");
+    const lines = t.captureCharFrame().split("\n");
+    expect(lines.findIndex(line => line.includes("[x] Отключить VPN"))).toBe(3);
     t.resize(60, 20);
     await t.renderOnce();
     expect(t.captureCharFrame()).toContain("q выход");

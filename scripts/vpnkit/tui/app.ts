@@ -1018,7 +1018,7 @@ export class App {
           : this.status.subscription !== "configured"
             ? "Добавьте подписку, затем откройте серверы."
             : "";
-    this.summary.visible = this.screen !== "home" || !!this.summary.content;
+    this.summary.visible = this.screen !== "home" || this.summary.chunks.some(chunk => chunk.text.length > 0);
     if (!this.summary.visible) this.summary.height = 0;
     const compactGauge = this.renderer.height < 25 || width < 29;
     this.gauge.visible = this.screen === "home" && !this.inlineSpeed();
