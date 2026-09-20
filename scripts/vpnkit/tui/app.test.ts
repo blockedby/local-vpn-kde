@@ -274,6 +274,15 @@ test("server table is sorted by name, keeps columns aligned and exposes three se
     t.mockInput.pressKey("o");
     await t.renderOnce();
     expect(t.captureCharFrame()).toContain("ping ↑");
+    t.resize(90, 18); await t.renderOnce();
+    const compact = t.captureCharFrame();
+    expect(compact).not.toContain("Docker:");
+    expect(compact).not.toContain("Сортировка [o]");
+    expect(compact).not.toContain("Сайт: https:");
+    expect(compact).toContain("Amsterdam");
+    t.resize(100, 30); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Сортировка [o]");
+    expect(t.captureCharFrame()).toContain("Docker:");
     t.mockInput.pressArrow("down");
     t.mockInput.pressEnter();
     await t.renderOnce();

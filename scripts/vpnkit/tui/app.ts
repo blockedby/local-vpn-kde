@@ -585,7 +585,7 @@ export class App {
     });
   }
   private rowCount() {
-    return Math.max(1, Math.min(100, this.renderer.terminalHeight - 15));
+    return Math.max(1, Math.min(100, this.renderer.terminalHeight - (this.inlineSpeed() ? (this.catalogStale || this.status?.subscription !== "configured" ? 14 : 12) : 15)));
   }
   private visibleServers() {
     const list = this.sortedServers();
@@ -970,6 +970,9 @@ export class App {
       width,
     );
     this.headline.fg = state.color;
+    const compactServers = this.screen === "servers" && this.inlineSpeed();
+    this.facts.visible = !compactServers;
+    this.facts.height = compactServers ? 0 : 1;
     const gateway = this.status?.gateway_state ?? this.status?.vpn_state;
     const gatewayNames: Record<string, string> = {
       healthy: "готов",
@@ -1048,6 +1051,10 @@ export class App {
         : this.status?.subscription !== "configured"
           ? "Добавьте подписку для загрузки серверов."
           : `${this.servers.length} серверов · Сортировка [o]: ${{ name: "имя ↑", ping: "ping ↑", speed: "скорость ↓", availability: "доступность ↓" }[this.sort]}${this.catalogStale ? " · каталог устарел" : ""}\nСайт: ${this.target}`;
+    if (compactServers && this.ready() && this.status?.subscription === "configured" && !this.catalogStale) {
+      this.summary.visible = false;
+      this.summary.height = 0;
+    }
     const nameWidth = Math.max(10, width - 39);
     this.tableHeader.content = `   ${cell("Сервер", nameWidth)} ${cell("Ping мс", 8)} ${cell("Мбит/с", 8)} ${cell("Сайт", 7)} Статус`;
     const visible = this.visibleServers();
