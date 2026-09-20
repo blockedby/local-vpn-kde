@@ -27,10 +27,65 @@ type BridgeOptions struct {
 	keepTerminal           bool
 }
 type Bridge struct {
-	options BridgeOptions
-	status  map[string]any
+	options     BridgeOptions
+	status      map[string]any
+	mu          sync.Mutex
+	active      map[string]context.CancelFunc
+	statusMu    sync.RWMutex
+	refreshMu   bridgeGate
+	mutationMu  bridgeGate
+	operationMu bridgeGate
+}
+
+// bridgeGate is a cancellable read/write gate. Waiting never owns a worker's
+// cancellation path, so a queued request can finish without waiting for a slow
+// lifecycle operation to release its resources.
+type bridgeGate struct {
 	mu      sync.Mutex
-	cancel  context.CancelFunc
+	readers int
+	writer  bool
+	changed chan struct{}
+}
+
+func (g *bridgeGate) acquire(ctx context.Context, exclusive bool) (func(), error) {
+	for {
+		g.mu.Lock()
+		if err := ctx.Err(); err != nil {
+			g.mu.Unlock()
+			return nil, err
+		}
+		if !g.writer && (!exclusive || g.readers == 0) {
+			if exclusive {
+				g.writer = true
+			} else {
+				g.readers++
+			}
+			g.mu.Unlock()
+			return func() {
+				g.mu.Lock()
+				if exclusive {
+					g.writer = false
+				} else {
+					g.readers--
+				}
+				if g.changed != nil {
+					close(g.changed)
+					g.changed = nil
+				}
+				g.mu.Unlock()
+			}, nil
+		}
+		if g.changed == nil {
+			g.changed = make(chan struct{})
+		}
+		changed := g.changed
+		g.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-changed:
+		}
+	}
 }
 
 var actions = map[string][]string{"backend/start": {"backend", "start"}, "disconnect": {"disconnect"}, "start": {"start"}, "stop": {"stop"}, "retest/select": {"retest", "select"}, "toggle-mode": {"toggle", "mode"}, "diagnostics": {"diagnostics"}}
@@ -71,7 +126,7 @@ func NewBridge(o BridgeOptions) (*Bridge, error) {
 	if o.Mock {
 		kind = "mock"
 	}
-	b := &Bridge{options: o, status: map[string]any{"schema": 1, "vpn_state": "unknown", "gateway_state": "unknown", "subscription": "not configured", "endpoint": "redacted", "routing_mode": o.Mode, "selection": "redacted", "diagnostics": "not-run", "last_action": "none", "last_result": "not-run", "last_attempt": "", "networkmanager_configured": "unknown", "networkmanager_active": "unknown", "runner": kind}}
+	b := &Bridge{options: o, active: make(map[string]context.CancelFunc), status: map[string]any{"schema": 1, "vpn_state": "unknown", "gateway_state": "unknown", "subscription": "not configured", "endpoint": "redacted", "routing_mode": o.Mode, "selection": "redacted", "diagnostics": "not-run", "last_action": "none", "last_result": "not-run", "last_attempt": "", "networkmanager_configured": "unknown", "networkmanager_active": "unknown", "runner": kind}}
 	if !o.Mock && SubscriptionConfigured(o.Base) {
 		b.status["subscription"] = "configured"
 	}
@@ -80,13 +135,15 @@ func NewBridge(o BridgeOptions) (*Bridge, error) {
 func (b *Bridge) Cancel() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.cancel != nil {
-		b.cancel()
+	for _, cancel := range b.active {
+		cancel()
 	}
 }
 func (b *Bridge) QueryStatus(ctx context.Context) map[string]any { b.refresh(ctx); return b.Status() }
 
 func (b *Bridge) Status() map[string]any {
+	b.statusMu.RLock()
+	defer b.statusMu.RUnlock()
 	copy := map[string]any{}
 	for k, v := range b.status {
 		copy[k] = v
@@ -94,9 +151,12 @@ func (b *Bridge) Status() map[string]any {
 	return copy
 }
 
-// Serve processes bounded JSON-lines requests sequentially. The UI remains
-// asynchronous; navigation is independent of this mutation queue.
+// Serve multiplexes ID-bearing requests. Legacy requests retain ordered replies.
+// A bounded number of workers keeps malformed clients from creating unlimited
+// processes. Cancellation is read by the scanner even while workers are busy.
 func (b *Bridge) Serve(ctx context.Context, input io.Reader, output io.Writer) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 4096), maxSubscription*6+1024)
 	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
@@ -109,24 +169,143 @@ func (b *Bridge) Serve(ctx context.Context, input io.Reader, output io.Writer) e
 		return 0, nil, nil
 	})
 	encoder := json.NewEncoder(output)
+	var outputMu sync.Mutex
+	var firstErr error
+	emit := func(id string, value any) error {
+		outputMu.Lock()
+		defer outputMu.Unlock()
+		if firstErr != nil {
+			return firstErr
+		}
+		if id != "" {
+			data, err := json.Marshal(value)
+			if err != nil {
+				firstErr = err
+				cancel()
+				return err
+			}
+			var envelope map[string]any
+			if err = json.Unmarshal(data, &envelope); err != nil {
+				firstErr = err
+				cancel()
+				return err
+			}
+			envelope["id"] = id
+			value = envelope
+		}
+		if err := encoder.Encode(value); err != nil {
+			firstErr = err
+			cancel()
+			return err
+		}
+		return nil
+	}
+	var workers sync.WaitGroup
 	for scanner.Scan() {
 		line := append([]byte(nil), scanner.Bytes()...)
-		reply, err := b.request(ctx, line, func(phase string) { _ = encoder.Encode(map[string]string{"event": "progress", "phase": phase}) }, func(p picker.CheckProgress) error { return encoder.Encode(p) })
-		if err != nil {
-			return err
+		var head struct {
+			ID     string `json:"id"`
+			Action string `json:"action"`
 		}
-		if err = encoder.Encode(reply); err != nil {
-			return err
+		if err := json.Unmarshal(line, &head); err != nil || len(head.ID) > 128 || strings.ContainsFunc(head.ID, unicode.IsControl) {
+			_ = emit("", map[string]any{"ok": false, "reason": "invalid-request", "status": b.Status()})
+			continue
+		}
+		if head.Action == "cancel" {
+			b.mu.Lock()
+			if stop := b.active[head.ID]; stop != nil {
+				stop()
+			}
+			b.mu.Unlock()
+			continue
+		}
+		if head.ID == "" {
+			workers.Wait()
+		}
+		requestCtx, stop := context.WithTimeout(ctx, b.options.Timeout)
+		b.mu.Lock()
+		_, duplicate := b.active[head.ID]
+		full := len(b.active) >= 16
+		if !duplicate && !full {
+			b.active[head.ID] = stop
+		}
+		b.mu.Unlock()
+		if duplicate {
+			stop()
+			cancel()
+			workers.Wait()
+			return errors.New("duplicate request id")
+		}
+		if full {
+			stop()
+			_ = emit(head.ID, map[string]any{"ok": false, "reason": "busy", "status": b.Status()})
+			continue
+		}
+		run := func() {
+			defer workers.Done()
+			defer func() { stop(); b.mu.Lock(); delete(b.active, head.ID); b.mu.Unlock() }()
+			// Selection changes only the active proxy. Probes own independent proxies;
+			// lifecycle and catalog mutations must wait for those proxies to finish.
+			shared := head.Action == "servers/select" || head.Action == "servers/list" || head.Action == "servers/current" || head.Action == "servers/ping" || head.Action == "servers/speed" || head.Action == "servers/availability" || head.Action == "servers/check-batch" || head.Action == "status" || head.Action == "subscription/read"
+			mutation := !shared || head.Action == "servers/select"
+			canceled := func() {
+				reason := "cancelled"
+				if errors.Is(requestCtx.Err(), context.DeadlineExceeded) {
+					reason = "timeout"
+				}
+				_ = emit(head.ID, map[string]any{"ok": false, "reason": reason, "status": b.Status()})
+			}
+			if mutation {
+				release, err := b.mutationMu.acquire(requestCtx, true)
+				if err != nil {
+					canceled()
+					return
+				}
+				defer release()
+			}
+			release, err := b.operationMu.acquire(requestCtx, !shared)
+			if err != nil {
+				canceled()
+				return
+			}
+			defer release()
+			if requestCtx.Err() != nil {
+				canceled()
+				return
+			}
+
+			reply, err := b.request(requestCtx, line, func(phase string) { _ = emit(head.ID, map[string]string{"event": "progress", "phase": phase}) }, func(p picker.CheckProgress) error { return emit(head.ID, p) })
+			if err != nil {
+				outputMu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				outputMu.Unlock()
+				cancel()
+				return
+			}
+			_ = emit(head.ID, reply)
+		}
+		workers.Add(1)
+		if head.ID == "" {
+			run()
+		} else {
+			go run()
 		}
 	}
-	return scanner.Err()
+	if scanner.Err() != nil {
+		cancel()
+	}
+	workers.Wait()
+	if scanner.Err() != nil {
+		return scanner.Err()
+	}
+	outputMu.Lock()
+	defer outputMu.Unlock()
+	return firstErr
 }
 func (b *Bridge) request(parent context.Context, line []byte, progress func(string), checkProgress func(picker.CheckProgress) error) (map[string]any, error) {
-	ctx, cancel := context.WithTimeout(parent, b.options.Timeout)
-	b.mu.Lock()
-	b.cancel = cancel
-	b.mu.Unlock()
-	defer func() { cancel(); b.mu.Lock(); b.cancel = nil; b.mu.Unlock() }()
+	ctx := parent
 	reply := map[string]any{"ok": true, "reason": "ok", "code": nil}
 	invalid := func() { reply["ok"] = false; reply["reason"] = "invalid-request" }
 	var request struct {
@@ -167,9 +346,11 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 		} else if err := WriteSubscription(b.options.Base, value); err != nil {
 			invalid()
 		} else {
+			b.statusMu.Lock()
 			b.status["subscription"] = "configured"
 			b.status["last_action"] = "configure subscription"
 			b.status["last_result"] = "ok"
+			b.statusMu.Unlock()
 		}
 	default:
 		if strings.HasPrefix(request.Action, "servers/") {
@@ -233,12 +414,14 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 			reply["ok"] = result.Reason == "ok"
 			reply["reason"] = result.Reason
 			reply["code"] = result.Code
+			b.statusMu.Lock()
 			b.status["last_action"] = request.Action
 			b.status["last_result"] = result.Reason
 			b.status["last_attempt"] = attempt
 			if result.Reason == "ok" && request.Action == "diagnostics" {
 				b.status["diagnostics"] = "available"
 			}
+			b.statusMu.Unlock()
 			b.refresh(ctx)
 		} else {
 			invalid()
@@ -277,10 +460,24 @@ func binaryStatus(value any) string {
 	return "unknown"
 }
 func (b *Bridge) refresh(parent context.Context) {
-	b.status["vpn_state"] = "unknown"
-	b.status["gateway_state"] = "unknown"
-	b.status["networkmanager_configured"] = "unknown"
-	b.status["networkmanager_active"] = "unknown"
+	release, err := b.refreshMu.acquire(parent, true)
+	if err != nil {
+		return
+	}
+	defer release()
+	status := map[string]any{}
+	defer func() {
+		b.statusMu.Lock()
+		defer b.statusMu.Unlock()
+		for k, v := range status {
+			b.status[k] = v
+		}
+	}()
+
+	status["vpn_state"] = "unknown"
+	status["gateway_state"] = "unknown"
+	status["networkmanager_configured"] = "unknown"
+	status["networkmanager_active"] = "unknown"
 	if b.options.Mock {
 		return
 	}
@@ -297,17 +494,17 @@ func (b *Bridge) refresh(parent context.Context) {
 	container, _ := raw["container"].(string)
 	switch container {
 	case "absent", "stopped", "starting", "healthy", "unhealthy", "running", "inactive", "unknown":
-		b.status["gateway_state"] = container
+		status["gateway_state"] = container
 	default:
 		container = "unknown"
 	}
 	if raw["routing_policy"] == "smart" || raw["routing_policy"] == "strict" {
-		b.status["routing_mode"] = raw["routing_policy"]
+		status["routing_mode"] = raw["routing_policy"]
 	}
 	if raw["subscription"] == "configured" {
-		b.status["subscription"] = "configured"
+		status["subscription"] = "configured"
 	} else if raw["subscription"] == "missing" {
-		b.status["subscription"] = "not configured"
+		status["subscription"] = "not configured"
 	}
 	configured, active := raw["networkmanager_configured"], raw["networkmanager_active"]
 	if configured == nil {
@@ -325,15 +522,15 @@ func (b *Bridge) refresh(parent context.Context) {
 		}
 	}
 	c, a := binaryStatus(configured), binaryStatus(active)
-	b.status["networkmanager_configured"] = c
-	b.status["networkmanager_active"] = a
+	status["networkmanager_configured"] = c
+	status["networkmanager_active"] = a
 	switch {
 	case a == "no" && (c == "yes" || c == "no"):
-		b.status["vpn_state"] = "inactive"
+		status["vpn_state"] = "inactive"
 	case a == "yes" || c == "not-managed":
-		b.status["vpn_state"] = container
+		status["vpn_state"] = container
 	case container != "healthy" && container != "running":
-		b.status["vpn_state"] = container
+		status["vpn_state"] = container
 	}
 }
 func validTarget(value string) bool {

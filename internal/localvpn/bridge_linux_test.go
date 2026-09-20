@@ -159,7 +159,7 @@ printf '%%s\n' '{"schema":"vibe-vpn.server-browser.v2","status":"ok","servers":[
 				t.Fatal(err)
 			}
 			value, _ := json.Marshal(map[string]any{"ids": []string{id}, "url": "https://example.com"})
-			request, _ := json.Marshal(map[string]any{"action": "servers/check-batch", "value": string(value), "progress": true})
+			request, _ := json.Marshal(map[string]any{"id": "batch-1", "action": "servers/check-batch", "value": string(value), "progress": true})
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			reader, writer := io.Pipe()
@@ -171,7 +171,7 @@ printf '%%s\n' '{"schema":"vibe-vpn.server-browser.v2","status":"ok","servers":[
 			if err := decoder.Decode(&event); err != nil {
 				t.Fatal(err)
 			}
-			if event["event"] != "server-check" || event["latency_ms"] != float64(23) || event["secret"] != nil {
+			if event["id"] != "batch-1" || event["event"] != "server-check" || event["latency_ms"] != float64(23) || event["secret"] != nil {
 				t.Fatal("bad progress", event)
 			}
 			select {
@@ -187,6 +187,9 @@ printf '%%s\n' '{"schema":"vibe-vpn.server-browser.v2","status":"ok","servers":[
 			var final map[string]any
 			if err := decoder.Decode(&final); err != nil {
 				t.Fatal(err)
+			}
+			if final["id"] != "batch-1" {
+				t.Fatal("lost request ID", final)
 			}
 			if stop && final["reason"] != "cancelled" {
 				t.Fatal("lost cancellation", final)
@@ -222,5 +225,230 @@ func TestBridgeKeepsFailedMeasurementFromNonzeroExit(t *testing.T) {
 		if reply["reason"] != want {
 			t.Fatalf("reason=%v want=%s", reply["reason"], want)
 		}
+	}
+}
+
+// The real subprocess adapter is held behind files so these checks exercise the
+// JSON transport, process cancellation and scheduling without touching a VPN.
+func TestBridgeMultiplexesSelectionAndCancelsOnlyProbe(t *testing.T) {
+	b := bridgeFixture(t, `{}`)
+	dir := t.TempDir()
+	started := filepath.Join(dir, "started")
+	release := filepath.Join(dir, "release")
+	id := "srv_" + strings.Repeat("a", 27)
+	script := fmt.Sprintf(`#!/bin/sh
+if [ "$2" = speed ]; then
+ touch '%s'
+ while [ ! -e '%s' ]; do sleep 0.01; done
+fi
+printf '%%s\n' '{"schema":"vibe-vpn.server-browser.v2","status":"ok","server":{"server_id":"%s","display_name":"Fixture","selected":true}}'
+`, started, release, id)
+	if err := os.WriteFile(b.options.Executable, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	input, send := io.Pipe()
+	output, write := io.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	defer input.Close()
+	defer send.Close()
+	defer output.Close()
+	defer write.Close()
+	done := make(chan error, 1)
+	go func() { done <- b.Serve(ctx, input, write); write.Close() }()
+	events := make(chan map[string]any, 10)
+	go func() {
+		d := json.NewDecoder(output)
+		for {
+			var event map[string]any
+			if d.Decode(&event) != nil {
+				return
+			}
+			events <- event
+		}
+	}()
+	request := func(value any) {
+		t.Helper()
+		if err := json.NewEncoder(send).Encode(value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request(map[string]any{"id": "speed-1", "action": "servers/speed", "value": id})
+	waitBridgeFile(t, started)
+	request(map[string]any{"id": "select-1", "action": "servers/select", "value": id})
+	select {
+	case event := <-events:
+		if event["id"] != "select-1" || event["ok"] != true {
+			t.Fatal(event)
+		}
+	case <-ctx.Done():
+		t.Fatal("selection waited for speed probe")
+	}
+	request(map[string]any{"id": "speed-1", "action": "cancel"})
+	select {
+	case event := <-events:
+		if event["id"] != "speed-1" || event["reason"] != "cancelled" {
+			t.Fatal(event)
+		}
+	case <-ctx.Done():
+		t.Fatal("target cancellation did not stop probe")
+	}
+	request(map[string]any{"id": "select-2", "action": "servers/select", "value": id})
+	send.Close()
+	select {
+	case event := <-events:
+		if event["id"] != "select-2" || event["ok"] != true {
+			t.Fatal("cancel damaged next request", event)
+		}
+	case <-ctx.Done():
+		t.Fatal("no final reply")
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func waitBridgeFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("adapter did not reach barrier", path)
+}
+
+func TestBridgeSerializesMutationsAndCorrelatesProgress(t *testing.T) {
+	b := bridgeFixture(t, `{}`)
+	dir := t.TempDir()
+	started := filepath.Join(dir, "started")
+	second := filepath.Join(dir, "second")
+	script := fmt.Sprintf(`#!/bin/sh
+case "$1" in
+start)
+ touch '%s'
+ printf 'vpnkit_phase=compose-up\n'
+ while :; do sleep 0.01; done;;
+disconnect) touch '%s';;
+status) printf '{}\n';;
+esac
+`, started, second)
+	if err := os.WriteFile(b.options.Executable, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	input, send := io.Pipe()
+	output, write := io.Pipe()
+	defer input.Close()
+	defer send.Close()
+	defer output.Close()
+	defer write.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- b.Serve(ctx, input, write); write.Close() }()
+	events := make(chan map[string]any, 10)
+	go func() {
+		d := json.NewDecoder(output)
+		for {
+			var event map[string]any
+			if d.Decode(&event) != nil {
+				return
+			}
+			events <- event
+		}
+	}()
+	encoder := json.NewEncoder(send)
+	if err := encoder.Encode(map[string]any{"id": "start", "action": "start", "progress": true}); err != nil {
+		t.Fatal(err)
+	}
+	waitBridgeFile(t, started)
+	select {
+	case event := <-events:
+		if event["id"] != "start" || event["event"] != "progress" {
+			t.Fatal(event)
+		}
+	case <-ctx.Done():
+		t.Fatal("missing correlated progress")
+	}
+	if err := encoder.Encode(map[string]any{"id": "stop", "action": "disconnect"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if _, err := os.Stat(second); !os.IsNotExist(err) {
+		t.Fatal("mutations overlapped")
+	}
+	// The second mutation is queued, but cancellation must not wait for start.
+	if err := encoder.Encode(map[string]any{"id": "stop", "action": "cancel"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-events:
+		if event["id"] != "stop" || event["reason"] != "cancelled" {
+			t.Fatal("queued cancellation was not scoped", event)
+		}
+	case <-ctx.Done():
+		t.Fatal("queued cancellation waited for active mutation")
+	}
+	if _, err := os.Stat(second); !os.IsNotExist(err) {
+		t.Fatal("cancelled queued mutation executed")
+	}
+	if err := encoder.Encode(map[string]any{"id": "stop-2", "action": "disconnect"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := encoder.Encode(map[string]any{"id": "start", "action": "cancel"}); err != nil {
+		t.Fatal(err)
+	}
+	send.Close()
+	replies := map[string]map[string]any{}
+	for len(replies) < 2 {
+		select {
+		case event := <-events:
+			if event["event"] == nil {
+				replies[event["id"].(string)] = event
+			}
+		case <-ctx.Done():
+			t.Fatal("requests not drained")
+		}
+	}
+	if replies["start"]["reason"] != "cancelled" || replies["stop-2"]["ok"] != true {
+		t.Fatal(replies)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	waitBridgeFile(t, second)
+}
+
+func TestBridgeConcurrentStatusRepliesRemainWholeAndCorrelated(t *testing.T) {
+	b, err := NewBridge(BridgeOptions{Mock: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var input, output bytes.Buffer
+	for i := 0; i < 16; i++ {
+		if err := json.NewEncoder(&input).Encode(map[string]any{"id": fmt.Sprint(i), "action": "status"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := b.Serve(context.Background(), &input, &output); err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(&output)
+	seen := map[string]bool{}
+	for i := 0; i < 16; i++ {
+		var reply map[string]any
+		if err := decoder.Decode(&reply); err != nil {
+			t.Fatal("interleaved JSON output", err)
+		}
+		id, ok := reply["id"].(string)
+		if !ok || seen[id] || reply["ok"] != true {
+			t.Fatal(reply)
+		}
+		seen[id] = true
+	}
+	if output.Len() != 0 {
+		t.Fatal("extra replies")
 	}
 }
