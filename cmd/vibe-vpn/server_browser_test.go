@@ -1553,3 +1553,97 @@ func TestBrowserSelectAcceptsUntestedAndFailedNodes(t *testing.T) {
 		})
 	}
 }
+
+// A measurement owns the node captured when it starts, not the active VPN.
+// Switching must finish while the probe is still waiting and survive publication.
+func TestBrowserSpeedAndBatchAllowSelectionWhileProbeRuns(t *testing.T) {
+	for _, batch := range []bool{false, true} {
+		name := "speed"
+		if batch {
+			name = "ping-site-batch"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir, cfg, catalog := browserFixture(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			started, release := make(chan struct{}), make(chan struct{})
+			finished := make(chan error, 1)
+			var out bytes.Buffer
+			cmd := &cobra.Command{}
+			cmd.SetContext(ctx)
+			cmd.SetOut(&out)
+			go func() {
+				if batch {
+					finished <- runBrowserCheckBatch(cmd, &cliOptions{configPath: cfg}, []string{catalog.Servers[0].ID}, "https://example.com/", func(ctx context.Context, _ config.Config, r picker.NodeResult, _ string) picker.NodeResult {
+						close(started)
+						select {
+						case <-release:
+						case <-ctx.Done():
+						}
+						r.PingMS, r.PingStatus, r.Availability = 23, "ready", "ready"
+						return r
+					})
+				} else {
+					finished <- runBrowserPing(cmd, &cliOptions{configPath: cfg}, catalog.Servers[0].ID, browserDependencies{probe: func(ctx context.Context, _ config.Config, _ picker.NodeResult) (nettest.Result, error) {
+						close(started)
+						select {
+						case <-release:
+						case <-ctx.Done():
+							return nettest.Result{}, ctx.Err()
+						}
+						return nettest.Result{Seconds: 3, Mbps: 72, Bytes: 27000000}, nil
+					}})
+				}
+			}()
+			select {
+			case <-started:
+			case <-ctx.Done():
+				t.Fatal("probe did not start")
+			}
+			var selection bytes.Buffer
+			selectCmd := &cobra.Command{}
+			selectCmd.SetContext(ctx)
+			selectCmd.SetOut(&selection)
+			err := runBrowserSelect(selectCmd, &cliOptions{configPath: cfg}, catalog.Servers[1].ID, browserDependencies{
+				recover: func(context.Context, config.Config) error { return nil },
+				apply: func(_ context.Context, c config.Config, r picker.NodeResult) error {
+					return state.SaveCurrent(c.StateDir, state.Current{ServerID: r.ServerID, Generation: r.Generation, Link: r.Link})
+				},
+			})
+			close(release)
+			probeErr := <-finished
+			if err != nil {
+				t.Fatalf("selection blocked by probe: %v %s", err, selection.String())
+			}
+			if probeErr != nil {
+				t.Fatalf("selection invalidated probe: %v %s", probeErr, out.String())
+			}
+			current, err := state.LoadCurrent(dir)
+			if err != nil || current.ServerID != catalog.Servers[1].ID {
+				t.Fatal("measurement overwrote selection", err)
+			}
+			latest, err := loadBrowserCatalogLocked(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if batch {
+				if latest.Servers[0].Result.PingMS != 23 || latest.Servers[0].Result.Availability != "ready" {
+					t.Fatal("missing ping/site evidence")
+				}
+			} else if latest.Servers[0].Result.Mbps != 72 || latest.Servers[1].Result.Mbps != catalog.Servers[1].Result.Mbps {
+				t.Fatal("speed attached to wrong server")
+			}
+			var reply picker.BrowserResponse
+			if err := json.Unmarshal(out.Bytes(), &reply); err != nil {
+				t.Fatal(err)
+			}
+			if batch {
+				if len(reply.Servers) != 1 || reply.Servers[0].Selected {
+					t.Fatal("batch reported obsolete selection")
+				}
+			} else if reply.Server == nil || reply.Server.Selected {
+				t.Fatal("speed reported obsolete selection")
+			}
+		})
+	}
+}
