@@ -990,3 +990,111 @@ test("home speed test skips download after failed ping and allows navigation", a
     expect(t.captureCharFrame()).toContain("q выход");
   } finally { finish(reply()); await settle(); await app.close(); }
 });
+
+test("switching completes during a held home speed test; late result belongs to original server", async () => {
+  const t = await createTestRenderer({ width: 90, height: 35 });
+  const b = new FakeBackend();
+  b.rows = rows.map((row, i) => ({ ...row, selected: i === 0 }));
+  let finish!: (r: Reply) => void;
+  b.hold = { action: "servers/speed", promise: new Promise(r => finish = r) };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("t");
+    await settle();
+    expect(b.calls.some(c => c.action === "servers/speed")).toBe(true);
+    t.mockInput.pressKey("v");
+    await settle();
+    await app.perform("servers/select", rows[1]!.server_id);
+    await t.renderOnce();
+    expect(t.captureCharFrame().split("\n").find(line => line.includes("Amsterdam") && line.includes("●"))).toBeDefined();
+    finish({ ...reply(), catalog: { status: "ok", server: { ...rows[0]!, selected: true, status: "ready", download_mbps: 77 } } });
+    await settle();
+    await t.renderOnce();
+    const frame = t.captureCharFrame();
+    expect(frame.split("\n").find(line => line.includes("Tokyo") && line.includes("77.0") && !line.includes("●"))).toBeDefined();
+    expect(frame.split("\n").find(line => line.includes("Amsterdam") && line.includes("●"))).toBeDefined();
+    expect(b.cancelled).toBe(0);
+  } finally { finish(reply()); await settle(); await app.close(); }
+});
+
+test("measurement cancellation is scoped and never cancels concurrent server selection", async () => {
+  const t = await createTestRenderer({ width: 90, height: 35 });
+  const b = new FakeBackend();
+  let finishCheck!: (r: Reply) => void, finishSelect!: (r: Reply) => void;
+  const check = new Promise<Reply>(r => finishCheck = r);
+  const select = new Promise<Reply>(r => finishSelect = r);
+  const tasks = new Map<Action, string | undefined>();
+  const cancelled: (string | undefined)[] = [];
+  const original = b.request.bind(b);
+  b.request = async (action: Action, value?: string, id?: string) => {
+    tasks.set(action, id);
+    if (action === "servers/check-batch") return check;
+    if (action === "servers/select") return select;
+    return original(action, value);
+  };
+  b.cancel = (id?: string) => { cancelled.push(id); };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v"); await settle();
+    t.mockInput.pressKey("p"); await settle();
+    const switching = app.perform("servers/select", rows[1]!.server_id);
+    await settle();
+    expect(tasks.get("servers/select")).toBeDefined();
+    t.mockInput.pressKey("k"); await settle();
+    expect(cancelled).toEqual([tasks.get("servers/check-batch")]);
+    expect(cancelled).not.toContain(tasks.get("servers/select"));
+    finishCheck({ ...reply(), ok: false, reason: "cancelled" });
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Применяем сервер");
+    finishSelect(reply()); await switching;
+    await t.renderOnce();
+    expect(t.captureCharFrame().split("\n").find(line => line.includes("Amsterdam") && line.includes("●"))).toBeDefined();
+  } finally { finishCheck(reply()); finishSelect(reply()); await settle(); await app.close(); }
+});
+
+test("conflicting refresh and second measurement stay blocked while selection is allowed", async () => {
+  const t = await createTestRenderer({ width: 90, height: 35 });
+  const b = new FakeBackend();
+  let finish!: (r: Reply) => void;
+  b.hold = { action: "servers/check-batch", promise: new Promise(r => finish = r) };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v"); await settle();
+    t.mockInput.pressKey("p"); await settle();
+    await app.perform("servers/refresh");
+    await app.perform("subscription", "https://example.invalid/replacement");
+    await app.perform("stop");
+    t.mockInput.pressKey("t"); await settle();
+    expect(b.calls.some(c => ["servers/refresh", "subscription", "stop", "servers/speed"].includes(c.action))).toBe(false);
+    await app.perform("servers/select", rows[0]!.server_id);
+    expect(b.calls.some(c => c.action === "servers/select")).toBe(true);
+  } finally { finish(reply()); await settle(); await app.close(); }
+});
+
+test("quit drains both selection and measurement before closing backend", async () => {
+  const t = await createTestRenderer({ width: 90, height: 35 });
+  const b = new FakeBackend();
+  let finishCheck!: (r: Reply) => void, finishSelect!: (r: Reply) => void;
+  const check = new Promise<Reply>(r => finishCheck = r);
+  const select = new Promise<Reply>(r => finishSelect = r);
+  let closed = false;
+  const original = b.request.bind(b);
+  b.request = async (action, value) => action === "servers/check-batch" ? check : action === "servers/select" ? select : original(action, value);
+  b.close = async () => { closed = true; };
+  const app = new App(t.renderer, b);
+  await app.perform("status");
+  t.mockInput.pressKey("v"); await settle();
+  t.mockInput.pressKey("p"); await settle();
+  const switching = app.perform("servers/select", rows[0]!.server_id);
+  await app.close();
+  expect(b.cancelled).toBe(2);
+  expect(closed).toBe(false);
+  finishCheck({ ...reply(), ok: false, reason: "cancelled" }); await settle();
+  expect(closed).toBe(false);
+  finishSelect(reply()); await switching;
+  expect(closed).toBe(true);
+});

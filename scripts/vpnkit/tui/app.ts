@@ -72,7 +72,23 @@ export function cell(text: string, width: number) {
 export class App {
   private status?: Status;
   private screen: Screen = "home";
-  private busy?: Action;
+  private tasks = new Map<string, { action: Action; measurement: boolean; started: number; phase: string }>();
+  private nextTask = 0;
+  private selectionRevision = 0;
+  private get busy(): Action | undefined {
+    return [...this.tasks.values()].at(-1)?.action;
+  }
+  private get measurementAction(): Action | undefined {
+    return [...this.tasks.values()].find(task => task.measurement)?.action;
+  }
+  private compatible(action: Action, other: Action): boolean {
+    const probe = (a: Action) => ["servers/ping", "servers/speed", "servers/availability", "servers/check-batch"].includes(a);
+    const read = (a: Action) => ["status", "subscription/read"].includes(a);
+    return (read(action) && action !== other && (probe(other) || other === "servers/select")) ||
+      (read(other) && action !== other && (probe(action) || action === "servers/select")) ||
+      (action === "servers/select" && probe(other)) ||
+      (other === "servers/select" && probe(action));
+  }
   private queued?: { action: Action; value?: string };
   private batch?: {
     kind: Batch;
@@ -93,7 +109,6 @@ export class App {
   private frame = 0;
   private started = 0;
   private checked = 0;
-  private phase = "";
   private notice = "";
   private noticeAttempt = "";
   private error = false;
@@ -235,11 +250,14 @@ export class App {
     this.progress = text(this.root, "", p.accent);
     this.notification = text(this.root, "", p.muted, 2);
     this.footer = text(this.root, "", p.muted);
-    backend.onProgress = (phase) => {
-      this.phase = phases[phase] ?? "";
+    backend.onProgress = (phase, id) => {
+      const task = id ? this.tasks.get(id) : [...this.tasks.values()].at(-1);
+      if (!task) return;
+      task.phase = phases[phase] ?? "";
       this.paint();
     };
-    backend.onCheckProgress = (row) => {
+    backend.onCheckProgress = (row, id) => {
+      if (id && this.tasks.get(id)?.action !== "servers/check-batch") return;
       const batch = this.batch;
       if (!batch || batch.kind !== "ping" || this.cancelled || this.closing || !batch.ids?.includes(row.server_id) || batch.completed.has(row.server_id)) return;
       const server = this.servers.find(s => s.server_id === row.server_id);
@@ -284,7 +302,7 @@ export class App {
     return (this.status?.gateway_state ?? this.status?.vpn_state) === "healthy";
   }
   private async loadPendingSubscription() {
-    if (this.busy || this.batch || this.closing || this.disposed) return;
+    if (this.closing || this.disposed || [...this.tasks.values()].some(task => !this.compatible("subscription/read", task.action))) return;
     const revision = this.pendingSubscriptionRevision;
     this.pendingSubscriptionRevision = undefined;
     if (revision !== undefined && revision === this.editorRevision &&
@@ -368,7 +386,7 @@ export class App {
                   },
             ]
           : []),
-        { key: "t", label: this.inlineSpeed() ? `Тест скорости · ${this.homeTesting ? `${frames[this.frame % 10]} ${this.busy === "servers/ping" ? "ping" : this.busy === "servers/speed" ? "замер" : "подготовка"} · ` : ""}${this.homePing === undefined ? "—" : Math.round(this.homePing)}ms, ${this.homeSpeed === undefined ? "—" : (this.homeSpeed / 8.388608).toFixed(1)} MiB/s` : "Тест скорости", run: () => void this.testHomeSpeed() },
+        { key: "t", label: this.inlineSpeed() ? `Тест скорости · ${this.homeTesting ? `${frames[this.frame % 10]} ${this.measurementAction === "servers/ping" ? "ping" : this.measurementAction === "servers/speed" ? "замер" : "подготовка"} · ` : ""}${this.homePing === undefined ? "—" : Math.round(this.homePing)}ms, ${this.homeSpeed === undefined ? "—" : (this.homeSpeed / 8.388608).toFixed(1)} MiB/s` : "Тест скорости", run: () => void this.testHomeSpeed() },
         { key: "v", label: "Серверы", run: () => this.open("servers") },
         { key: "c", label: "Подписка", run: () => this.open("subscription") },
         { key: "d", label: "Диагностика", run: () => this.open("diagnostics") },
@@ -663,42 +681,40 @@ export class App {
     insideBatch = false,
   ): Promise<Reply | undefined> {
     if (this.closing || this.disposed) return;
-    if (((this.batch || this.homeTesting) && !insideBatch) || this.busy) {
-      if (
-        this.busy === "status" &&
-        action !== "status" &&
-        !this.queued &&
-        !this.batch
-      ) {
+    const measurementActive = !!this.batch || this.homeTesting;
+    const allowedDuringMeasurement = ["servers/select", "status", "subscription/read"].includes(action);
+    if ((measurementActive && !insideBatch && !allowedDuringMeasurement) ||
+        [...this.tasks.values()].some(task => !this.compatible(action, task.action))) {
+      if (this.busy === "status" && action !== "status" && !this.queued && !measurementActive) {
         this.queued = { action, value };
         return;
       }
-      if (action !== "status")
-        this.notify(
-          "Другая операция выполняется. Можно сменить экран или отменить её [k].",
-        );
+      if (action !== "status") this.notify("Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k].");
       return;
     }
     if (action === "subscription" && (!value || !/^https?:\/\//.test(value))) {
       this.notify("Введите ссылку подписки.", true);
       return;
     }
-    this.busy = action;
-    this.started = Date.now();
-    this.phase = "";
+    const requestID = `ui-${++this.nextTask}`;
+    this.tasks.set(requestID, { action, measurement: insideBatch, started: Date.now(), phase: "" });
+    const selectionRevision = this.selectionRevision;
     const revision = this.editorRevision,
       navigation = this.navigationRevision;
     this.paint();
     let reply: Reply | undefined;
     try {
-      reply = await this.backend.request(action, value);
+      reply = await this.backend.request(action, value, requestID);
       if (!action.startsWith("servers/") && action !== "subscription/read") {
         this.status = reply.status;
         this.checked = Date.now();
       }
       const previousMeasurements = this.homeTesting && action === "servers/list"
         ? new Map(this.servers.map(row => [row.server_id, row])) : undefined;
+      const currentSelection = this.servers.find(row => row.selected)?.server_id;
       this.updateCatalog(reply, action);
+      if (selectionRevision !== this.selectionRevision && reply.catalog?.servers)
+        this.servers.forEach(row => row.selected = row.server_id === currentSelection);
       if (previousMeasurements) this.servers = this.servers.map(row => {
         const previous = previousMeasurements.get(row.server_id);
         return previous ? { ...row, status: previous.status, ping_status: previous.ping_status,
@@ -758,16 +774,18 @@ export class App {
             if (navigation === this.navigationRevision) this.open("home");
           }
         }
-        if (action === "servers/select" && value)
+        if (action === "servers/select" && value) {
+          this.selectionRevision++;
           this.servers.forEach((s) => (s.selected = s.server_id === value));
+        }
       }
     } catch {
       if (!action.startsWith("servers/")) this.status = undefined;
       this.notify(failure("backend-unavailable", null), true);
     } finally {
-      this.busy = undefined;
+      this.tasks.delete(requestID);
       this.paint();
-      if (this.closing && !this.batch) await this.finishClose();
+      if (this.closing && !this.batch && !this.homeTesting && !this.tasks.size) await this.finishClose();
       else if (this.queued) {
         const queued = this.queued;
         this.queued = undefined;
@@ -828,6 +846,8 @@ export class App {
       if (this.cancelled) this.homeSpeedLabel = "Тест отменён";
       this.homeTesting = false;
       this.paint();
+      if (this.closing && !this.tasks.size) await this.finishClose();
+      else await this.loadPendingSubscription();
     }
   }
 
@@ -844,7 +864,8 @@ export class App {
     this.notice = "";
     this.noticeAttempt = "";
     this.error = false;
-    // Batch owns the command lane, including discovery, so navigation cannot enqueue mutations.
+    // One measurement pass at a time; server selection has an independent task.
+    this.started = Date.now();
     this.batch = {
       kind,
       done: 0,
@@ -868,7 +889,7 @@ export class App {
             : "Не удалось загрузить серверы. Проверьте подписку и Docker.",
           true,
         );
-        if (this.closing) await this.finishClose();
+        if (this.closing && !this.tasks.size && !this.homeTesting && !this.batch) await this.finishClose();
         return;
       }
     }
@@ -940,26 +961,18 @@ export class App {
         : `${this.cancelled || this.closing ? "Остановлено" : "Завершено"}: ${done}/${total} · ошибок ${failed}. ${kind !== "speed" && (this.cancelled || this.closing) ? "Показаны полученные результаты; проход не сохранён." : "Результаты сохранены."}`,
       failed > 0 || !!stoppedReason,
     );
-    if (this.closing) await this.finishClose();
+    if (this.closing && !this.tasks.size && !this.homeTesting && !this.batch) await this.finishClose();
     else await this.loadPendingSubscription();
   }
   private cancel() {
-    if (!this.busy && !this.batch) return;
-    if (
-      this.busy === "subscription" ||
-      this.busy === "subscription/read" ||
-      this.busy === "status"
-    ) {
-      this.notify(
-        "Короткая операция завершается; переход между экранами доступен.",
-      );
-      return;
-    }
-    this.cancelled = true;
-    this.backend.cancel?.();
-    this.notify(
-      "Отмена запрошена. Ожидаем завершения и восстановления состояния.",
-    );
+    // While measuring, k belongs to the measurement, never to a concurrent switch.
+    const measuring = !!this.batch || this.homeTesting;
+    const entry = [...this.tasks.entries()].find(([, task]) =>
+      measuring ? task.measurement : !["status", "subscription", "subscription/read"].includes(task.action));
+    if (!entry && !measuring) return;
+    if (measuring) this.cancelled = true;
+    if (entry) this.backend.cancel?.(entry[0]);
+    this.notify("Отмена запрошена. Ожидаем завершения и восстановления состояния.");
   }
   private paint = () => {
     if (this.disposed) return;
@@ -1096,19 +1109,25 @@ export class App {
             : p.text;
       row.attributes = s.server_id === this.serverID ? TextAttributes.BOLD : 0;
     });
+    const activeTask = [...this.tasks.values()].find(task => task.measurement) ??
+      [...this.tasks.values()].find(task => task.action !== "status");
     if (this.batch) {
       const detail = this.batch.kind === "speed"
         ? `Тест скорости · ${this.batch.done}/${this.batch.total} · ${cell(this.servers.find((s) => s.server_id === this.batch?.id)?.display_name ?? "", 16).trim()}`
         : `Ping → сайт · ${this.batch.done}/${this.batch.total} · ${Math.floor((Date.now() - this.started) / 1000)} с`;
       this.progress.content = `${frames[this.frame % 10]} ${detail}${this.cancelled ? " · отмена…" : " · [k] отменить"}`;
     }
-    else if (this.busy && this.busy !== "status")
-      this.progress.content = `${frames[this.frame % 10]} ${names[this.busy] ?? "Операция"} · ${this.phase || "выполняется"} · ${Math.floor((Date.now() - this.started) / 1000)} с`;
+    else if (activeTask) {
+      this.progress.content = `${frames[this.frame % 10]} ${names[activeTask.action] ?? "Операция"} · ${activeTask.phase || "выполняется"} · ${Math.floor((Date.now() - activeTask.started) / 1000)} с`;
+    }
     else
       this.progress.content =
         this.checked && Date.now() - this.checked > 15000
           ? "Статус устарел · [u] проверить"
           : "";
+    const switching = [...this.tasks.values()].find(task => task.action === "servers/select");
+    if (switching && (this.batch || this.homeTesting))
+      this.progress.content = `${this.progress.chunks.map(chunk => chunk.text).join("")} · Применяем сервер`;
     this.notification.content = this.closing
       ? "Завершаем текущую операцию перед выходом…"
       : this.notice +
@@ -1116,7 +1135,7 @@ export class App {
           ? `\nПопытка: ${this.noticeAttempt}`
           : "");
     this.notification.fg = this.error ? p.red : p.muted;
-    const inlineProgress = this.screen === "home" && this.inlineSpeed() && this.homeTesting;
+    const inlineProgress = this.screen === "home" && this.inlineSpeed() && this.homeTesting && !switching;
     this.progress.visible = this.progress.chunks.some(chunk => chunk.text.length > 0) && !inlineProgress;
     this.progress.height = this.progress.visible ? 1 : 0;
     const hasNotice = this.closing || !!this.notice;
@@ -1135,16 +1154,16 @@ export class App {
     this.input.blur();
     this.draft = "";
     this.input.value = "";
-    if (this.busy || this.batch) {
+    if (this.tasks.size || this.batch || this.homeTesting) {
       this.cancelled = true;
-      this.backend.cancel?.();
+      for (const id of this.tasks.keys()) this.backend.cancel?.(id);
       this.paint();
       return;
     }
     await this.finishClose();
   }
   private async finishClose() {
-    if (this.disposed) return;
+    if (this.disposed || this.tasks.size || this.batch || this.homeTesting) return;
     this.disposed = true;
     clearInterval(this.timer);
     clearInterval(this.poll);
