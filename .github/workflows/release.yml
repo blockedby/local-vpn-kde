@@ -1,0 +1,76 @@
+name: Manual stable release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Human-approved stable tag (vMAJOR.MINOR.PATCH)
+        required: true
+        type: string
+      commit:
+        description: Full commit SHA approved and validated locally
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate the approved tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          APPROVED_COMMIT: ${{ inputs.commit }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$APPROVED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")" = "$APPROVED_COMMIT"
+          git show "$APPROVED_COMMIT:go.mod" > /tmp/release-go.mod
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: /tmp/release-go.mod
+          cache: false
+      - name: Package selected revision
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: bash scripts/release/package.sh "$RELEASE_TAG" "$RUNNER_TEMP/release-assets"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: ${{ runner.temp }}/release-assets/*
+          retention-days: 1
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: assets
+      - name: Verify and publish without replacing existing releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          APPROVED_COMMIT: ${{ inputs.commit }}
+        run: |
+          test "$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)" = "$APPROVED_COMMIT"
+          cd assets
+          sha256sum --check SHA256SUMS
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo 'Release exists; refusing to replace its assets.' >&2
+            exit 1
+          fi
+          printf 'Revision: `%s`\n\nLinux x86-64 installer archive with Go source, a prebuilt host executable, Bun/OpenTUI source, and Docker gateway assets. Extract, run `./install.sh` as your desktop user, then `./run.sh`. The installer installs dependencies and rebuilds the application; this is not a standalone VPN binary. The archive includes empty Git metadata for legacy installer root discovery, not source history. For updates, download the next archive and preserve secrets/ instead of using git pull. Routine tests were run locally before human approval.\n' "$APPROVED_COMMIT" > "$RUNNER_TEMP/release-notes.md"
+          gh release create "$RELEASE_TAG" ./*.tar.gz SHA256SUMS --verify-tag --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
