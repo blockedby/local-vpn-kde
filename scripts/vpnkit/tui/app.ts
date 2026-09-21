@@ -11,8 +11,10 @@ import { connection, failure, palette as p } from "./model";
 
 import { StyledText, t } from "@opentui/core";
 import { speedometer } from "./speedometer";
+import { recoveryFor, type Recovery } from "./recovery";
 
 type Screen =
+  | "tasks" | "cancel-confirm" | "recovery" | "retry-confirm"
   | "autostart"
   | "home"
   | "servers"
@@ -76,8 +78,14 @@ export class App {
   private status?: Status;
   private autostart?: AutostartOptions;
   private screen: Screen = "home";
-  private tasks = new Map<string, { action: Action; measurement: boolean; started: number; phase: string }>();
+  private tasks = new Map<string, { action: Action; measurement: boolean; started: number; phase: string; value?: string }>();
   private nextTask = 0;
+  private cancelTaskID?: string;
+  private recovery?: Recovery & { action: Action; value?: string; homeServerID?: string; batchRetry?: { kind: Batch; ids: string[]; target: string } };
+  private retryOperation?: NonNullable<App["recovery"]>;
+  private backendOffline = false;
+  private reconnecting = false;
+  private liveSpeeds = new Map<string, number>();
   private selectionRevision = 0;
   private get busy(): Action | undefined {
     return [...this.tasks.values()].at(-1)?.action;
@@ -121,6 +129,8 @@ export class App {
   private confirmation: "disconnect" | "stop" = "disconnect";
   private serverID?: string;
   private servers: Server[] = [];
+  private viewStart = 0;
+  private frozenOrder?: string[];
   private catalogLoaded = false;
   private catalogStale = false;
   private sort: "name" | "ping" | "speed" | "availability" = "name";
@@ -153,6 +163,8 @@ export class App {
   private homeSpeed?: number;
   private homePing?: number;
   private homeSpeedAt = 0;
+  private homeSpeedServer?: { id: string; name: string };
+  private measurementInfo: TextRenderable;
   private homeSpeedLabel = "[t] Проверить скорость выбранного сервера";
 
   constructor(
@@ -218,6 +230,7 @@ export class App {
       this.controlRows.push(row);
       this.controlLabels.push(text(row));
     }
+    this.measurementInfo = text(this.content, "", p.muted, 2);
     this.gauge = text(this.content, "", p.accent, 14);
     this.gauge.marginTop = 1;
     this.tableHeader = text(this.content, "", p.accent);
@@ -287,6 +300,22 @@ export class App {
       }
       this.paint();
     };
+    backend.onDisconnect = () => {
+      if (this.closing || this.disposed) return;
+      this.backendOffline = true;
+      this.status = undefined;
+      this.queued = undefined;
+      this.cancelled = true;
+      this.recovery = { ...recoveryFor("status", "backend-unavailable"), action: "status" };
+      this.notify("Связь потеряна. Действие могло продолжиться. [f] Восстановить связь", true);
+    };
+    backend.onSpeedProgress = (row, id) => {
+      const task = id ? this.tasks.get(id) : undefined;
+      if (!task || task.action !== "servers/speed" || task.value !== row.server_id || this.cancelled || this.closing) return;
+      this.liveSpeeds.set(row.server_id, row.download_mbps);
+      if (this.homeTesting && this.homeSpeedServer?.id === row.server_id) this.homeSpeed = row.download_mbps;
+      this.paint();
+    };
     renderer.keyInput.on("keypress", this.onKey);
     renderer.on("resize", this.paint);
     this.paint();
@@ -297,7 +326,7 @@ export class App {
       this.paint();
     }, 100);
     this.poll = setInterval(() => {
-      if (!this.busy && !this.batch && !this.closing)
+      if (!this.busy && !this.batch && !this.closing && !this.backendOffline && !this.reconnecting)
         void this.perform("status");
     }, 5000);
     void this.perform("status");
@@ -352,6 +381,38 @@ export class App {
     this.open("confirm");
   }
   private items(): Item[] {
+    if (this.screen === "cancel-confirm" || this.screen === "retry-confirm") {
+      const retry = this.screen === "retry-confirm";
+      return [{ key: "n", label: "Нет", run: () => this.open(retry ? "recovery" : "tasks") },
+        { key: "y", label: "Да", run: () => {
+          if (retry) { const r = this.retryOperation; this.retryOperation = undefined; this.open("home"); if (r) void this.perform(r.action, r.value); }
+          else { const id = this.cancelTaskID; this.open("tasks"); if (id) this.cancelTask(id); }
+        } }];
+    }
+    if (this.screen === "tasks") return [...this.tasks].filter(([, task]) => task.action !== "status").map(([id, task], i) => ({
+      key: String(i + 1), label: `Отменить: ${names[task.action] ?? (task.action === "servers/check-batch" ? "Ping → сайт" : "Операция")}`,
+      run: () => {
+        if (task.measurement || task.action.startsWith("servers/") && task.action !== "servers/select") this.cancelTask(id);
+        else { this.cancelTaskID = id; this.open("cancel-confirm"); }
+      },
+    }));
+    if (this.screen === "recovery") {
+      if (this.backendOffline) return [{ key: "u", label: this.reconnecting ? "Восстанавливаем связь…" : "Восстановить связь", run: () => void this.reconnectBackend() }];
+      return (this.recovery?.actions ?? ["status", "diagnostics"]).map(choice => ({
+        key: { status: "u", diagnostics: "d", servers: "v", retry: "r" }[choice],
+        label: { status: "Проверить состояние", diagnostics: "Открыть диагностику", servers: "Выбрать другой сервер", retry: "Повторить действие" }[choice],
+        run: () => {
+          if (choice === "servers") this.open("servers");
+          else if (choice === "diagnostics") this.open("diagnostics");
+          else if (choice === "status") void this.perform("status");
+          else if (this.recovery) {
+            if (["servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/list", "status", "diagnostics"].includes(this.recovery.action))
+              void this.retryCheck(this.recovery);
+            else { this.retryOperation = { ...this.recovery }; this.open("retry-confirm"); }
+          }
+        },
+      }));
+    }
     if (this.screen === "confirm")
       return [
         { key: "n", label: "Нет", run: () => this.open("home") },
@@ -505,6 +566,8 @@ export class App {
       return;
     }
     if (this.closing) return;
+    if (key.name === "j") { this.open("tasks"); return; }
+    if (key.name === "f" && this.recovery) { this.open("recovery"); return; }
     if (key.name === "k") {
       this.cancel();
       return;
@@ -532,7 +595,10 @@ export class App {
       }
       if (key.name === "o") {
         const sorts = ["name", "ping", "speed", "availability"] as const;
+        this.frozenOrder = undefined;
         this.sort = sorts[(sorts.indexOf(this.sort) + 1) % sorts.length];
+        this.viewStart = 0;
+        if (this.batch) this.frozenOrder = this.sortedServers().map(s => s.server_id);
         this.paint();
         return;
       }
@@ -580,7 +646,7 @@ export class App {
     else if (key.name === "down" || key.name === "tab")
       this.selected = (this.selected + 1) % Math.max(1, items.length);
     else if (key.name === "return") items[this.selected]?.run();
-    else if (key.name === "u")
+    else if (key.name === "u" && !items.some(item => item.key === "u"))
       void this.perform(
         this.screen === "diagnostics" ? "diagnostics" : "status",
       );
@@ -594,6 +660,10 @@ export class App {
     this.paint();
   };
   private sortedServers() {
+    if (this.frozenOrder) {
+      const ranks = new Map(this.frozenOrder.map((id, i) => [id, i]));
+      return [...this.servers].sort((a, b) => (ranks.get(a.server_id) ?? Infinity) - (ranks.get(b.server_id) ?? Infinity));
+    }
     const compare = (a: Server, b: Server) =>
       a.display_name.localeCompare(b.display_name, "ru", { numeric: true }) ||
       a.server_id.localeCompare(b.server_id);
@@ -624,8 +694,10 @@ export class App {
       0,
       list.findIndex((s) => s.server_id === this.serverID),
     );
-    const start = Math.floor(at / this.rowCount()) * this.rowCount();
-    return list.slice(start, start + this.rowCount());
+    this.viewStart = Math.min(this.viewStart, Math.max(0, list.length - this.rowCount()));
+    if (at < this.viewStart) this.viewStart = at;
+    if (at >= this.viewStart + this.rowCount()) this.viewStart = at - this.rowCount() + 1;
+    return list.slice(this.viewStart, this.viewStart + this.rowCount());
   }
   private updateCatalog(reply: Reply, action: Action) {
     if (action === "servers/check-batch" && reply.catalog?.servers) {
@@ -643,17 +715,22 @@ export class App {
           };
       }
     } else if (reply.catalog?.servers) {
-      this.servers = reply.catalog.servers.map((s) => ({
-        ...s,
-        // Persisted catalog failures are not measurements from this UI session.
-        status: "untested",
-        ping_status: "untested",
-        latency_ms: undefined,
-        download_mbps: undefined,
-        download_seconds: undefined,
-        downloaded_bytes: undefined,
-        availability: "untested",
-      }));
+      const previous = new Map(this.servers.map(s => [s.server_id, s]));
+      const oldOrder = this.sortedServers();
+      const anchor = oldOrder[this.viewStart]?.server_id;
+      const cursorIndex = oldOrder.findIndex(s => s.server_id === this.serverID);
+      this.servers = reply.catalog.servers.map(s => {
+        const measured = previous.get(s.server_id);
+        return { ...s, status: measured?.status ?? "untested",
+          ping_status: measured?.ping_status ?? "untested", latency_ms: measured?.latency_ms,
+          download_mbps: measured?.download_mbps, download_seconds: measured?.download_seconds,
+          downloaded_bytes: measured?.downloaded_bytes, availability: measured?.availability ?? "untested" };
+      });
+      const order = this.sortedServers();
+      if (!this.servers.some(s => s.server_id === this.serverID))
+        this.serverID = order[Math.max(0, Math.min(cursorIndex, order.length - 1))]?.server_id;
+      const anchorIndex = order.findIndex(s => s.server_id === anchor);
+      if (anchorIndex >= 0) this.viewStart = anchorIndex;
       this.catalogLoaded = true;
       this.catalogStale = false;
     }
@@ -694,6 +771,9 @@ export class App {
     insideBatch = false,
   ): Promise<Reply | undefined> {
     if (this.closing || this.disposed) return;
+    if (this.backendOffline || this.reconnecting && !["status", "servers/list"].includes(action)) {
+      this.notify("Связь со службой недоступна. [f] Восстановить связь", true); return;
+    }
     const measurementActive = !!this.batch || this.homeTesting;
     const allowedDuringMeasurement = ["servers/select", "status", "subscription/read"].includes(action);
     if ((measurementActive && !insideBatch && !allowedDuringMeasurement) ||
@@ -710,7 +790,7 @@ export class App {
       return;
     }
     const requestID = `ui-${++this.nextTask}`;
-    this.tasks.set(requestID, { action, measurement: insideBatch, started: Date.now(), phase: "" });
+    this.tasks.set(requestID, { action, measurement: insideBatch, started: Date.now(), phase: "", value });
     const selectionRevision = this.selectionRevision;
     const revision = this.editorRevision,
       navigation = this.navigationRevision;
@@ -744,8 +824,13 @@ export class App {
           if (this.screen === "subscription") this.input.value = this.draft;
         }
       }
+      if (!reply.ok && reply.reason === "cancelled") this.recovery = undefined;
+      else if (!reply.ok) this.recovery = { ...recoveryFor(action, reply.reason), action, value,
+        homeServerID: this.homeTesting ? this.homeSpeedServer?.id : undefined,
+        batchRetry: this.batch ? { kind: this.batch.kind, ids: [...(this.batch.ids ?? [])], target: this.batch.target ?? this.target } : undefined,
+      };
       if (!reply.ok && !insideBatch) {
-        this.notice = reply.reason === "autostart-unavailable" ? "Не удалось настроить автозапуск. Проверьте пользовательскую службу systemd." : failure(reply.reason, reply.code);
+        this.notice = reply.reason === "autostart-unavailable" ? "Не удалось настроить автозапуск. Проверьте пользовательскую службу systemd." : this.recovery?.message ?? failure(reply.reason, reply.code);
         this.noticeAttempt = [
           "start",
           "backend/start",
@@ -771,7 +856,7 @@ export class App {
           disconnect: "VPN отключён. Docker работает.",
           stop: "Docker и VPN остановлены.",
           "servers/list": "Список загружен.",
-          "servers/refresh": "Каталог обновлён. Результаты проверок сброшены.",
+          "servers/refresh": "Каталог обновлён.",
           "servers/select": "Сервер выбран.",
           subscription: "Подписка сохранена. Обновите список серверов.",
           diagnostics: "Состояние компонентов обновлено.",
@@ -797,10 +882,15 @@ export class App {
         }
       }
     } catch {
-      if (!action.startsWith("servers/") && !action.startsWith("autostart/")) this.status = undefined;
+      this.backendOffline = true;
+      this.cancelled = true;
+      this.queued = undefined;
+      this.recovery = { ...recoveryFor(action, "backend-unavailable"), action, value };
+      this.status = undefined;
       this.notify(failure("backend-unavailable", null), true);
     } finally {
       this.tasks.delete(requestID);
+      if (action === "servers/speed" && value) this.liveSpeeds.delete(value);
       this.paint();
       if (this.closing && !this.batch && !this.homeTesting && !this.tasks.size) await this.finishClose();
       else if (this.queued) {
@@ -826,13 +916,15 @@ export class App {
   private inlineSpeed() {
     return this.renderer.width < 70 || this.renderer.height < 25;
   }
-  private async testHomeSpeed() {
+  private async testHomeSpeed(sourceID?: string) {
     if (this.busy || this.batch || this.homeTesting) return;
     if (!this.ready()) { this.notify("Сначала запустите Docker.", true); return; }
     this.homeTesting = true;
     this.cancelled = false;
     this.homeSpeed = undefined;
     this.homePing = undefined;
+    this.homeSpeedAt = 0;
+    this.homeSpeedServer = undefined;
     this.notice = "";
     this.noticeAttempt = "";
     this.error = false;
@@ -841,8 +933,9 @@ export class App {
       const list = await this.perform("servers/list", undefined, true);
       if (this.cancelled || this.closing) return;
       if (!list?.ok) throw new Error("Не удалось загрузить серверы.");
-      const server = list.catalog?.servers?.find(row => row.selected);
-      if (!server) throw new Error("Сначала выберите сервер в списке.");
+      const server = list.catalog?.servers?.find(row => sourceID ? row.server_id === sourceID : row.selected);
+      if (!server) throw new Error(sourceID ? "Сервер удалён из подписки. Выберите другой сервер." : "Сначала выберите сервер в списке.");
+      this.homeSpeedServer = { id: server.server_id, name: server.display_name };
       this.homeSpeedLabel = `Ping · ${server.display_name}`;
       const ping = await this.perform("servers/ping", server.server_id, true);
       if (this.cancelled || this.closing) return;
@@ -857,10 +950,11 @@ export class App {
       this.homeSpeedAt = Date.now();
       this.homeSpeedLabel = `${server.display_name} · средняя скорость`;
     } catch (error) {
+      this.homeSpeed = undefined;
       this.homeSpeedLabel = error instanceof Error ? error.message : "Ошибка измерения.";
       this.notify(this.homeSpeedLabel, true);
     } finally {
-      if (this.cancelled) this.homeSpeedLabel = "Тест отменён";
+      if (this.cancelled) { this.homeSpeedLabel = "Тест отменён"; this.homeSpeed = undefined; }
       this.homeTesting = false;
       this.paint();
       if (this.closing && !this.tasks.size) await this.finishClose();
@@ -868,7 +962,7 @@ export class App {
     }
   }
 
-  private async runBatch(kind: Batch) {
+  private async runBatch(kind: Batch, retry?: { ids: string[]; target: string }) {
     if (this.busy || this.batch || this.homeTesting) {
       this.notify("Дождитесь завершения или отмените текущую операцию [k].");
       return;
@@ -888,7 +982,7 @@ export class App {
       done: 0,
       total: this.servers.length,
       failed: 0,
-      target: this.target,
+      target: retry?.target ?? this.target,
       running: new Set(),
       pinged: new Set(), completed: new Set(), failures: new Set(),
     };
@@ -910,7 +1004,13 @@ export class App {
         return;
       }
     }
-    const ids = this.sortedServers().map((s) => s.server_id);
+    const ids = retry?.ids ?? this.sortedServers().map((s) => s.server_id);
+    if (ids.some(id => !this.servers.some(s => s.server_id === id))) {
+      this.batch = undefined;
+      this.notify("Сервер удалён из подписки. Обновите список перед проверкой.", true);
+      return;
+    }
+    this.frozenOrder = ids;
     this.batch.total = ids.length;
     const target = this.batch.target!;
     let stoppedReason: string | undefined;
@@ -971,6 +1071,7 @@ export class App {
       }
     }
     const { done, total, failed } = this.batch;
+    this.frozenOrder = undefined;
     this.batch = undefined;
     this.notify(
       stoppedReason
@@ -981,15 +1082,54 @@ export class App {
     if (this.closing && !this.tasks.size && !this.homeTesting && !this.batch) await this.finishClose();
     else await this.loadPendingSubscription();
   }
-  private cancel() {
-    // While measuring, k belongs to the measurement, never to a concurrent switch.
-    const measuring = !!this.batch || this.homeTesting;
-    const entry = [...this.tasks.entries()].find(([, task]) =>
-      measuring ? task.measurement : !["status", "subscription", "subscription/read"].includes(task.action));
-    if (!entry && !measuring) return;
-    if (measuring) this.cancelled = true;
-    if (entry) this.backend.cancel?.(entry[0]);
+  private cancelTask(id: string) {
+    const task = this.tasks.get(id);
+    if (!task) return;
+    if (task.measurement) this.cancelled = true;
+    this.backend.cancel?.(id);
     this.notify("Отмена запрошена. Ожидаем завершения и восстановления состояния.");
+  }
+  private cancel() {
+    const entries = [...this.tasks.entries()].filter(([, task]) => !["status", "subscription", "subscription/read"].includes(task.action));
+    if (entries.length !== 1) { if (entries.length) this.open("tasks"); return; }
+    const [id, task] = entries[0]!;
+    if (task.measurement || task.action.startsWith("servers/") && task.action !== "servers/select") this.cancelTask(id);
+    else { this.cancelTaskID = id; this.open("cancel-confirm"); }
+  }
+  private async retryCheck(recovery: NonNullable<App["recovery"]>) {
+    if (recovery.homeServerID) {
+      await this.testHomeSpeed(recovery.homeServerID);
+      return;
+    }
+    if (recovery.batchRetry) {
+      await this.runBatch(recovery.batchRetry.kind, recovery.batchRetry);
+      return;
+    }
+    const { action, value } = recovery;
+    if (action === "servers/speed") {
+      const ping = await this.perform("servers/ping", value);
+      if (!ping?.ok || ping.catalog?.server?.ping_status !== "ready") return;
+    }
+    await this.perform(action, value);
+  }
+  private async reconnectBackend() {
+    if (this.reconnecting || this.tasks.size || this.batch || this.homeTesting || this.closing) return;
+    if (!this.backend.reconnect) { this.notify("Перезапустите интерфейс: служба не поддерживает восстановление.", true); return; }
+    this.reconnecting = true;
+    this.paint();
+    try {
+      await this.backend.reconnect();
+      if (this.closing || this.disposed) return;
+      this.backendOffline = false;
+      const state = await this.perform("status");
+      if (!state?.ok) throw new Error();
+      if (this.ready() && this.status?.subscription === "configured") {
+        const list = await this.perform("servers/list");
+        if (!list?.ok) throw new Error();
+      }
+      this.notify("Связь восстановлена. Состояние обновлено; действия не повторялись.");
+    } catch { this.backendOffline = true; this.notify("Не удалось восстановить связь. Можно повторить [u].", true); }
+    finally { this.reconnecting = false; this.paint(); }
   }
   private paint = () => {
     if (this.disposed) return;
@@ -1038,6 +1178,14 @@ export class App {
         : "";
     });
     this.summary.height = this.screen === "diagnostics" ? 6 : 2;
+    if (this.screen === "tasks") this.summary.content = this.tasks.size ? "Текущие задачи" : "Нет выполняющихся задач";
+    if (this.screen === "cancel-confirm") this.summary.content = "Точно отменить эту операцию?";
+    if (this.screen === "retry-confirm") this.summary.content = "Точно повторить изменение VPN?";
+    if (this.screen === "recovery") {
+      this.summary.height = 3;
+      const stages: Record<string, string> = { docker: "Docker", routes: "Маршруты", profile: "Профиль KDE", dns: "DNS", server: "Сервер", management: "Служба управления", input: "Ввод данных", unknown: "Операция" };
+      this.summary.content = `${stages[this.recovery?.stage ?? "unknown"]}\n${this.recovery?.message ?? "Проверьте состояние."}`;
+    }
     if (this.screen === "confirm")
       this.summary.content =
         this.confirmation === "disconnect"
@@ -1053,13 +1201,17 @@ export class App {
             : "";
     this.summary.visible = this.screen !== "home" || this.summary.chunks.some(chunk => chunk.text.length > 0);
     if (!this.summary.visible) this.summary.height = 0;
+    this.measurementInfo.visible = this.screen === "home" && this.inlineSpeed() && !!this.homeSpeedServer;
+    this.measurementInfo.height = this.measurementInfo.visible ? 2 : 0;
+    const measuredElsewhere = this.homeSpeedServer && this.servers.some(s => s.selected && s.server_id !== this.homeSpeedServer!.id);
+    const timeLabel = this.homeSpeedAt ? new Date(this.homeSpeedAt).toLocaleTimeString("ru-RU", { hour12: false }) : this.homeTesting ? "выполняется" : "не завершён";
+    this.measurementInfo.content = `Замер: ${timeLabel}${measuredElsewhere ? " · другой сервер" : ""}\n${cell(this.homeSpeedServer?.name ?? "", width).trimEnd()}`;
     const compactGauge = this.renderer.height < 25 || width < 29;
     this.gauge.visible = this.screen === "home" && !this.inlineSpeed();
     this.gauge.height = this.gauge.visible ? (compactGauge ? 4 : 11) + (this.homeSpeedAt ? 1 : 0) : 0;
     this.gauge.marginTop = this.gauge.visible ? 1 : 0;
     this.gauge.fg = this.homeSpeed === undefined ? p.accent : p.green;
-    const ease = Math.min(1, (Date.now() - this.homeSpeedAt) / 450);
-    const dial = speedometer(this.homeSpeed, (this.homeSpeed ?? 0) * (1 - (1 - ease) ** 3), compactGauge);
+    const dial = speedometer(this.homeSpeed, this.homeSpeed ?? 0, compactGauge);
     this.gauge.content = new StyledText([...dial.chunks,
       ...t`\n${cell(this.homeSpeedLabel, width).trimEnd()}${this.homeSpeedAt ? `\nПоследний замер: ${new Date(this.homeSpeedAt).toLocaleTimeString("ru-RU", { hour12: false })}` : ""}`.chunks,
     ]);
@@ -1111,7 +1263,7 @@ export class App {
           ? "ошибка"
           : (s.latency_ms?.toString() ?? "—");
       const speed = checking("speed") && this.batch?.pinged.has(s.server_id)
-        ? frames[this.frame % 10]
+        ? this.liveSpeeds.has(s.server_id) ? `~${this.liveSpeeds.get(s.server_id)!.toFixed(1)}` : frames[this.frame % 10]
         : s.status === "failed"
           ? "ошибка"
           : (s.download_mbps?.toFixed(1) ?? "—");
@@ -1150,23 +1302,26 @@ export class App {
     const switching = [...this.tasks.values()].find(task => task.action === "servers/select");
     if (switching && (this.batch || this.homeTesting))
       this.progress.content = `${this.progress.chunks.map(chunk => chunk.text).join("")} · Применяем сервер`;
+    const activeRows = [...this.tasks.values()].filter(task => task.action !== "status");
+    if (activeRows.length > 1) this.progress.content = activeRows.map(task =>
+      cell(`${frames[this.frame % 10]} ${names[task.action] ?? "Ping → сайт"} · ${task.phase || "выполняется"} · [j] задачи`, width).trimEnd()).join("\n");
     this.notification.content = this.closing
       ? "Завершаем текущую операцию перед выходом…"
-      : this.notice +
+      : this.notice + (this.error && this.recovery ? "\n[f] Действия" : "") +
         (this.error && this.noticeAttempt
           ? `\nПопытка: ${this.noticeAttempt}`
           : "");
     this.notification.fg = this.error ? p.red : p.muted;
     const inlineProgress = this.screen === "home" && this.inlineSpeed() && this.homeTesting && !switching;
     this.progress.visible = this.progress.chunks.some(chunk => chunk.text.length > 0) && !inlineProgress;
-    this.progress.height = this.progress.visible ? 1 : 0;
+    this.progress.height = this.progress.visible ? Math.max(1, activeRows.length) : 0;
     const hasNotice = this.closing || !!this.notice;
     this.notification.visible = hasNotice;
-    this.notification.height = hasNotice ? 2 : 0;
+    this.notification.height = hasNotice ? (this.error && this.recovery && this.noticeAttempt ? 3 : 2) : 0;
     this.footer.content = editor
       ? "Esc назад · Ctrl+C выход"
       : this.screen === "servers"
-        ? "Tab меню/список · ↑↓ · Enter · o сортировка · Esc назад · q выход"
+        ? "Tab меню/список · ↑↓ · Enter · o сортировка · j задачи · Esc назад · q выход"
         : "↑↓ / Tab выбор · Enter · Esc назад · k отменить · q выход";
   };
   async close() {
@@ -1193,7 +1348,8 @@ export class App {
     this.renderer.off("resize", this.paint);
     this.backend.onProgress = undefined;
     this.backend.onCheckProgress = undefined;
-    await this.backend.close();
-    this.renderer.destroy();
+    this.backend.onSpeedProgress = undefined;
+    this.backend.onDisconnect = undefined;
+    try { await this.backend.close(); } finally { this.renderer.destroy(); }
   }
 }

@@ -979,7 +979,7 @@ test("home speed test skips download after failed ping and allows navigation", a
     const narrow = t.captureCharFrame();
     expect(narrow).toContain("[m] Режим:");
     expect(narrow).toContain("[z] Остановить Docker");
-    expect(narrow).not.toContain("выполняется");
+    expect(narrow).not.toContain("Ping · выполняется");
     expect(narrow).toContain("ping");
     t.mockInput.pressKey("d"); await t.renderOnce();
     expect(t.captureCharFrame()).not.toContain("СКОРОСТЬ СЕРВЕРА");
@@ -1043,6 +1043,7 @@ test("measurement cancellation is scoped and never cancels concurrent server sel
     await settle();
     expect(tasks.get("servers/select")).toBeDefined();
     t.mockInput.pressKey("k"); await settle();
+    t.mockInput.pressKey("1"); await settle();
     expect(cancelled).toEqual([tasks.get("servers/check-batch")]);
     expect(cancelled).not.toContain(tasks.get("servers/select"));
     finishCheck({ ...reply(), ok: false, reason: "cancelled" });
@@ -1050,6 +1051,7 @@ test("measurement cancellation is scoped and never cancels concurrent server sel
     await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Применяем сервер");
     finishSelect(reply()); await switching;
+    t.mockInput.pressKey("v"); await settle();
     await t.renderOnce();
     expect(t.captureCharFrame().split("\n").find(line => line.includes("Amsterdam") && line.includes("●"))).toBeDefined();
   } finally { finishCheck(reply()); finishSelect(reply()); await settle(); await app.close(); }
