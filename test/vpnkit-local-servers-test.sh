@@ -134,6 +134,12 @@ fi
 if [[ "${1:-}" != exec ]]; then
   exit 98
 fi
+# Docker consumes exec options; the legacy supervisor receives unchanged argv
+# and deliberately ignores the opt-in environment.
+if [[ "${2:-}" == -e ]]; then
+  [[ "${3:-}" == VPNKIT_SPEED_PROGRESS=1 ]] || exit 95
+  set -- "$1" "${@:4}"
+fi
 [[ "${2:-}" == owned-container || "${2:-}" == new-container ]] || exit 95
 [[ "${3:-}" == "$helper" ]] || exit 96
 command=${4:-}
@@ -147,7 +153,7 @@ case "$command" in
     case "$operation:$#" in
       list:6|test-all:6|current:6) server_id= ;;
       check-batch:8) exit 2 ;;
-      ping:7|select:7) [[ "$server_id" =~ ^srv_[A-Za-z0-9_-]{27}$ ]] || exit 92 ;;
+      ping:7|select:7|speed:7) [[ "$server_id" =~ ^srv_[A-Za-z0-9_-]{27}$ ]] || exit 92 ;;
       *) exit 93 ;;
     esac
     ;;
@@ -170,7 +176,7 @@ case "$command" in
       printf 'exec-lock=held operation=%s\n' "$operation" >>"$MOCK_DOCKER_LOG"
     fi
     if [[ "${MOCK_EXEC_SLEEP:-0}" != 1 ]]; then
-      if [[ "$operation" == list || "$operation" == test-all ]]; then
+      if [[ "$operation" == list || "$operation" == test-all || "$operation" == speed ]]; then
         printf '{"schema":"vibe-vpn.server-browser.v2","status":"ok","generation":4,"servers":[]}\n'
       else
         printf '{"schema":"vibe-vpn.server-browser.v2","status":"unavailable","generation":0}\n'
@@ -294,6 +300,19 @@ grep -Eq 'docker <exec> <owned-container> </usr/local/bin/vibe-vpn-server-op-sup
 ! grep -Fq '/usr/local/bin/vibe-vpn> <--config>' "$tmp/docker.log"
 [[ "$(stat -c '%a' "$tmp/secrets/state/lifecycle.lock")" == 600 ]]
 [[ "$(stat -c '%h' "$tmp/secrets/state/lifecycle.lock")" == 1 ]]
+
+# An older speed supervisor remains usable: Docker passes only an optional env
+# value, never a new argv flag, and its final-only response is preserved.
+: >"$tmp/docker.log"
+VPNKIT_SPEED_PROGRESS=1 $lifecycle servers speed "$server_id" >"$tmp/out" 2>"$tmp/err"
+python3 - "$tmp/out" <<'PYOLD'
+import json, sys
+with open(sys.argv[1]) as stream:
+    response = json.load(stream)
+assert response["status"] == "ok"
+PYOLD
+grep -Eq 'docker <exec> <-e> <VPNKIT_SPEED_PROGRESS=1> <owned-container> </usr/local/bin/vibe-vpn-server-op-supervisor> <run> <op_[A-Za-z0-9_-]{43}> <speed> <srv_' "$tmp/docker.log"
+! grep -Fq '<--progress>' "$tmp/docker.log"
 
 # A pre-batch supervisor must produce an actionable version error.
 $lifecycle servers check-batch "$server_id" https://example.com/ >"$tmp/out" 2>"$tmp/err"

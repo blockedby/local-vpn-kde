@@ -235,10 +235,18 @@ func addServerBrowserCommands(root *cobra.Command, o *cliOptions) {
 		if !jsonOut {
 			return fmt.Errorf("--json is required")
 		}
+		enabled, _ := cmd.Flags().GetBool("progress")
+		if enabled {
+			encoder := json.NewEncoder(cmd.OutOrStdout())
+			cmd.SetContext(context.WithValue(browserCommandContext(cmd), downloadProgressKey{}, func(r nettest.Result) error {
+				return encoder.Encode(picker.SpeedProgress{Event: "speed-progress", ServerID: id, DownloadedBytes: r.Bytes, ElapsedSeconds: r.Seconds, DownloadMbps: r.Mbps})
+			}))
+		}
 		return runBrowserPing(cmd, o, id, defaultBrowserDependencies())
 	}}
 	speed.Flags().String("server-id", "", "opaque server ID")
 	speed.Flags().Bool("json", false, "print redacted JSON")
+	speed.Flags().Bool("progress", false, "stream measured throughput before final result")
 	root.AddCommand(speed)
 
 	availability := &cobra.Command{Use: "availability", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {

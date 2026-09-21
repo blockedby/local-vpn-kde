@@ -58,8 +58,12 @@ func fakeWorker() {
 		}
 	}
 	switch mode {
-	case "stream-check":
-		fmt.Fprintf(os.Stdout, "{\"event\":\"server-check\",\"server_id\":%q,\"stage\":\"ping\",\"ping_status\":\"ready\",\"latency_ms\":17,\"availability\":\"untested\",\"secret\":\"private-marker\"}\n", testServerID)
+	case "stream-check", "stream-speed":
+		if mode == "stream-speed" {
+			fmt.Fprintf(os.Stdout, `{"event":"speed-progress","server_id":%q,"downloaded_bytes":1000,"elapsed_seconds":0.1,"download_mbps":0.08,"secret":"private-marker"}`+"\n", testServerID)
+		} else {
+			fmt.Fprintf(os.Stdout, "{\"event\":\"server-check\",\"server_id\":%q,\"stage\":\"ping\",\"ping_status\":\"ready\",\"latency_ms\":17,\"availability\":\"untested\",\"secret\":\"private-marker\"}\n", testServerID)
+		}
 		deadline := time.Now().Add(5 * time.Second)
 		for time.Now().Before(deadline) {
 			if _, err := os.Stat(os.Getenv("VPNKIT_CHECK_RELEASE")); err == nil {
@@ -996,6 +1000,93 @@ func TestSupervisorStreamsSafePingWhileWorkerIsStillRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 	if event["event"] != "server-check" || event["latency_ms"] != float64(17) || event["secret"] != nil {
+		t.Fatalf("invalid progress: %v", event)
+	}
+	select {
+	case <-done:
+		t.Fatal("progress waited for worker exit")
+	default:
+	}
+	if err := os.WriteFile(release, []byte("go"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var final map[string]any
+	if err := decoder.Decode(&final); err != nil || final["status"] != "ok" {
+		t.Fatal("final response lost", err)
+	}
+	if code := <-done; code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if err := s.verify(testToken); err != nil {
+		t.Fatal("worker not drained", err)
+	}
+}
+
+func TestSupervisorStreamsSpeedBeforeWorkerCompletes(t *testing.T) {
+	release := filepath.Join(t.TempDir(), "release")
+	s := newTestSupervisor(t, "stream-speed", "VPNKIT_CHECK_RELEASE="+release)
+	args := []string{testToken, "speed", testServerID}
+	if err := s.prepare(args); err != nil {
+		t.Fatal(err)
+	}
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	done := make(chan int, 1)
+	go func() {
+		defer writer.Close()
+		done <- dispatch(append(append([]string{"run"}, args...), "--progress"), s, writer)
+	}()
+	defer func() { os.WriteFile(release, []byte("go"), 0600) }()
+	decoder := json.NewDecoder(reader)
+	var event map[string]any
+	if err := decoder.Decode(&event); err != nil {
+		t.Fatal(err)
+	}
+	if event["event"] != "speed-progress" || event["downloaded_bytes"] != float64(1000) || event["secret"] != nil {
+		t.Fatalf("invalid progress: %v", event)
+	}
+	select {
+	case <-done:
+		t.Fatal("progress waited for worker exit")
+	default:
+	}
+	if err := os.WriteFile(release, []byte("go"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var final map[string]any
+	if err := decoder.Decode(&final); err != nil || final["status"] != "ok" {
+		t.Fatal("final response lost", err)
+	}
+	if code := <-done; code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if err := s.verify(testToken); err != nil {
+		t.Fatal("worker not drained", err)
+	}
+}
+
+func TestSupervisorStreamsSpeedWithEnvironmentOptIn(t *testing.T) {
+	t.Setenv("VPNKIT_SPEED_PROGRESS", "1")
+	release := filepath.Join(t.TempDir(), "release")
+	s := newTestSupervisor(t, "stream-speed", "VPNKIT_CHECK_RELEASE="+release)
+	args := []string{testToken, "speed", testServerID}
+	if err := s.prepare(args); err != nil {
+		t.Fatal(err)
+	}
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	done := make(chan int, 1)
+	go func() {
+		defer writer.Close()
+		done <- dispatch(append([]string{"run"}, args...), s, writer)
+	}()
+	defer func() { os.WriteFile(release, []byte("go"), 0600) }()
+	decoder := json.NewDecoder(reader)
+	var event map[string]any
+	if err := decoder.Decode(&event); err != nil {
+		t.Fatal(err)
+	}
+	if event["event"] != "speed-progress" || event["downloaded_bytes"] != float64(1000) || event["secret"] != nil {
 		t.Fatalf("invalid progress: %v", event)
 	}
 	select {

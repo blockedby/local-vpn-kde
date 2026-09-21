@@ -45,10 +45,26 @@ candidate=0
 probe() {
   local action=$1
   shift
-  local rc=0
-  sudo -u tester -H scripts/vpnkit/vpnkit-local.sh servers "$action" "$@" > /tmp/lab-result.json || rc=$?
+  local rc=0 progress=0
+  [[ "$action" != speed ]] || progress=1
+  sudo -u tester -H env VPNKIT_SPEED_PROGRESS="$progress" scripts/vpnkit/vpnkit-local.sh servers "$action" "$@" > /tmp/lab-result.json || rc=$?
   local status
-  status=$(python3 -c 'import json; print(json.load(open("/tmp/lab-result.json"))["status"])') || exit 1
+  status=$(python3 - "$action" <<'PYPROGRESS'
+import json, sys
+frames = [json.loads(line) for line in open("/tmp/lab-result.json") if line.strip()]
+final = frames[-1]
+if sys.argv[1] == "speed" and final["status"] == "ok":
+    samples = frames[:-1]
+    assert len(samples) >= 2, "speed samples arrived only at completion"
+    previous_bytes, previous_seconds = 0, 0
+    for p in samples:
+        assert p["event"] == "speed-progress"
+        assert p["downloaded_bytes"] >= previous_bytes and p["elapsed_seconds"] > previous_seconds
+        assert abs(p["download_mbps"] - p["downloaded_bytes"] * 8 / p["elapsed_seconds"] / 1e6) < 0.001
+        previous_bytes, previous_seconds = p["downloaded_bytes"], p["elapsed_seconds"]
+print(final["status"])
+PYPROGRESS
+  ) || exit 1
   case "$status" in
     ok) (( rc == 0 )) || exit 1; return 0 ;;
     failed) echo "FAIL candidate $candidate: $action"; return 1 ;;

@@ -1453,8 +1453,13 @@ server_browser_helper_exec() {
     cancel::|verify::) ;;
     *) return 2 ;;
   esac
+  local -a exec_options=()
+  if [[ "$command" == run && "$operation" == speed && "${VPNKIT_SPEED_PROGRESS:-0}" == 1 ]]; then
+    # Older supervisors ignore the opt-in environment and retain final-only JSON.
+    exec_options=(-e VPNKIT_SPEED_PROGRESS=1)
+  fi
   if [[ "$command" == run || "${LIFECYCLE_RECOVERY_MODE:-0}" == 1 ]]; then
-    lifecycle_docker_command exec "$cid" "${argv[@]}"
+    lifecycle_docker_command exec "${exec_options[@]}" "$cid" "${argv[@]}"
   else
     # A wedged client attachment is not process closure. Bound each fixed
     # prepare/cancel/verify attachment so the caller can re-prove ownership and

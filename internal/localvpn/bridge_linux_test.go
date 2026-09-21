@@ -478,3 +478,86 @@ func TestBridgeAutostartRejectsInvalidSettingsWithoutSystemMutation(t *testing.T
 		t.Fatal(invalid)
 	}
 }
+
+func TestBridgeForwardsSpeedProgressBeforeFinalAndDrainsCancellation(t *testing.T) {
+	for _, stop := range []bool{false, true} {
+		t.Run(fmt.Sprint(stop), func(t *testing.T) {
+			b := bridgeFixture(t, `{"container":"healthy"}`)
+			release := filepath.Join(t.TempDir(), "release")
+			t.Setenv("VPNKIT_CHECK_RELEASE", release)
+			id := "srv_" + strings.Repeat("a", 27)
+			script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' '{"event":"speed-progress","server_id":"%s","downloaded_bytes":1000,"elapsed_seconds":0.1,"download_mbps":0.08,"secret":"private-marker"}'
+while [ ! -e "$VPNKIT_CHECK_RELEASE" ]; do sleep 0.01; done
+printf '%%s\n' '{"schema":"vibe-vpn.server-browser.v2","status":"ok","servers":[{"server_id":"%s","display_name":"Fixture","ping_status":"ready","latency_ms":23,"availability":"ready"}]}'
+`, id, id)
+			if err := os.WriteFile(b.options.Executable, []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			request, _ := json.Marshal(map[string]any{"id": "speed-1", "action": "servers/speed", "value": id, "progress": true})
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			reader, writer := io.Pipe()
+			defer reader.Close()
+			done := make(chan error, 1)
+			go func() { defer writer.Close(); done <- b.Serve(ctx, bytes.NewReader(append(request, '\n')), writer) }()
+			decoder := json.NewDecoder(reader)
+			var event map[string]any
+			if err := decoder.Decode(&event); err != nil {
+				t.Fatal(err)
+			}
+			if event["id"] != "speed-1" || event["event"] != "speed-progress" || event["downloaded_bytes"] != float64(1000) || event["secret"] != nil {
+				t.Fatal("bad progress", event)
+			}
+			select {
+			case <-done:
+				t.Fatal("progress buffered until exit")
+			default:
+			}
+			if stop {
+				b.Cancel()
+			} else if err := os.WriteFile(release, []byte("go"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var final map[string]any
+			if err := decoder.Decode(&final); err != nil {
+				t.Fatal(err)
+			}
+			if final["id"] != "speed-1" {
+				t.Fatal("lost request ID", final)
+			}
+			if stop && final["reason"] != "cancelled" {
+				t.Fatal("lost cancellation", final)
+			}
+			if !stop && final["ok"] != true {
+				t.Fatal("lost final result", final)
+			}
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestBridgeSpeedAcceptsLegacyFinalOnlyWithProgressRequested(t *testing.T) {
+	b := bridgeFixture(t, `{}`)
+	id := "srv_" + strings.Repeat("a", 27)
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' '%s'\n", `{"schema":"vibe-vpn.server-browser.v2","status":"ok","server":{"server_id":"`+id+`","status":"ready","download_mbps":12}}`)
+	if err := os.WriteFile(b.options.Executable, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	var input, output bytes.Buffer
+	if err := json.NewEncoder(&input).Encode(map[string]any{"id": "legacy-speed", "action": "servers/speed", "value": id, "progress": true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Serve(context.Background(), &input, &output); err != nil {
+		t.Fatal(err)
+	}
+	var final map[string]any
+	if err := json.Unmarshal(output.Bytes(), &final); err != nil {
+		t.Fatal("expected final-only JSON", err)
+	}
+	if final["id"] != "legacy-speed" || final["ok"] != true {
+		t.Fatal("old supervisor final rejected", final)
+	}
+}

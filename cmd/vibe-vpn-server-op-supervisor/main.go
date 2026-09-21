@@ -34,10 +34,18 @@ func dispatch(args []string, supervisor *supervisor, stdout io.Writer) int {
 		}
 		return 0
 	case "run":
+		speedProgress := len(args) == 5 && args[2] == "speed" && args[4] == "--progress"
+		if speedProgress {
+			args = args[:4]
+		}
 		if len(args) < 3 || len(args) > 5 || (len(args) == 5 && args[2] != "availability" && args[2] != "check-batch") {
 			return exitUsage
 		}
-		result, err := supervisor.run(args[1:], stdout)
+		var progress []io.Writer
+		if args[2] == "check-batch" || speedProgress || (args[2] == "speed" && os.Getenv("VPNKIT_SPEED_PROGRESS") == "1") {
+			progress = []io.Writer{stdout}
+		}
+		result, err := supervisor.run(args[1:], progress...)
 		if err != nil {
 			return exitFailure
 		}

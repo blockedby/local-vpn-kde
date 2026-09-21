@@ -493,12 +493,18 @@ func (supervisor *supervisor) run(args []string, progress ...io.Writer) (runResu
 	command := exec.Command(supervisor.config.worker, workerArgv(supervisor.config, request)...)
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	command.Stdout = captured
-	var stream *picker.CheckStream
+	var stream interface{ Finish() error }
 	if request.operation == "check-batch" && len(progress) > 0 {
 		command.Args = append(command.Args, "--progress")
 		encoder := json.NewEncoder(progress[0])
 		stream = picker.NewCheckStream(strings.Split(request.serverID, ","), captured, func(p picker.CheckProgress) error { return encoder.Encode(p) })
-		command.Stdout = stream
+		command.Stdout = stream.(io.Writer)
+	}
+	if request.operation == "speed" && len(progress) > 0 {
+		command.Args = append(command.Args, "--progress")
+		encoder := json.NewEncoder(progress[0])
+		stream = picker.NewSpeedStream(request.serverID, captured, func(p picker.SpeedProgress) error { return encoder.Encode(p) })
+		command.Stdout = stream.(io.Writer)
 	}
 	command.Stderr = io.Discard
 	if supervisor.config.workerEnv != nil {

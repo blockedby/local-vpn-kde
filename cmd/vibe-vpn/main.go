@@ -300,6 +300,8 @@ func runTestContextVersioned(ctx context.Context, o *cliOptions, apply bool, max
 	return nil
 }
 
+type downloadProgressKey struct{}
+
 func testOneContext(ctx context.Context, c config.Config, n vless.Node, debug bool) (nettest.Result, error) {
 	return testOneContextUsing(ctx, c, n, debug, nil)
 }
@@ -344,7 +346,8 @@ func testOneContextUsing(ctx context.Context, c config.Config, n vless.Node, deb
 		if check != nil {
 			result, err = check()
 		} else if c.TestDurationSeconds > 0 {
-			result, err = nettest.DownloadFor(c.TestSocks, c.TestURL, time.Duration(c.TestDurationSeconds)*time.Second, time.Duration(c.TimeoutSeconds)*time.Second)
+			progress, _ := ctx.Value(downloadProgressKey{}).(func(nettest.Result) error)
+			result, err = nettest.DownloadForContext(ctx, c.TestSocks, c.TestURL, time.Duration(c.TestDurationSeconds)*time.Second, time.Duration(c.TimeoutSeconds)*time.Second, progress)
 		} else {
 			result, err = nettest.Download(c.TestSocks, c.TestURL, int64(c.TestLimitKiB)*1024, time.Duration(c.TimeoutSeconds)*time.Second)
 		}
@@ -357,8 +360,11 @@ func testOneContextUsing(ctx context.Context, c config.Config, n vless.Node, deb
 	case result := <-resultCh:
 		return result.result, result.err
 	case <-ctx.Done():
-		// CommandContext tears down the isolated backend. The buffered result
-		// channel lets the short-lived network worker exit without blocking.
+		// Timed downloads close their connection on cancellation. Drain that
+		// worker before a final response so no progress can follow completion.
+		if check == nil && c.TestDurationSeconds > 0 {
+			<-resultCh
+		}
 		return nettest.Result{}, ctx.Err()
 	}
 }

@@ -274,7 +274,7 @@ func (b *Bridge) Serve(ctx context.Context, input io.Reader, output io.Writer) e
 				return
 			}
 
-			reply, err := b.request(requestCtx, line, func(phase string) { _ = emit(head.ID, map[string]string{"event": "progress", "phase": phase}) }, func(p picker.CheckProgress) error { return emit(head.ID, p) })
+			reply, err := b.request(requestCtx, line, func(phase string) { _ = emit(head.ID, map[string]string{"event": "progress", "phase": phase}) }, func(p picker.CheckProgress) error { return emit(head.ID, p) }, func(p picker.SpeedProgress) error { return emit(head.ID, p) })
 			if err != nil {
 				outputMu.Lock()
 				if firstErr == nil {
@@ -304,7 +304,7 @@ func (b *Bridge) Serve(ctx context.Context, input io.Reader, output io.Writer) e
 	defer outputMu.Unlock()
 	return firstErr
 }
-func (b *Bridge) request(parent context.Context, line []byte, progress func(string), checkProgress func(picker.CheckProgress) error) (map[string]any, error) {
+func (b *Bridge) request(parent context.Context, line []byte, progress func(string), checkProgress func(picker.CheckProgress) error, speedProgress func(picker.SpeedProgress) error) (map[string]any, error) {
 	ctx := parent
 	reply := map[string]any{"ok": true, "reason": "ok", "code": nil}
 	invalid := func() { reply["ok"] = false; reply["reason"] = "invalid-request" }
@@ -321,6 +321,7 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 	if !request.Progress {
 		progress = nil
 		checkProgress = nil
+		speedProgress = nil
 	}
 	var value string
 	if len(request.Value) > 0 && string(request.Value) != "null" {
@@ -386,6 +387,8 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 				var overflow bool
 				if ids != nil {
 					data, result, overflow = b.captureChecks(ctx, args, ids, checkProgress)
+				} else if request.Action == "servers/speed" && speedProgress != nil {
+					data, result, overflow = b.captureSpeed(ctx, args, value, speedProgress)
 				} else {
 					data, result, overflow = b.capture(ctx, args, 1048576)
 				}
@@ -713,5 +716,25 @@ func (b *Bridge) captureChecks(ctx context.Context, args, ids []string, progress
 	err := stream.Finish()
 	data, overflow := output.result()
 	// Cancellation keeps its classification even if the stream has no final row.
+	return data, result, overflow || (err != nil && result.Reason == "ok")
+}
+
+func (b *Bridge) captureSpeed(ctx context.Context, args []string, id string, progress func(picker.SpeedProgress) error) ([]byte, ProcessResult, bool) {
+	child, cancel := context.WithCancel(ctx)
+	defer cancel()
+	output := &boundedOutput{limit: 1048576, cancel: cancel}
+	stream := picker.NewSpeedStream(id, output, func(p picker.SpeedProgress) error {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err := progress(p); err != nil {
+			cancel()
+			return err
+		}
+		return nil
+	})
+	result := RunProcess(child, b.options.Executable, args, append(os.Environ(), "VPNKIT_TUI_SUPERVISED=1", "VPNKIT_SPEED_PROGRESS=1"), stream, nil, b.options.Grace)
+	err := stream.Finish()
+	data, overflow := output.result()
 	return data, result, overflow || (err != nil && result.Reason == "ok")
 }

@@ -2,6 +2,7 @@ package nettest
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -22,20 +23,49 @@ func Download(socksAddr, testURL string, limit int64, timeout time.Duration) (Re
 	if limit <= 0 {
 		return Result{}, fmt.Errorf("download limit must be positive")
 	}
-	return download(socksAddr, testURL, limit, 0, timeout)
+	return download(context.Background(), socksAddr, testURL, limit, 0, timeout, nil)
 }
 
 func DownloadFor(socksAddr, testURL string, duration, timeout time.Duration) (Result, error) {
+	return DownloadForContext(context.Background(), socksAddr, testURL, duration, timeout, nil)
+}
+
+// DownloadForContext reports cumulative body bytes and their actual elapsed time.
+// Samples are provisional measurements, emitted at most every 100ms while reading.
+func DownloadForContext(ctx context.Context, socksAddr, testURL string, duration, timeout time.Duration, progress func(Result) error) (Result, error) {
 	if duration <= 0 {
 		return Result{}, fmt.Errorf("download duration must be positive")
 	}
 	start := time.Now()
 	deadline := start.Add(duration)
 	var total int64
+	last := start
+	emit := func(current int64, final bool) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		now := time.Now()
+		if progress == nil || (!final && now.Sub(last) < 100*time.Millisecond) {
+			return nil
+		}
+		last = now
+		sec := now.Sub(start).Seconds()
+		if sec <= 0 {
+			return nil
+		}
+		return progress(Result{current, sec, float64(current) * 8 / sec / 1e6})
+	}
 	for time.Now().Before(deadline) {
 		remaining := time.Until(deadline)
-		r, err := download(socksAddr, testURL, 0, remaining, timeout)
+		r, err := download(ctx, socksAddr, testURL, 0, remaining, timeout, func(n int64) error { return emit(total+n, false) })
 		if err != nil {
+			if ctx.Err() != nil {
+				return Result{}, ctx.Err()
+			}
+			// Callback failures must not turn into a successful partial result.
+			if _, ok := err.(progressError); ok {
+				return Result{}, err
+			}
 			if total > 0 {
 				break
 			}
@@ -50,10 +80,17 @@ func DownloadFor(socksAddr, testURL string, duration, timeout time.Duration) (Re
 	if total <= 0 {
 		return Result{}, fmt.Errorf("download read no body bytes")
 	}
+	if err := emit(total, true); err != nil {
+		return Result{}, err
+	}
 	return Result{total, sec, float64(total) * 8 / sec / 1e6}, nil
 }
 
-func download(socksAddr, testURL string, limit int64, duration, timeout time.Duration) (Result, error) {
+type progressError struct{ error }
+
+func (e progressError) Unwrap() error { return e.error }
+
+func download(ctx context.Context, socksAddr, testURL string, limit int64, duration, timeout time.Duration, progress func(int64) error) (Result, error) {
 	u, err := url.Parse(testURL)
 	if err != nil {
 		return Result{}, err
@@ -81,11 +118,13 @@ func download(socksAddr, testURL string, limit int64, duration, timeout time.Dur
 		path = "/"
 	}
 	d := net.Dialer{Timeout: timeout}
-	raw, err := d.Dial("tcp", socksAddr)
+	raw, err := d.DialContext(ctx, "tcp", socksAddr)
 	if err != nil {
 		return Result{}, err
 	}
 	defer raw.Close()
+	stop := context.AfterFunc(ctx, func() { _ = raw.Close() })
+	defer stop()
 	if err := raw.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return Result{}, err
 	}
@@ -112,7 +151,7 @@ func download(socksAddr, testURL string, limit int64, duration, timeout time.Dur
 	conn := raw
 	if u.Scheme == "https" {
 		tlsconn := tls.Client(raw, &tls.Config{ServerName: host})
-		if err := tlsconn.Handshake(); err != nil {
+		if err := tlsconn.HandshakeContext(ctx); err != nil {
 			return Result{}, err
 		}
 		conn = tlsconn
@@ -148,9 +187,17 @@ func download(socksAddr, testURL string, limit int64, duration, timeout time.Dur
 				n += int64(c)
 			}
 		}
+		if haveHeader && progress != nil {
+			if progressErr := progress(n); progressErr != nil {
+				return Result{}, progressError{progressErr}
+			}
+		}
 		if err != nil {
 			break
 		}
+	}
+	if ctx.Err() != nil {
+		return Result{}, ctx.Err()
 	}
 	if !haveHeader {
 		return Result{}, fmt.Errorf("http response missing complete headers")
