@@ -61,18 +61,35 @@ export interface CheckProgress {
   latency_ms: number;
   availability: "ready" | "failed" | "untested";
 }
+export interface SpeedProgress {
+  event: "speed-progress";
+  server_id: string;
+  downloaded_bytes: number;
+  elapsed_seconds: number;
+  download_mbps: number;
+}
 export interface Backend {
   request(action: Action, value?: string, requestId?: string): Promise<Reply>;
   cancel?(requestId?: string): void;
   onProgress?: (phase: string, requestId?: string) => void;
   onCheckProgress?: (result: CheckProgress, requestId?: string) => void;
+  onSpeedProgress?: (result: SpeedProgress, requestId?: string) => void;
+  onDisconnect?: () => void;
+  reconnect?(): Promise<void>;
   close(): Promise<void>;
 }
 
 // Correlate independent operations; the backend serializes conflicting mutations.
 export class Bridge implements Backend {
-  private child: ChildProcessWithoutNullStreams;
+  private child!: ChildProcessWithoutNullStreams;
+  private factory: () => ChildProcessWithoutNullStreams;
+  private generation = 0;
+  private disposed = false;
+  private draining?: Promise<void>;
+  private reconnecting?: Promise<void>;
   private pending = new Map<string, {
+    action: Action;
+    value?: string;
     resolve: (reply: Reply) => void;
     reject: (error: Error) => void;
   }>();
@@ -81,16 +98,27 @@ export class Bridge implements Backend {
   private closed = false;
   onProgress?: (phase: string, requestId?: string) => void;
   onCheckProgress?: (result: CheckProgress, requestId?: string) => void;
-  constructor(args: string[] = [], child?: ChildProcessWithoutNullStreams) {
+  onSpeedProgress?: (result: SpeedProgress, requestId?: string) => void;
+  onDisconnect?: () => void;
+  constructor(args: string[] = [], child?: ChildProcessWithoutNullStreams | (() => ChildProcessWithoutNullStreams)) {
     const root = fileURLToPath(new URL("../../../", import.meta.url));
-    this.child = child ?? spawn(
+    this.factory = typeof child === "function" ? child : () => child ?? spawn(
       fileURLToPath(new URL("../../../.build/local-vpn-kde.bin", import.meta.url)),
       ["bridge", "--repo", root, ...args],
       { stdio: "pipe" },
     );
-    this.child.stderr.resume();
+    this.attach(this.factory());
+  }
+  private attach(child: ChildProcessWithoutNullStreams) {
+    this.child = child;
+    const generation = ++this.generation;
+    this.buffer = "";
+    this.closed = false;
+    this.draining = undefined;
+    child.stderr.resume();
     this.child.stdout.setEncoding("utf8");
     this.child.stdout.on("data", (chunk: string) => {
+      if (generation !== this.generation || this.closed) return;
       this.buffer += chunk;
       if (Buffer.byteLength(this.buffer) > 2 * 1048576) {
         this.fail();
@@ -104,6 +132,16 @@ export class Bridge implements Backend {
           const reply = JSON.parse(line);
           if (typeof reply.id !== "string") throw new Error();
           const pending = this.pending.get(reply.id);
+          if (reply.event === "speed-progress") {
+            if (!pending) continue;
+            if (pending.action !== "servers/speed" || pending.value !== reply.server_id ||
+                !/^srv_[A-Za-z0-9_-]{27}$/.test(reply.server_id) ||
+                !Number.isSafeInteger(reply.downloaded_bytes) || reply.downloaded_bytes < 0 ||
+                !Number.isFinite(reply.elapsed_seconds) || reply.elapsed_seconds <= 0 || reply.elapsed_seconds > 3600 ||
+                !Number.isFinite(reply.download_mbps) || reply.download_mbps < 0) throw new Error();
+            this.onSpeedProgress?.(reply, reply.id);
+            continue;
+          }
           if (reply.event === "server-check") {
             if (!/^srv_[A-Za-z0-9_-]{27}$/.test(reply.server_id) ||
                 !["start", "ping", "complete"].includes(reply.stage) ||
@@ -126,18 +164,49 @@ export class Bridge implements Backend {
           pending?.resolve(reply);
         } catch {
           this.fail();
+          return;
         }
       }
     });
-    this.child.on("error", () => this.fail());
-    this.child.on("exit", () => this.fail());
-    this.child.stdin.on("error", () => this.fail());
+    const fail = () => { if (generation === this.generation) this.fail(); };
+    child.on("error", fail);
+    child.on("exit", fail);
+    child.stdin.on("error", fail);
   }
   private fail() {
+    if (this.closed) return;
+    this.cancel();
     this.closed = true;
     for (const pending of this.pending.values())
       pending.reject(new Error("backend-unavailable"));
     this.pending.clear();
+    this.draining = this.drain(this.child);
+    // Keep a rejected shutdown promise observable by reconnect/close, not unhandled.
+    void this.draining.catch(() => {});
+    if (!this.disposed) this.onDisconnect?.();
+  }
+  private async drain(child: ChildProcessWithoutNullStreams) {
+    child.stdin.end();
+    if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return;
+    await new Promise<void>((resolve, reject) => {
+      const finish = () => { clearTimeout(timer); child.off("exit", finish); resolve(); };
+      const timer = setTimeout(() => {
+        child.off("exit", finish);
+        reject(new Error("backend-shutdown-timeout"));
+      }, 5000);
+      child.once("exit", finish);
+    });
+  }
+  reconnect(): Promise<void> {
+    if (this.disposed) return Promise.reject(new Error("backend-unavailable"));
+    if (!this.closed) return Promise.resolve();
+    if (this.reconnecting) return this.reconnecting;
+    this.reconnecting = (async () => {
+      if (this.child.exitCode === null && this.child.signalCode === null) await this.draining;
+      if (this.disposed) throw new Error("backend-unavailable");
+      this.attach(this.factory());
+    })().finally(() => { this.reconnecting = undefined; });
+    return this.reconnecting;
   }
   request(action: Action, value?: string, requestId?: string): Promise<Reply> {
     const id = requestId ?? `bridge-${++this.sequence}`;
@@ -146,7 +215,7 @@ export class Bridge implements Backend {
     if (this.pending.has(id))
       return Promise.reject(new Error("duplicate-request-id"));
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { action, value, resolve, reject });
       this.child.stdin.write(
         JSON.stringify({ id, action, value, progress: true }) + "\n",
       );
@@ -160,13 +229,9 @@ export class Bridge implements Backend {
     }
   }
   async close() {
-    this.cancel();
+    this.disposed = true;
     this.fail();
-    this.child.stdin.end();
-    if (this.child.exitCode !== null || this.child.signalCode !== null) return;
-    await new Promise<void>((resolve) =>
-      this.child.once("exit", () => resolve()),
-    );
+    await this.draining;
   }
 }
 

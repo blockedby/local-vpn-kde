@@ -112,3 +112,97 @@ test("backend exit rejects every concurrent waiter", async () => {
   await expect(f.bridge.request("status")).rejects.toThrow("backend-unavailable");
   await f.bridge.close();
 });
+
+test("speed samples are request scoped and stop after the final response", async () => {
+  const f = fixture();
+  const id = "srv_" + "s".repeat(27);
+  const samples: string[] = [];
+  f.bridge.onSpeedProgress = (row, requestId) => samples.push(requestId + ":" + row.downloaded_bytes);
+  const task = f.bridge.request("servers/speed", id, "speed");
+  const event = { id: "speed", event: "speed-progress", server_id: id, downloaded_bytes: 1024, elapsed_seconds: 0.2, download_mbps: 0.04096 };
+  f.send(event);
+  f.finish("speed"); await task;
+  f.send(event);
+  expect(samples).toEqual(["speed:1024"]);
+  await f.bridge.close();
+});
+
+test("malformed or wrong-action speed samples fail the connection", async () => {
+  for (const action of ["status", "servers/speed"] as const) {
+    const f = fixture();
+    const id = "srv_" + "s".repeat(27);
+    const outcome = f.bridge.request(action, id, "sample").catch((error: Error) => error.message);
+    f.send({ id: "sample", event: "speed-progress", server_id: id, downloaded_bytes: action === "status" ? 1 : -1, elapsed_seconds: 1, download_mbps: 1 });
+    expect(await outcome).toBe("backend-unavailable");
+    await f.bridge.close();
+  }
+});
+
+test("explicit recovery replaces a real exited child without replaying interrupted mutation", async () => {
+  const { spawn } = await import("node:child_process");
+  let starts = 0;
+  const children: ReturnType<typeof spawn>[] = [];
+  const source = `
+    const readline = require("node:readline");
+    const seen = [];
+    readline.createInterface({input:process.stdin}).on("line", line => {
+      const r = JSON.parse(line);
+      if (r.action === "cancel") return;
+      seen.push(r.action);
+      if (r.action === "servers/select") { process.exit(19); return; }
+      process.stdout.write(JSON.stringify({id:r.id,ok:true,reason:"ok",code:0,status:{vpn_state:"unknown"},value:JSON.stringify(seen)})+"\\n");
+    });
+  `;
+  const bridge = new Bridge([], () => {
+    starts++;
+    const child = spawn(process.execPath, ["-e", source], { stdio: "pipe" });
+    children.push(child);
+    return child;
+  });
+  let disconnects = 0;
+  bridge.onDisconnect = () => disconnects++;
+  try {
+    await expect(bridge.request("servers/select", "a")).rejects.toThrow("backend-unavailable");
+    expect(starts).toBe(1);
+    expect(disconnects).toBe(1);
+    await expect(bridge.request("status")).rejects.toThrow("backend-unavailable");
+    await Promise.all([bridge.reconnect(), bridge.reconnect()]);
+    expect(starts).toBe(2);
+    const reply = await bridge.request("status");
+    expect(JSON.parse(reply.value!)).toEqual(["status"]);
+    // Old process events cannot break the new generation.
+    children[0].emit("error", new Error("late"));
+    expect((await bridge.request("servers/list")).ok).toBe(true);
+    children[1].kill("SIGTERM");
+    await new Promise<void>((resolve) => children[1].once("exit", () => resolve()));
+    expect(disconnects).toBe(2);
+    await bridge.reconnect();
+    expect((await bridge.request("status")).ok).toBe(true);
+  } finally {
+    await bridge.close();
+  }
+  await expect(bridge.reconnect()).rejects.toThrow("backend-unavailable");
+});
+
+test("recovery refuses to overlap a child that has not drained", async () => {
+  const { spawn } = await import("node:child_process");
+  let starts = 0;
+  const child = spawn(process.execPath, ["-e", `
+    process.stdin.resume();
+    process.stdin.on("end", () => {});
+    setInterval(() => {}, 1000);
+  `], { stdio: "pipe" });
+  const bridge = new Bridge([], () => { starts++; return child; });
+  const outcome = bridge.request("servers/select", "a").catch((e: Error) => e.message);
+  // Simulate a transport error while its operation process remains alive.
+  child.stdout.emit("data", "invalid-json\n");
+  expect(await outcome).toBe("backend-unavailable");
+  try {
+    await expect(bridge.reconnect()).rejects.toThrow("backend-shutdown-timeout");
+    expect(starts).toBe(1);
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    await bridge.close().catch(() => {});
+  }
+}, 8000);
