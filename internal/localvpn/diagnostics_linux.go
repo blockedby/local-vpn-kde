@@ -15,6 +15,13 @@ import (
 )
 
 var diagnosticReasons = []struct{ message, reason string }{
+	{"Docker is unavailable", "docker-unavailable"},
+	{"refusing unowned or changed NetworkManager profile", "profile-invalid"},
+	{"refusing foreign or invalid NetworkManager profile", "profile-invalid"},
+	{"foreign same-name profile", "foreign-profile"},
+	{"NetworkManager connect timed out before the owned tunnel and full-tunnel routes became ready", "nm-activation-failed"},
+	{"NetworkManager import failed after creating a profile", "profile-import-failed"},
+	{"DNS hostname smoke returned an invalid address", "dns-failed"},
 	{"A vpnkit-local profile already exists", "foreign-profile"},
 	{"Disconnect the previous local VPN before migrating", "previous-profile-active"},
 	{"underlay installation failed", "underlay-install-failed"},
