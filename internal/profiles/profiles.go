@@ -7,27 +7,22 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/blockedby/local-vpn-kde/internal/sharelink"
 	"github.com/blockedby/local-vpn-kde/internal/state"
 	"github.com/blockedby/local-vpn-kde/internal/subscription"
-	"net/url"
 	"os"
 	"regexp"
 	"strconv"
-	"strings"
-	"unicode"
 )
 
-const File = "source-profiles.json"
+const (
+	File             = "source-profiles.json"
+	MaxProfiles      = 64
+	MaxCachedServers = 1000
+	MaxRequestBytes  = 32 << 10
+)
 
 var IDPattern = regexp.MustCompile(`^profile_[a-zA-Z0-9_-]{1,40}$`)
 
-type Request struct {
-	Action string `json:"action"`
-	ID     string `json:"id,omitempty"`
-	Name   string `json:"name,omitempty"`
-	Source string `json:"source,omitempty"`
-}
 type Profile struct {
 	ID     string   `json:"id"`
 	Name   string   `json:"name"`
@@ -53,46 +48,6 @@ type Response struct {
 	Items  []View `json:"items"`
 }
 
-func SourceKind(s string) (string, error) {
-	if len(s) == 0 || len(s) > 16384 || strings.ContainsAny(s, "\r\n\x00") {
-		return "", errors.New("invalid profile source")
-	}
-	if sharelink.Supported(s) {
-		if _, e := sharelink.Parse(s); e != nil {
-			return "", e
-		}
-		return "server", nil
-	}
-	u, e := url.Parse(s)
-	if e != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
-		return "", errors.New("expected HTTPS subscription or supported server link")
-	}
-	return "subscription", nil
-}
-func (r Request) Validate() error {
-	switch r.Action {
-	case "list":
-		if r.ID == "" && r.Name == "" && r.Source == "" {
-			return nil
-		}
-	case "open", "remove":
-		if IDPattern.MatchString(r.ID) && r.Name == "" && r.Source == "" {
-			return nil
-		}
-	case "add":
-		if r.ID != "" || len([]rune(r.Name)) < 1 || len([]rune(r.Name)) > 60 || strings.Contains(r.Name, "://") {
-			break
-		}
-		for _, c := range r.Name {
-			if unicode.IsControl(c) || unicode.Is(unicode.Cf, c) {
-				return errors.New("invalid profile name")
-			}
-		}
-		_, e := SourceKind(r.Source)
-		return e
-	}
-	return errors.New("invalid profile request")
-}
 func LoadLocked(dir, legacy string) (Document, error) {
 	b, _, e := state.LoadPrivateFileLocked(dir, File, 16<<20)
 	if os.IsNotExist(e) {
@@ -102,7 +57,7 @@ func LoadLocked(dir, legacy string) (Document, error) {
 			return d, e
 		}
 		for i, s := range subscription.URLList(string(data)) {
-			if i >= 64 {
+			if i >= MaxProfiles {
 				return d, errors.New("too many legacy sources")
 			}
 			kind, e := SourceKind(s)
@@ -121,29 +76,49 @@ func LoadLocked(dir, legacy string) (Document, error) {
 		return Document{}, e
 	}
 	var d Document
-	if json.Unmarshal(b, &d) != nil || d.Version != 1 || len(d.Items) > 64 {
+	if json.Unmarshal(b, &d) != nil {
 		return d, errors.New("invalid profile store")
 	}
+	if err := d.Validate(); err != nil {
+		return d, err
+	}
+	return d, nil
+}
+
+// Validate keeps persisted documents readable by the next operation as well.
+func (d Document) Validate() error {
+	if d.Version != 1 || len(d.Items) > MaxProfiles {
+		return errors.New("invalid profile store")
+	}
 	seen := map[string]bool{}
+	total := 0
 	for _, p := range d.Items {
-		if !IDPattern.MatchString(p.ID) || seen[p.ID] || len(p.Cache) > 1000 {
-			return d, errors.New("invalid profile store")
+		if !IDPattern.MatchString(p.ID) || seen[p.ID] || len(p.Cache) > MaxCachedServers {
+			return errors.New("invalid profile store")
+		}
+		total += len(p.Cache)
+		if total > MaxCachedServers {
+			return errors.New("profile catalog too large")
 		}
 		seen[p.ID] = true
 		kind, err := SourceKind(p.Source)
 		if err != nil || kind != p.Kind {
-			return d, errors.New("invalid profile kind")
+			return errors.New("invalid profile kind")
 		}
 		if e := (Request{Action: "add", Name: p.Name, Source: p.Source}).Validate(); e != nil {
-			return d, e
+			return e
 		}
 	}
 	if d.Active != "" && !seen[d.Active] {
-		return d, errors.New("invalid active profile")
+		return errors.New("invalid active profile")
 	}
-	return d, nil
+	return nil
 }
+
 func SaveLocked(ctx context.Context, dir string, d Document) error {
+	if err := d.Validate(); err != nil {
+		return err
+	}
 	b, e := json.Marshal(d)
 	if e != nil {
 		return e
@@ -158,7 +133,7 @@ func (d *Document) Apply(r Request) error {
 		return nil
 	}
 	if r.Action == "add" {
-		if len(d.Items) >= 64 {
+		if len(d.Items) >= MaxProfiles {
 			return errors.New("profile limit reached")
 		}
 		for _, p := range d.Items {

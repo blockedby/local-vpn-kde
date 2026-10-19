@@ -39,3 +39,26 @@ func TestNativePolicyDetection(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeProfileOperationValidatesWholeRequest(t *testing.T) {
+	for _, request := range []string{
+		`{"action":"list"}`,
+		`{"action":"open","id":"profile_one"}`,
+		`{"action":"remove","id":"profile_one"}`,
+		`{"action":"add","name":"VPS","source":"hy2://fixture@example.invalid"}`,
+	} {
+		if err := validateNativeOperation([]string{"profiles", request}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, request := range []string{
+		`{"action":"list"}{"action":"remove","id":"profile_one"}`,
+		`{"action":"list","config":"/tmp/private-marker"}`,
+		`{"action":"add","name":"VPS","source":"file:///private-marker"}`,
+		`{"action":"list"}` + strings.Repeat(" ", 32<<10),
+	} {
+		if err := validateNativeOperation([]string{"profiles", request}); err == nil || strings.Contains(err.Error(), "private-marker") {
+			t.Fatal("unsafe profile operation accepted or exposed")
+		}
+	}
+}

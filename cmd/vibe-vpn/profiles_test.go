@@ -7,8 +7,10 @@ import (
 	"github.com/blockedby/local-vpn-kde/internal/picker"
 	"github.com/blockedby/local-vpn-kde/internal/profiles"
 	"github.com/blockedby/local-vpn-kde/internal/state"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -115,5 +117,27 @@ func TestFailedProfileRefreshKeepsCachedServers(t *testing.T) {
 	}
 	if !after.Items[0].Stale || after.Items[1].Stale || len(after.Items[0].Cache) != 1 {
 		t.Fatal("cache was lost or other profile affected")
+	}
+}
+
+func TestProfileCLIRejectsTrailingInputBeforeTouchingState(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeTestConfig(t, dir)
+	for _, input := range []string{
+		`{"action":"add","name":"VPS","source":"hy2://fixture@example.invalid"}{"action":"list"}`,
+		`{"action":"list"}` + strings.Repeat(" ", profiles.MaxRequestBytes),
+		`{"action":"list","private-marker":true}`,
+	} {
+		cmd := newRootCommand()
+		cmd.SetIn(strings.NewReader(input))
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SetArgs([]string{"--config", cfg, "profiles"})
+		if err := cmd.Execute(); err == nil || strings.Contains(err.Error(), "private-marker") {
+			t.Fatal("unsafe request accepted or leaked")
+		}
+		if _, err := os.Stat(filepath.Join(dir, profiles.File)); !os.IsNotExist(err) {
+			t.Fatal("rejected request touched profile store")
+		}
 	}
 }

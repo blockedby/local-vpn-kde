@@ -1578,3 +1578,76 @@ test("native profiles show separate server lists and adding a link does not conn
   t.resize(70,18);await t.renderOnce();expect(t.captureCharFrame()).toContain("Добавить профиль");
  }finally{await app.close()}
 });
+
+test("failed profile open retains the current source and avoids catalog reload", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", installed: true };
+  b.rows = [{ ...rows[0]!, profile_id: "profile_one" }, { ...rows[1]!, profile_id: "profile_two" }];
+  const items = [
+    { id: "profile_one", name: "First profile", kind: "subscription" as const, count: 1, stale: false },
+    { id: "profile_two", name: "Second profile", kind: "server" as const, count: 1, stale: false },
+  ];
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "profiles/open" && value === "profile_two")
+      return { ...result, ok: false, reason: "profiles-failed" };
+    if (action.startsWith("profiles/")) result.profiles = { active: "profile_one", items };
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("c"); await settle();
+    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Tokyo");
+    t.mockInput.pressKey("c"); await settle();
+    const listsBefore = b.calls.filter(call => call.action === "servers/list").length;
+    t.mockInput.pressKey("2"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Не удалось сохранить профиль");
+    expect(b.calls.filter(call => call.action === "servers/list")).toHaveLength(listsBefore);
+    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Tokyo");
+    expect(t.captureCharFrame()).not.toContain("Amsterdam");
+    expect(b.calls.some(call => ["start", "stop", "servers/select"].includes(call.action))).toBe(false);
+  } finally { await app.close(); }
+});
+
+test("removing the active source browses its fallback without changing the VPN", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", installed: true, networkmanager_active: "yes" };
+  b.rows = [{ ...rows[0]!, profile_id: "profile_one" }, { ...rows[1]!, profile_id: "profile_two" }];
+  let items = [
+    { id: "profile_one", name: "First profile", kind: "subscription" as const, count: 1, stale: false },
+    { id: "profile_two", name: "Second profile", kind: "server" as const, count: 1, stale: false },
+  ];
+  let active = "profile_one";
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "profiles/remove") {
+      expect(value).toBe("profile_one");
+      items = items.slice(1);
+      active = "profile_two";
+    }
+    if (action.startsWith("profiles/")) result.profiles = { active, items };
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("c"); await settle();
+    t.mockInput.pressKey("x"); await settle();
+    expect(b.calls.some(call => call.action === "profiles/remove")).toBe(false);
+    t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).not.toContain("First profile");
+    expect(t.captureCharFrame()).toContain("Second profile");
+    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Amsterdam");
+    expect(t.captureCharFrame()).not.toContain("Tokyo");
+    expect(b.calls.filter(call => call.action === "profiles/remove")).toHaveLength(1);
+    expect(b.calls.some(call => ["start", "stop", "disconnect", "servers/select"].includes(call.action))).toBe(false);
+  } finally { await app.close(); }
+});

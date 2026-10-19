@@ -10,18 +10,15 @@ import (
 	"github.com/blockedby/local-vpn-kde/internal/sharelink"
 	"github.com/blockedby/local-vpn-kde/internal/state"
 	"github.com/spf13/cobra"
-	"io"
 	"os"
 	"time"
 )
 
 func addProfileCommands(root *cobra.Command, o *cliOptions) {
 	root.AddCommand(&cobra.Command{Use: "profiles", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		var r profiles.Request
-		dec := json.NewDecoder(io.LimitReader(cmd.InOrStdin(), 32<<10))
-		dec.DisallowUnknownFields()
-		if dec.Decode(&r) != nil || r.Validate() != nil {
-			return errors.New("invalid profile request")
+		r, err := profiles.DecodeRequest(cmd.InOrStdin())
+		if err != nil {
+			return err
 		}
 		c, e := loadConfig(o.configPath)
 		if e != nil {
@@ -87,27 +84,18 @@ func loadProfileCandidates(ctx context.Context, c config.Config) ([]picker.NodeR
 		lock.Close()
 		return nil, e
 	}
-	active := d.Active
-	var source string
-	var kind string
-	for _, p := range d.Items {
-		if p.ID == active {
-			source, kind = p.Source, p.Kind
-		}
+	active, ok := d.ActiveProfile()
+	if !ok {
+		lock.Close()
+		return nil, errors.New("profile has no cached servers")
 	}
 	lock.Close()
 	var fetched []string
 	var fetchErr error
-	if kind == "server" {
-		fetched = []string{source}
-	} else if source != "" {
-		fetched, fetchErr = fetchSubscriptionContext(ctx, source, time.Duration(c.TimeoutSeconds)*time.Second)
-	}
-	valid := []string{}
-	for _, s := range fetched {
-		if _, e := sharelink.Parse(s); e == nil {
-			valid = append(valid, s)
-		}
+	if active.Kind == "server" {
+		fetched = []string{active.Source}
+	} else {
+		fetched, fetchErr = fetchSubscriptionContext(ctx, active.Source, time.Duration(c.TimeoutSeconds)*time.Second)
 	}
 	lock, e = state.AcquireLock(ctx, c.StateDir)
 	if e != nil {
@@ -118,24 +106,23 @@ func loadProfileCandidates(ctx context.Context, c config.Config) ([]picker.NodeR
 	if e != nil {
 		return nil, e
 	}
-	if latest.Active != active {
-		return nil, errors.New("profile changed during refresh")
-	}
-	for i, p := range latest.Items {
-		if p.ID == active && p.Source == source {
-			if fetchErr == nil && len(valid) > 0 {
-				latest.Items[i].Cache = valid
-				latest.Items[i].Stale = false
-			} else {
-				latest.Items[i].Stale = true
-			}
-		}
+	if e = latest.RefreshCache(active, fetched, fetchErr); e != nil {
+		return nil, e
 	}
 	if e = profiles.SaveLocked(ctx, c.StateDir, latest); e != nil {
 		return nil, e
 	}
+	results, err := profileCandidates(latest)
+	if err == nil && len(results) == 0 {
+		err = errors.New("profile has no cached servers")
+	}
+	return results, err
+}
+
+// Both refresh and profile mutations must assign the same profile boundaries.
+func profileCandidates(d profiles.Document) ([]picker.NodeResult, error) {
 	results := []picker.NodeResult{}
-	for _, p := range latest.Items {
+	for _, p := range d.Items {
 		for _, s := range p.Cache {
 			n, e := sharelink.Parse(s)
 			if e != nil {
@@ -145,9 +132,6 @@ func loadProfileCandidates(ctx context.Context, c config.Config) ([]picker.NodeR
 			r.ProfileID = p.ID
 			results = append(results, r)
 		}
-	}
-	if len(results) == 0 {
-		return nil, errors.New("profile has no cached servers")
 	}
 	if len(results) > browserMaxServers {
 		return nil, errors.New("profile catalog too large")
@@ -166,23 +150,12 @@ func syncProfileCatalogLocked(ctx context.Context, c config.Config, d profiles.D
 	if e != nil {
 		return e
 	}
-	results := []picker.NodeResult{}
-	for _, p := range d.Items {
-		for _, s := range p.Cache {
-			n, e := sharelink.Parse(s)
-			if e != nil {
-				continue
-			}
-			r := browserResult(len(results)+1, n)
-			r.ProfileID = p.ID
-			results = append(results, r)
-		}
+	results, e := profileCandidates(d)
+	if e != nil {
+		return e
 	}
 	if len(results) == 0 {
 		return nil
-	}
-	if len(results) > browserMaxServers {
-		return errors.New("profile catalog too large")
 	}
 	salt := baseline.salt
 	if len(salt) == 0 {

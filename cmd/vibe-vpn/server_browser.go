@@ -39,7 +39,7 @@ const (
 	browserPublicationBackupFile  = ".server-browser-catalog.backup"
 	browserSaltFile               = ".server-browser-id-salt"
 	browserSaltSize               = 32
-	browserMaxServers             = 1000
+	browserMaxServers             = profiles.MaxCachedServers
 	browserMaxCatalogBytes        = 64 << 20
 	browserMaxGenerationLen       = 4096
 	browserMaxCommitLen           = 8192
