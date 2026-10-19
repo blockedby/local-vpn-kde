@@ -45,7 +45,9 @@ sha256sum "${packages[0]}"
 python /work/portable-src/packaging/portable/build.py "${packages[0]}" /work/vpnkit-portable
 /work/vpnkit-portable --inspect > /work/portable-manifest.json
 python -c '\''import json; m=json.load(open("/work/portable-manifest.json")); assert "bun" not in m["dependencies"] and not any(d.startswith("sing-box") for d in m["dependencies"])'\''
-printf "y\ny\ny\n" | /work/vpnkit-portable --install
+builder_uid=$(id -u builder)
+printf "y\ny\ny\n" | env SUDO_UID="$builder_uid" /work/vpnkit-portable --install
+id -nG builder | tr " " "\n" | grep -qx local-vpn-kde-users
 printf "portable_single_download_install=passed\n"
 test -f /usr/lib/systemd/system/local-vpn-kde-network.service
 test -f /usr/share/polkit-1/actions/org.local-vpn-kde.configure.policy

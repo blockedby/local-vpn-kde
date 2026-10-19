@@ -66,3 +66,9 @@ be recorded separately. No stable release is implied.
 The coexistence kernel lab also includes an active VPN default and Docker
 underlay rules. It checks physical egress for the native namespace, unchanged
 host route lookup during startup, and complete restoration after stop.
+
+Authorization is enrolled once by the elevated portable installer (sudo/pkexec
+caller) or the initial setup for a directly installed package. Polkit consults
+current account membership, so enrollment and revocation work without restarting
+the desktop session. Only native configuration/operations and start/stop of the
+two fixed native units receive this permission; arbitrary system units do not.

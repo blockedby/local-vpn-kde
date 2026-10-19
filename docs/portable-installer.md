@@ -5,7 +5,10 @@ Linux executable. It embeds a regular `local-vpn-kde-native` Arch package and a
 SHA-256 manifest. Run `./vpnkit-portable --inspect` without root to inspect the
 package revision, checksum and remaining dependencies, then
 `sudo ./vpnkit-portable --install`. Pacman asks for confirmation before installing
-missing system dependencies and the embedded package. Keep the Arch system and
+missing system dependencies and the embedded package. The installer enrolls
+the invoking sudo/pkexec user for this application, so initial configuration
+and subsequent TUI actions do not ask for another password. A direct root
+installation without an invoking user leaves enrollment to the first setup. Keep the Arch system and
 its repository databases current using the normal full-system upgrade workflow;
 the installer deliberately does not perform a database-only refresh or retry.
 

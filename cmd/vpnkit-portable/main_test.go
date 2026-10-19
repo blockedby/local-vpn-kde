@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"os/user"
 	"testing"
 	"testing/fstest"
 )
@@ -50,5 +51,22 @@ func TestPayloadIntegrity(t *testing.T) {
 				t.Fatalf("%s: %v", name, err)
 			}
 		})
+	}
+}
+
+func TestInstallationCaller(t *testing.T) {
+	lookup := func(uid string) (*user.User, error) { return &user.User{Uid: uid, Username: "fixture-user"}, nil }
+	for _, tc := range []struct {
+		s, p  string
+		valid bool
+		name  string
+	}{
+		{"1000", "", true, "fixture-user"}, {"", "1000", true, "fixture-user"}, {"", "", true, ""},
+		{"1000", "1001", false, ""}, {"0", "", false, ""}, {"-1", "", false, ""}, {"01000", "", false, ""},
+	} {
+		name, err := installationCaller(tc.s, tc.p, lookup)
+		if (err == nil) != tc.valid || name != tc.name {
+			t.Fatalf("%+v: %q %v", tc, name, err)
+		}
 	}
 }

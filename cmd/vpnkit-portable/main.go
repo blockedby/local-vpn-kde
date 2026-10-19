@@ -15,7 +15,9 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"os/user"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -82,6 +84,10 @@ func install(m manifest, data []byte) error {
 	if err != nil || !archHost(string(release)) {
 		return errors.New("this installer supports Arch Linux and Arch derivatives only")
 	}
+	caller, err := installationCaller(os.Getenv("SUDO_UID"), os.Getenv("PKEXEC_UID"), user.LookupId)
+	if err != nil {
+		return err
+	}
 	// Use a private directory under the root-owned /run, never a user-selected
 	// TMPDIR. Pacman handles dependency checking, locks, ownership and rollback
 	// markers. Package signature policy remains pacman's policy.
@@ -109,7 +115,38 @@ func install(m manifest, data []byte) error {
 			return err
 		}
 	}
+	if caller != "" {
+		cmd := exec.Command("/usr/bin/usermod", "--append", "--groups", "local-vpn-kde-users", "--", caller)
+		cmd.Env = []string{"PATH=/usr/bin:/usr/sbin:/bin:/sbin", "LANG=C.UTF-8"}
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("package installed, user authorization failed: %w", err)
+		}
+	}
 	return nil
+}
+
+// Root elevation authenticates the installation caller once. Never infer an
+// account from HOME/USER or enroll users during a generic pacman transaction.
+func installationCaller(sudoUID, pkexecUID string, lookup func(string) (*user.User, error)) (string, error) {
+	if sudoUID != "" && pkexecUID != "" && sudoUID != pkexecUID {
+		return "", errors.New("ambiguous installation caller")
+	}
+	uidText := sudoUID
+	if uidText == "" {
+		uidText = pkexecUID
+	}
+	if uidText == "" {
+		return "", nil
+	} // direct root install: setup enrolls later
+	uid, err := strconv.ParseUint(uidText, 10, 32)
+	if err != nil || uid == 0 || strconv.FormatUint(uid, 10) != uidText {
+		return "", errors.New("invalid installation caller")
+	}
+	account, err := lookup(uidText)
+	if err != nil || account.Uid != uidText || account.Username == "" {
+		return "", errors.New("installation caller unavailable")
+	}
+	return account.Username, nil
 }
 
 func run(args []string, out io.Writer) error {
@@ -123,7 +160,7 @@ func run(args []string, out io.Writer) error {
 	if args[0] == "--inspect" {
 		return json.NewEncoder(out).Encode(m)
 	}
-	fmt.Fprintln(out, "Installing the embedded native package. Existing native package hooks guard upgrades; no VPN is connected by this installer.")
+	fmt.Fprintln(out, "Installing the embedded native package. Existing native package hooks guard upgrades; the invoking desktop user receives permission to manage this application without further password prompts. No VPN is connected by this installer.")
 	return install(m, data)
 }
 
