@@ -195,16 +195,20 @@ func nativeGeneratedAssetFixture(t *testing.T) (string, string) {
 		t.Fatal(err)
 	}
 	for _, relative := range installedAssetFiles {
-		source, err := os.ReadFile(filepath.Join("..", "..", relative))
-		if err != nil {
-			t.Fatalf("read public fixture %s: %v", relative, err)
+		source := []byte("compiled TUI fixture\n")
+		if relative != "scripts/vpnkit/tui/vpnkit-tui" {
+			var err error
+			source, err = os.ReadFile(filepath.Join("..", "..", relative))
+			if err != nil {
+				t.Fatalf("read public fixture %s: %v", relative, err)
+			}
 		}
 		destination := filepath.Join(assetRoot, relative)
 		if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
 			t.Fatal(err)
 		}
 		mode := os.FileMode(0600)
-		if relative == "scripts/vpnkit/vpnkit-native.sh" {
+		if relative == "scripts/vpnkit/vpnkit-native.sh" || relative == "scripts/vpnkit/tui/vpnkit-tui" {
 			mode = 0700
 		}
 		if err := os.WriteFile(destination, source, mode); err != nil {

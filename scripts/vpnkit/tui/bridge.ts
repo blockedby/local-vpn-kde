@@ -86,7 +86,9 @@ export class Bridge implements Backend {
   onProgress?: (phase: string, requestId?: string) => void;
   onCheckProgress?: (result: CheckProgress, requestId?: string) => void;
   constructor(args: string[] = [], child?: ChildProcessWithoutNullStreams) {
-    const root = fileURLToPath(new URL("../../../", import.meta.url));
+    const root = process.env.VPNKIT_COMPILED_NATIVE === "1"
+      ? "/usr/share/local-vpn-kde/"
+      : fileURLToPath(new URL("../../../", import.meta.url));
     const executable = root === "/usr/share/local-vpn-kde/"
       ? "/usr/libexec/local-vpn-kde/local-vpn-kde.bin"
       : fileURLToPath(new URL("../../../.build/local-vpn-kde.bin", import.meta.url));
