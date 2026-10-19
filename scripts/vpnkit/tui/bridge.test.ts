@@ -112,3 +112,19 @@ test("backend exit rejects every concurrent waiter", async () => {
   await expect(f.bridge.request("status")).rejects.toThrow("backend-unavailable");
   await f.bridge.close();
 });
+
+test("close drains a failed spawn which emits close without exit", async () => {
+  const child = Object.assign(new EventEmitter(), {
+    stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+    exitCode: null, signalCode: null,
+  });
+  const bridge = new Bridge([], child as unknown as ChildProcessWithoutNullStreams);
+  const request = bridge.request("status");
+  child.emit("error", new Error("ENOENT"));
+  await expect(request).rejects.toThrow("backend-unavailable");
+  const closing = bridge.close();
+  child.emit("close", -2, null);
+  await closing;
+  // Repeated cleanup must also work after the close event was consumed.
+  await bridge.close();
+});
