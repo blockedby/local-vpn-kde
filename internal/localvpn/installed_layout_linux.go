@@ -12,6 +12,7 @@ import (
 
 const (
 	InstalledAssetRoot = "/usr/share/local-vpn-kde"
+	InstalledTUI       = "/usr/share/local-vpn-kde/scripts/vpnkit/tui/vpnkit-tui"
 	InstalledCLI       = "/usr/libexec/local-vpn-kde/local-vpn-kde.bin"
 )
 
@@ -27,8 +28,7 @@ type ApplicationLayout struct {
 }
 
 var installedAssetFiles = []string{
-	"scripts/vpnkit/tui/index.ts",
-	"scripts/vpnkit/tui/package.json",
+	"scripts/vpnkit/tui/vpnkit-tui",
 	"scripts/vpnkit/vpnkit-native.sh",
 	"config/openvpn/local-server.tpl",
 	"config/openvpn/local-client.ovpn.template",
@@ -235,7 +235,7 @@ func validateInstalledAssetsAt(assetRoot, cli string, expectedUID uint32, anchor
 		return fmt.Errorf("validate installed CLI: %w", err)
 	}
 	for _, relative := range installedAssetFiles {
-		executable := relative == "scripts/vpnkit/vpnkit-native.sh"
+		executable := relative == "scripts/vpnkit/vpnkit-native.sh" || relative == "scripts/vpnkit/tui/vpnkit-tui"
 		if err := validateTrustedRegularFile(filepath.Join(assetRoot, relative), expectedUID, anchor, executable); err != nil {
 			return fmt.Errorf("validate installed asset %s: %w", relative, err)
 		}

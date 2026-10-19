@@ -18,6 +18,10 @@ docker run -d --pull never --name "$name" \
 # Copy only these public fixture sources, never checkout directories/state.
 docker cp "$root/test/native-profile-installed-lab/main.go" "$name:/work/profile-main.go"
 docker cp "$root/test/native-profile-installed-test.py" "$name:/work/profile-test.py"
+docker cp "$root/test/compiled-tui-installed-test.py" "$name:/work/compiled-tui-test.py"
+docker exec "$name" mkdir -p /work/portable-src/cmd/vpnkit-portable /work/portable-src/packaging/portable
+docker cp "$root/cmd/vpnkit-portable/main.go" "$name:/work/portable-src/cmd/vpnkit-portable/main.go"
+docker cp "$root/packaging/portable/build.py" "$name:/work/portable-src/packaging/portable/build.py"
 # Network access is used only for frozen public Go/Bun build dependencies.
 timeout --kill-after=5s 900s docker exec "$name" bash -lc '
 set -Eeuo pipefail
@@ -38,11 +42,14 @@ set -Eeuo pipefail
 packages=(/work/local-vpn-kde-native-[0-9]*-x86_64.pkg.tar.zst)
 [[ ${#packages[@]} == 1 ]]
 sha256sum "${packages[0]}"
-pacman -U --noconfirm "${packages[0]}"
+python /work/portable-src/packaging/portable/build.py "${packages[0]}" /work/vpnkit-portable
+/work/vpnkit-portable --inspect > /work/portable-manifest.json
+python -c '\''import json; m=json.load(open("/work/portable-manifest.json")); assert "bun" not in m["dependencies"] and not any(d.startswith("sing-box") for d in m["dependencies"])'\''
+printf "y\ny\ny\n" | /work/vpnkit-portable --install
+printf "portable_single_download_install=passed\n"
 test -f /usr/lib/systemd/system/local-vpn-kde-network.service
 test -f /usr/share/polkit-1/actions/org.local-vpn-kde.configure.policy
 test ! -e /usr/share/local-vpn-kde/.build
-runuser -u builder -- bash -c '\''cd /usr/share/local-vpn-kde/scripts/vpnkit/tui && bun -e "await import(\"@opentui/core\")"'\''
 if runuser -u builder -- env HOME=/home/builder XDG_STATE_HOME=/home/builder/.local/state \
   /usr/bin/local-vpn-kde ui --status-json > /work/status.json; then
   printf "installed_first_launch=passed\n"
@@ -67,6 +74,7 @@ runuser -u builder -- env HOME=/home/builder XDG_STATE_HOME=/home/builder/.local
 [[ $(stat -c %a /home/builder/.local/state/local-vpn-kde/vibe-vpn) == 700 ]]
 VPNKIT_NATIVE_PACKAGE_LAB=1 /work/profile-fixture
 VPNKIT_NATIVE_PACKAGE_LAB=1 python /work/profile-test.py
+python /work/compiled-tui-test.py
 # Simulate the marker left by a completed pre-hook and a later abort. The
 # offline container cannot exercise actual service stopping.
 test ! -e /var/lib/pacman/db.lck
@@ -106,6 +114,9 @@ if [[ -n ${VPNKIT_NATIVE_ARCH_TEST_ARTIFACT_DIR:-} ]]; then
   [[ $package_name == local-vpn-kde-native-[0-9]*-x86_64.pkg.tar.zst && $package_name != */* ]]
   test ! -e "$artifact_dir/$package_name"
   docker cp "$name:/work/$package_name" "$artifact_dir/$package_name"
+  test ! -e "$artifact_dir/vpnkit-portable"
+  docker cp "$name:/work/vpnkit-portable" "$artifact_dir/vpnkit-portable"
+  docker cp "$name:/work/vpnkit-portable.sha256" "$artifact_dir/vpnkit-portable.sha256"
   (cd "$artifact_dir" && sha256sum -- "$package_name" > "$package_name.sha256")
   printf "local_package_artifact=%s/%s\n" "$artifact_dir" "$package_name"
 fi

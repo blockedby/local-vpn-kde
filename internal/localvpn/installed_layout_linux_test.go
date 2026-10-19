@@ -158,11 +158,11 @@ func TestValidateInstalledAssetsAt(t *testing.T) {
 		assets := filepath.Join(fixture, "share", "local-vpn-kde")
 		binary := filepath.Join(fixture, "libexec", "local-vpn-kde", "local-vpn-kde.bin")
 		writeInstalledAssetFixture(t, assets, binary)
-		entry := filepath.Join(assets, "scripts/vpnkit/tui/index.ts")
+		entry := filepath.Join(assets, "scripts/vpnkit/tui/vpnkit-tui")
 		if err := os.Remove(entry); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(filepath.Join(assets, "scripts/vpnkit/tui/package.json"), entry); err != nil {
+		if err := os.Symlink(filepath.Join(assets, "config/openvpn/local-server.tpl"), entry); err != nil {
 			t.Fatal(err)
 		}
 		if err := validateInstalledAssetsAt(assets, binary, uint32(os.Getuid()), fixture); err == nil {
@@ -175,7 +175,7 @@ func TestValidateInstalledAssetsAt(t *testing.T) {
 		assets := filepath.Join(fixture, "share", "local-vpn-kde")
 		binary := filepath.Join(fixture, "libexec", "local-vpn-kde", "local-vpn-kde.bin")
 		writeInstalledAssetFixture(t, assets, binary)
-		if err := os.Chmod(filepath.Join(assets, "scripts/vpnkit/tui/package.json"), 0666); err != nil {
+		if err := os.Chmod(filepath.Join(assets, "config/openvpn/local-server.tpl"), 0666); err != nil {
 			t.Fatal(err)
 		}
 		if err := validateInstalledAssetsAt(assets, binary, uint32(os.Getuid()), fixture); err == nil {
@@ -194,7 +194,7 @@ func writeInstalledAssetFixture(t *testing.T, assetRoot, cli string) {
 			t.Fatal(err)
 		}
 		mode := os.FileMode(0644)
-		if path == cli || strings.HasSuffix(path, "vpnkit-native.sh") {
+		if path == cli || strings.HasSuffix(path, "vpnkit-native.sh") || strings.HasSuffix(path, "vpnkit-tui") {
 			mode = 0755
 		}
 		if err := os.WriteFile(path, []byte("fixture\n"), mode); err != nil {

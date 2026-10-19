@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -16,10 +15,7 @@ import (
 )
 
 func TestNativeConfigurationGeneratedContractsAgree(t *testing.T) {
-	assets, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
+	assets, _ := nativeGeneratedAssetFixture(t)
 	generated, err := generateNativeConfigurationAt(context.Background(), "https://example.invalid/subscription", 1000, assets, t.TempDir())
 	if err != nil {
 		t.Fatal("generation failed:", err)
