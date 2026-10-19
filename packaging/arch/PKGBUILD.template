@@ -62,6 +62,10 @@ package() {
   install -Dm755 build/vibe-vpn-server-op-supervisor "$pkgdir/usr/libexec/local-vpn-kde/vibe-vpn-server-op-supervisor"
   ln -s /usr/bin/sing-box "$pkgdir/usr/libexec/local-vpn-kde/sing-box"
 
+  # ip netns exec bind-mounts this file only in the worker's mount namespace.
+  install -Dm644 packaging/arch/native-netns-resolv.conf \
+    "$pkgdir/etc/netns/vpnkit-native/resolv.conf"
+
   install -Dm755 packaging/arch/local-vpn-kde "$pkgdir/usr/bin/local-vpn-kde"
   install -Dm644 build/units/*.service -t "$pkgdir/usr/lib/systemd/system"
   install -Dm644 packaging/arch/local-vpn-kde-native.sysusers \

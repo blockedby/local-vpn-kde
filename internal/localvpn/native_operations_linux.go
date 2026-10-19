@@ -188,6 +188,11 @@ func RunNativeOperation(parent context.Context, input io.Reader, output io.Write
 	if incomplete, err := nativeSetupIncomplete(); err != nil || incomplete {
 		return errors.New("native setup incomplete")
 	}
+	// ip netns exec supplies this package-owned resolver to workers and their
+	// probe children. Host loopback DNS stubs are unreachable in our namespace.
+	if err = validateTrustedRegularFile("/etc/netns/"+nativegateway.Namespace+"/resolv.conf", 0, "/", false); err != nil {
+		return errors.New("native namespace resolver unavailable")
+	}
 	identity, err := user.Lookup(nativegateway.ServiceUser)
 	if err != nil {
 		return err

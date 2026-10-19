@@ -41,6 +41,9 @@ sha256sum "${packages[0]}"
 pacman -U --noconfirm "${packages[0]}"
 test -f /usr/lib/systemd/system/local-vpn-kde-network.service
 test -f /usr/share/polkit-1/actions/org.local-vpn-kde.configure.policy
+test -f /etc/netns/vpnkit-native/resolv.conf
+grep -qx "nameserver 8.8.8.8" /etc/netns/vpnkit-native/resolv.conf
+[[ $(stat -c "%u:%g:%a" /etc/netns/vpnkit-native/resolv.conf) == 0:0:644 ]]
 test ! -e /usr/share/local-vpn-kde/.build
 runuser -u builder -- bash -c '\''cd /usr/share/local-vpn-kde/scripts/vpnkit/tui && bun -e "await import(\"@opentui/core\")"'\''
 if runuser -u builder -- env HOME=/home/builder XDG_STATE_HOME=/home/builder/.local/state \
@@ -92,6 +95,7 @@ printf retained > /etc/local-vpn-kde/package-lab-retain
 pacman -R --noconfirm local-vpn-kde-native
 test ! -e /usr/bin/local-vpn-kde
 test ! -e /usr/libexec/local-vpn-kde/local-vpn-kde.bin
+test ! -e /etc/netns/vpnkit-native/resolv.conf
 test "$(</etc/local-vpn-kde/package-lab-retain)" == retained
 test -d /home/builder/.local/state/local-vpn-kde
 getent passwd local-vpn-kde >/dev/null
