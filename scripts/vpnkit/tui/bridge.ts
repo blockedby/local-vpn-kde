@@ -22,6 +22,8 @@ export type Action =
   | "servers/availability"
   | "servers/select";
 export interface Status {
+  runtime?: "docker" | "native";
+  installed?: boolean;
   vpn_state: string;
   gateway_state?: string;
   subscription: string;
@@ -43,9 +45,11 @@ export interface Server {
   download_seconds?: number;
   downloaded_bytes?: number;
 }
-export interface AutostartOptions { gateway: boolean; connect: boolean; last_result?: string }
+export interface AutostartOptions { gateway: boolean; connect: boolean; last_result?: string; runtime?: "docker" | "native" }
+export interface AutostartServiceState { enabled: string; active: string }
 export interface Reply {
   autostart?: AutostartOptions;
+  autostart_service?: AutostartServiceState;
   ok: boolean;
   reason: string;
   code: number | null;
@@ -83,8 +87,11 @@ export class Bridge implements Backend {
   onCheckProgress?: (result: CheckProgress, requestId?: string) => void;
   constructor(args: string[] = [], child?: ChildProcessWithoutNullStreams) {
     const root = fileURLToPath(new URL("../../../", import.meta.url));
+    const executable = root === "/usr/share/local-vpn-kde/"
+      ? "/usr/libexec/local-vpn-kde/local-vpn-kde.bin"
+      : fileURLToPath(new URL("../../../.build/local-vpn-kde.bin", import.meta.url));
     this.child = child ?? spawn(
-      fileURLToPath(new URL("../../../.build/local-vpn-kde.bin", import.meta.url)),
+      executable,
       ["bridge", "--repo", root, ...args],
       { stdio: "pipe" },
     );

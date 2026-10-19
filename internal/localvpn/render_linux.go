@@ -13,7 +13,9 @@ import (
 
 type RenderOptions struct {
 	Template, Base, Policy, RuleSets, Outbound string
-	AllowMissingSubscription, Fixture          bool
+	// Runtime selects the installed config layout; empty retains Docker compatibility.
+	Runtime                           string
+	AllowMissingSubscription, Fixture bool
 	// afterRead is an internal deterministic race seam, never an external command.
 	afterRead func() error
 }
@@ -21,6 +23,9 @@ type RenderOptions struct {
 // Render holds each destination directory open until all outputs are installed.
 // Renaming or replacing a path during rendering cannot redirect writes or chmod.
 func Render(o RenderOptions) error {
+	if o.Runtime != "" && o.Runtime != "docker" && o.Runtime != "native" {
+		return errors.New("invalid runtime")
+	}
 	if o.Policy != "strict" && o.Policy != "smart" {
 		return errors.New("invalid policy")
 	}
@@ -100,6 +105,14 @@ func Render(o RenderOptions) error {
 	if err != nil {
 		return err
 	}
+	vibeText := vibeConfig
+	if o.Runtime == "native" {
+		config, err = nativeSingBoxConfig(config)
+		if err != nil {
+			return err
+		}
+		vibeText = nativeVibeConfig()
+	}
 	sourceRules, err := childDirectory(templateDir, "rule-sets", false, false)
 	if err != nil {
 		return err
@@ -164,7 +177,7 @@ func Render(o RenderOptions) error {
 			return err
 		}
 	}
-	if err = atomicWrite(vibe, "config.yaml", []byte(vibeConfig)); err != nil {
+	if err = atomicWrite(vibe, "config.yaml", []byte(vibeText)); err != nil {
 		return err
 	}
 	if len(subscription) > 0 {

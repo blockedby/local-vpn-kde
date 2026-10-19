@@ -21,10 +21,10 @@ import (
 )
 
 type BridgeOptions struct {
-	Base, Executable, Mode, Repo string
-	Mock                         bool
-	Timeout, Grace               time.Duration
-	keepTerminal                 bool
+	Base, Executable, Mode, Repo, Runtime string
+	Mock                                  bool
+	Timeout, Grace                        time.Duration
+	keepTerminal                          bool
 }
 type Bridge struct {
 	options     BridgeOptions
@@ -92,6 +92,12 @@ var actions = map[string][]string{"backend/start": {"backend", "start"}, "discon
 var serverID = regexp.MustCompile(`^srv_[A-Za-z0-9_-]{27}$`)
 
 func NewBridge(o BridgeOptions) (*Bridge, error) {
+	if o.Runtime != "" && o.Runtime != "docker" && o.Runtime != "native" {
+		return nil, errors.New("invalid runtime")
+	}
+	if o.Runtime == "native" && !o.Mock && o.Executable != filepath.Join(o.Repo, "scripts/vpnkit/vpnkit-native.sh") {
+		return nil, errors.New("native runtime requires its fixed lifecycle adapter")
+	}
 	if o.Mode == "" {
 		o.Mode = "strict"
 	}
@@ -118,15 +124,27 @@ func NewBridge(o BridgeOptions) (*Bridge, error) {
 		}
 		fd, err := subscriptionParent(o.Base)
 		if err != nil {
-			return nil, errors.New("private subscription directory unavailable")
+			// First-run installed status must remain read-only. The interactive
+			// CLI bootstraps directories before constructing its bridge.
+			if o.Runtime != "native" || o.Repo != InstalledAssetRoot || !errors.Is(err, os.ErrNotExist) {
+				return nil, errors.New("private subscription directory unavailable")
+			}
+		} else {
+			unix.Close(fd)
 		}
-		unix.Close(fd)
 	}
 	kind := "configured"
 	if o.Mock {
 		kind = "mock"
 	}
 	b := &Bridge{options: o, active: make(map[string]context.CancelFunc), status: map[string]any{"schema": 1, "vpn_state": "unknown", "gateway_state": "unknown", "subscription": "not configured", "endpoint": "redacted", "routing_mode": o.Mode, "selection": "redacted", "diagnostics": "not-run", "last_action": "none", "last_result": "not-run", "last_attempt": "", "networkmanager_configured": "unknown", "networkmanager_active": "unknown", "runner": kind}}
+	if o.Runtime == "native" {
+		b.status["runtime"] = "native"
+		b.status["installed"] = o.Repo == InstalledAssetRoot
+		if o.Repo == InstalledAssetRoot {
+			b.status["routing_mode"] = "strict"
+		}
+	}
 	if !o.Mock && SubscriptionConfigured(o.Base) {
 		b.status["subscription"] = "configured"
 	}
@@ -330,11 +348,24 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 			return reply, nil
 		}
 	}
+	if b.options.Runtime == "native" {
+		switch request.Action {
+		case "status", "backend/start", "start", "disconnect", "stop", "autostart/read", "autostart/set":
+		case "subscription", "subscription/read":
+			if b.options.Repo != InstalledAssetRoot {
+				reply["ok"], reply["reason"], reply["status"] = false, "unsupported-native-action", b.Status()
+				return reply, nil
+			}
+		default:
+			reply["ok"], reply["reason"], reply["status"] = false, "unsupported-native-action", b.Status()
+			return reply, nil
+		}
+	}
 	switch request.Action {
 	case "status":
 		b.refresh(ctx)
 	case "autostart/read", "autostart/set":
-		a := Autostart{Repo: b.options.Repo, Base: b.options.Base}
+		a := Autostart{Repo: b.options.Repo, Base: b.options.Base, Runtime: b.options.Runtime, Installed: b.options.Repo == InstalledAssetRoot}
 		var options AutostartOptions
 		var err error
 		if request.Action == "autostart/set" {
@@ -352,6 +383,11 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 			reply["ok"], reply["reason"] = false, "autostart-unavailable"
 		} else {
 			reply["autostart"] = options
+			service, serviceErr := a.ServiceState(ctx)
+			if serviceErr != nil {
+				service = AutostartServiceState{Enabled: "unknown", Active: "unknown"}
+			}
+			reply["autostart_service"] = service
 		}
 	case "subscription/read":
 		text, err := ReadSubscription(b.options.Base)
@@ -361,6 +397,20 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 			reply["value"] = text
 		}
 	case "subscription":
+		if b.options.Runtime == "native" && !b.options.Mock {
+			if progress != nil {
+				progress("configuring-native")
+			}
+			if err := ConfigureNativeDesktop(ctx, b.options.Base, value); err != nil {
+				reply["ok"], reply["reason"] = false, "native-configuration-incomplete"
+			} else {
+				b.statusMu.Lock()
+				b.status["subscription"], b.status["last_action"], b.status["last_result"] = "configured", "configure native subscription", "ok"
+				b.statusMu.Unlock()
+				b.refresh(ctx)
+			}
+			break
+		}
 		if b.options.Mock {
 			invalid()
 		} else if err := WriteSubscription(b.options.Base, value); err != nil {
@@ -450,11 +500,18 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 	reply["status"] = b.Status()
 	return reply, nil
 }
+func (b *Bridge) environment() []string {
+	env := append(os.Environ(), "VPNKIT_TUI_SUPERVISED=1")
+	if b.options.Runtime == "native" {
+		env = append(env, "VPNKIT_LOCAL_SECRETS_DIR="+b.options.Base)
+	}
+	return env
+}
 func (b *Bridge) capture(ctx context.Context, args []string, limit int) ([]byte, ProcessResult, bool) {
 	child, cancel := context.WithCancel(ctx)
 	defer cancel()
 	output := &boundedOutput{limit: limit, cancel: cancel}
-	result := RunProcess(child, b.options.Executable, args, append(os.Environ(), "VPNKIT_TUI_SUPERVISED=1"), output, nil, b.options.Grace)
+	result := RunProcess(child, b.options.Executable, args, b.environment(), output, nil, b.options.Grace)
 	data, overflow := output.result()
 	return data, result, overflow
 }
@@ -709,7 +766,7 @@ func (b *Bridge) captureChecks(ctx context.Context, args, ids []string, progress
 		}
 		return nil
 	})
-	result := RunProcess(child, b.options.Executable, args, append(os.Environ(), "VPNKIT_TUI_SUPERVISED=1"), stream, nil, b.options.Grace)
+	result := RunProcess(child, b.options.Executable, args, b.environment(), stream, nil, b.options.Grace)
 	err := stream.Finish()
 	data, overflow := output.result()
 	// Cancellation keeps its classification even if the stream has no final row.

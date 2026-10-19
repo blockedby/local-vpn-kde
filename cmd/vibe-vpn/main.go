@@ -95,6 +95,23 @@ func newRootCommand() *cobra.Command {
 	addFilters(pick)
 	root.AddCommand(pick)
 
+	benchmark := &cobra.Command{Use: "test", Short: "Benchmark in isolation without applying a result", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		max, _ := cmd.Flags().GetInt("max")
+		lim, _ := cmd.Flags().GetInt("limit-kib")
+		dur, _ := cmd.Flags().GetInt("duration-sec")
+		verbose, _ := cmd.Flags().GetBool("verbose")
+		debug, _ := cmd.Flags().GetBool("debug")
+		return runTestContext(cmd.Context(), o, false, max, lim, dur, verbose, debug)
+	}}
+	benchmark.Flags().Int("max", 0, "max nodes")
+	benchmark.Flags().Int("limit-kib", 0, "test KiB")
+	benchmark.Flags().Int("duration-sec", -1, "download duration per node in seconds; 0 disables duration mode")
+	benchmark.Flags().Bool("verbose", false, "print every node while testing")
+	benchmark.Flags().Bool("debug", false, "show temporary benchmark backend logs")
+	addFilters(benchmark)
+	root.AddCommand(benchmark)
+	root.AddCommand(newNativeInitialSelectionCommand(o))
+
 	for name, handler := range map[string]func(*cobra.Command, *cliOptions) error{"list": runBrowserList, "current": runBrowserCurrent} {
 		handler := handler
 		cmd := &cobra.Command{Use: name, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {

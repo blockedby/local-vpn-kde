@@ -1,4 +1,6 @@
 # Private state and local settings
+.env
+.env.local
 secrets/
 config/*.local.env
 *.key

@@ -14,19 +14,21 @@ export const palette = {
 
 export function connection(status?: Status) {
   const gateway = status?.gateway_state ?? status?.vpn_state;
+  const native = status?.runtime === "native";
+  const service = native ? "native-служба" : "Docker";
   if (!status || gateway === "unknown")
     return { title: "Статус недоступен", detail: "", color: palette.amber };
   if (gateway === "unhealthy")
     return {
       title: "Нужна проверка",
-      detail: "Docker сообщает об ошибке",
+      detail: `${service} сообщает об ошибке`,
       color: palette.red,
     };
   if (status.networkmanager_active === "yes" && gateway === "healthy")
     return { title: "VPN подключён", detail: "", color: palette.green };
   if (status.networkmanager_active === "yes")
     return {
-      title: "VPN без готового Docker",
+      title: native ? "VPN без готовой native-службы" : "VPN без готового Docker",
       detail: "",
       color: palette.amber,
     };
@@ -39,10 +41,17 @@ export function connection(status?: Status) {
   return { title: "VPN отключён", detail: "", color: palette.muted };
 }
 
-export function failure(reason: string, code: number | null) {
+export function failure(
+  reason: string,
+  code: number | null,
+  runtime: Status["runtime"] = "docker",
+) {
+  const native = runtime === "native";
+  const service = native ? "native-служба" : "Docker";
   const explanations: Record<string, string> = {
-    "backend-outdated":
-      "Нужен обновлённый Docker-бэкенд. Остановите его и запустите заново.",
+    "backend-outdated": native
+      ? "Нужен обновлённый native-бэкенд. Перезапустите native-службу."
+      : "Нужен обновлённый Docker-бэкенд. Остановите его и запустите заново.",
     stale: "Каталог изменился. Обновите список серверов.",
     recovery_required:
       "Предыдущая операция не завершила откат. Запуск заблокирован; нужна проверка журнала восстановления в диагностике.",
@@ -66,20 +75,27 @@ export function failure(reason: string, code: number | null) {
       "Подключение не прошло проверку готовности. Причина и результат отката сохранены в журнал.",
     "nm-activation-failed":
       "KDE не смог подключить профиль OpenVPN. Журнал NetworkManager сохранён для разбора.",
-    "docker-registry-failed":
-      "Docker не смог загрузить сведения о базовом образе. Подробности — в приватном журнале.",
-    "gateway-build-failed":
-      "Не удалось собрать Docker-образ. Подробности — в приватном журнале.",
-    "gateway-start-failed":
-      "Не удалось запустить Docker-шлюз. Вывод запуска сохранён в журнал.",
-    "gateway-unhealthy":
-      "Шлюз не достиг готовности. Состояние и журнал контейнера сохранены до отката.",
-    "underlay-not-ready":
-      "Не прошла проверка обхода VPN для Docker. Подробности сохранены в журнал.",
+    "docker-registry-failed": native
+      ? "Native-служба не смогла загрузить сведения о базовом образе. Подробности — в приватном журнале."
+      : "Docker не смог загрузить сведения о базовом образе. Подробности — в приватном журнале.",
+    "gateway-build-failed": native
+      ? "Не удалось подготовить native-службу. Подробности — в приватном журнале."
+      : "Не удалось собрать Docker-образ. Подробности — в приватном журнале.",
+    "gateway-start-failed": native
+      ? "Не удалось запустить native-службу. Вывод запуска сохранён в журнал."
+      : "Не удалось запустить Docker-шлюз. Вывод запуска сохранён в журнал.",
+    "gateway-unhealthy": native
+      ? "Native-служба не достигла готовности. Состояние и журнал сохранены до отката."
+      : "Шлюз не достиг готовности. Состояние и журнал контейнера сохранены до отката.",
+    "underlay-not-ready": native
+      ? "Не прошла проверка подготовки native-службы. Подробности сохранены в журнал."
+      : "Не прошла проверка обхода VPN для Docker. Подробности сохранены в журнал.",
   };
   if (explanations[reason]) return explanations[reason];
   if (reason === "gateway-not-ready")
-    return "Не удалось подготовить Docker-бэкенд для проверки серверов. Откройте диагностику [d].";
+    return native
+      ? "Не удалось подготовить native-службу для проверки. Откройте диагностику [d]."
+      : "Не удалось подготовить Docker-бэкенд для проверки серверов. Откройте диагностику [d].";
   if (reason === "timeout")
     return "Время ожидания истекло. Проверьте состояние и повторите действие.";
   if (reason === "unavailable" || reason === "backend-unavailable")
@@ -88,5 +104,5 @@ export function failure(reason: string, code: number | null) {
     return "Не удалось сохранить подписку. Проверьте ссылку и права на приватный каталог.";
   if (reason === "cancelled")
     return "Действие отменено. Проверьте текущее состояние подключения.";
-  return `Действие не выполнено${code === null ? "" : ` (код ${code})`}. Проверьте Docker, профиль KDE и диагностику [d].`;
+  return `Действие не выполнено${code === null ? "" : ` (код ${code})`}. Проверьте ${service}, профиль KDE и диагностику [d].`;
 }

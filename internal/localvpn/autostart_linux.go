@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"golang.org/x/sys/unix"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,18 +21,24 @@ const autostartMarker = "# Managed by local-vpn-kde autostart\n"
 type AutostartOptions struct {
 	Gateway    bool   `json:"gateway"`
 	Connect    bool   `json:"connect"`
+	Runtime    string `json:"runtime,omitempty"`
 	LastResult string `json:"last_result,omitempty"`
 }
 
 // Autostart is opt-in at user login. It never enables linger or changes routing
 // policy, and disabling it never disconnects a currently running VPN.
-// default.target follows the user manager, including an existing linger policy;
-// this is not graphical-session.target and does not create a new boot policy.
+// Native autostart follows graphical-session.target, not a lingering user
+// manager at boot. Legacy Docker target semantics remain unchanged.
 type Autostart struct {
 	Repo, Base, ConfigHome string
+	Runtime                string
+	Installed              bool
 	command                func(context.Context, string, ...string) ([]byte, error)
 	lifecycle              func(context.Context, []string) error
 	wait                   func(context.Context) error
+	nativeStatus           func(context.Context) (GatewayStatus, error)
+	nativeStart            func(context.Context) error
+	nativeConnect          func(context.Context) error
 }
 
 func (a Autostart) call(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -51,8 +58,33 @@ func (a Autostart) configDir() (int, error) {
 	}
 	return directory(filepath.Join(home, "systemd/user"), true, true)
 }
+func autostartRuntime(value string) (string, error) {
+	switch value {
+	case "", "docker":
+		return "docker", nil
+	case "native":
+		return "native", nil
+	default:
+		return "", errors.New("invalid autostart runtime")
+	}
+}
+
+func (a Autostart) runtime() (string, error) {
+	if a.Installed && a.Runtime == "" {
+		return "native", nil
+	}
+	return autostartRuntime(a.Runtime)
+}
+
 func (a Autostart) Status(ctx context.Context) (AutostartOptions, error) {
-	var options AutostartOptions
+	requested, err := a.runtime()
+	if err != nil {
+		return AutostartOptions{}, err
+	}
+	options := AutostartOptions{Runtime: a.Runtime}
+	if a.Installed {
+		options.Runtime = requested
+	}
 	fd, err := directory(a.Base, false, true)
 	if errors.Is(err, unix.ENOENT) {
 		return options, nil
@@ -68,8 +100,21 @@ func (a Autostart) Status(ctx context.Context) (AutostartOptions, error) {
 	if err != nil {
 		return options, err
 	}
+	// A legacy file with no runtime means Docker, not the requested runtime.
+	options = AutostartOptions{}
 	if err = json.Unmarshal(data, &options); err != nil {
 		return options, errors.New("invalid autostart settings")
+	}
+	saved, runtimeErr := autostartRuntime(options.Runtime)
+	if runtimeErr != nil {
+		return options, runtimeErr
+	}
+	if options.Gateway && saved != requested {
+		return options, errors.New("enabled autostart runtime does not match requested runtime")
+	}
+	if !options.Gateway {
+		// Disabled intent is safe to adopt for the caller's selected runtime.
+		options.Runtime = a.Runtime
 	}
 	if options.Connect && !options.Gateway {
 		return options, errors.New("autoconnect requires gateway autostart")
@@ -112,6 +157,10 @@ func (a Autostart) validateBase() error {
 	if _, err := a.unit(); err != nil {
 		return err
 	}
+	if a.Installed {
+		_, err := ResolveApplicationLayout(InstalledCLI, a.Repo, a.Base, a.Runtime)
+		return err
+	}
 	if a.Base != filepath.Join(a.Repo, "secrets/vpnkit-local") {
 		return errors.New("autostart requires the installation's default private directory")
 	}
@@ -130,22 +179,56 @@ func (a Autostart) unit() (string, error) {
 	if !filepath.IsAbs(a.Repo) || filepath.Clean(a.Repo) != a.Repo || a.Repo == "/" || strings.ContainsAny(a.Repo, "\n\r\x00") {
 		return "", errors.New("invalid repository path")
 	}
+	executable := filepath.Join(a.Repo, ".build/local-vpn-kde.bin")
+	extra, session, target := "", "", "default.target"
+	stateEnvironment := ""
+	if runtime, _ := a.runtime(); runtime == "native" {
+		extra = " --runtime " + systemdArg("native")
+		target = "graphical-session.target"
+		session = "PartOf=graphical-session.target\nAfter=graphical-session-pre.target\n"
+	}
+	if a.Installed {
+		layout, err := ResolveApplicationLayout(InstalledCLI, a.Repo, a.Base, a.Runtime)
+		if err != nil {
+			return "", err
+		}
+		executable = layout.Executable
+		session += "ConditionPathIsExecutable=" + InstalledCLI + "\n"
+		extra += " --secrets-dir " + systemdArg(layout.State)
+		// A shell's XDG override may not be imported into the user manager.
+		// Environment= expands specifiers, but unlike ExecStart not dollar signs.
+		stateEnvironment = "Environment=" + strconv.Quote(strings.ReplaceAll("XDG_STATE_HOME="+filepath.Dir(layout.State), "%", "%%")) + "\n"
+	}
 	return a.marker() + fmt.Sprintf(`[Unit]
 Description=Local VPN at desktop login
-
+%s
 [Service]
 Type=oneshot
-ExecStart=%s autostart --repo %s --action run
+%sExecStart=%s autostart --repo %s%s --action run
 TimeoutStartSec=6min
 RemainAfterExit=yes
 StandardOutput=null
 StandardError=null
 
 [Install]
-WantedBy=default.target
-`, systemdArg(filepath.Join(a.Repo, ".build/local-vpn-kde.bin")), systemdArg(a.Repo)), nil
+WantedBy=%s
+`, session, stateEnvironment, systemdArg(executable), systemdArg(a.Repo), extra, target), nil
 }
 func (a Autostart) Configure(ctx context.Context, options AutostartOptions) error {
+	requested, err := a.runtime()
+	if err != nil {
+		return err
+	}
+	selected, err := autostartRuntime(options.Runtime)
+	if err != nil {
+		return err
+	}
+	if selected != requested {
+		return errors.New("autostart runtime does not match requested runtime")
+	}
+	if options.Runtime == "" {
+		options.Runtime = a.Runtime
+	}
 	if err := a.validateBase(); err != nil {
 		return err
 	}
@@ -181,9 +264,15 @@ func (a Autostart) Configure(ctx context.Context, options AutostartOptions) erro
 	}
 	// Publish disabled intent first so failed systemctl operations cannot leave
 	// an old enabled unit unexpectedly connecting on the next login.
-	data, _ := json.Marshal(AutostartOptions{})
+	data, _ := json.Marshal(AutostartOptions{Runtime: options.Runtime})
 	if err = atomicWrite(fd, "autostart.json", data); err != nil {
 		return err
+	}
+	if options.Runtime == "native" && len(old) != 0 && strings.Contains(string(old), "WantedBy=default.target") {
+		// Remove the old boot/user-manager link without stopping an active VPN.
+		if _, err = a.call(ctx, "systemctl", "--user", "disable", autostartUnit); err != nil {
+			return errors.New("could not migrate login autostart target")
+		}
 	}
 	if err = atomicWrite(dir, autostartUnit, []byte(unit)); err != nil {
 		return err
@@ -201,7 +290,23 @@ func (a Autostart) Configure(ctx context.Context, options AutostartOptions) erro
 	data, _ = json.Marshal(options)
 	return atomicWrite(fd, "autostart.json", data)
 }
+func nativeAutostartServiceAvailable(status GatewayStatus) bool {
+	available := func(state string) bool {
+		switch state {
+		case "active", "inactive", "failed", "activating", "deactivating", "reloading":
+			return true
+		default:
+			return false
+		}
+	}
+	return available(status.Gateway) && available(status.Network)
+}
+
 func (a Autostart) Run(ctx context.Context) (runErr error) {
+	runtime, err := a.runtime()
+	if err != nil {
+		return err
+	}
 	if err := a.validateBase(); err != nil {
 		return err
 	}
@@ -235,7 +340,20 @@ func (a Autostart) Run(ctx context.Context) (runErr error) {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		_, dockerErr := a.call(ctx, "docker", "info", "--format", "{{.ServerVersion}}")
+		gatewayErr := error(nil)
+		if runtime == "native" {
+			status := GatewayStatus{}
+			if a.nativeStatus != nil {
+				status, gatewayErr = a.nativeStatus(ctx)
+			} else {
+				status, gatewayErr = (NativeService{}).Status(ctx)
+			}
+			if gatewayErr == nil && !nativeAutostartServiceAvailable(status) {
+				gatewayErr = errors.New("native gateway unavailable")
+			}
+		} else {
+			_, gatewayErr = a.call(ctx, "docker", "info", "--format", "{{.ServerVersion}}")
+		}
 		networkErr := error(nil)
 		if options.Connect {
 			var state []byte
@@ -244,12 +362,10 @@ func (a Autostart) Run(ctx context.Context) (runErr error) {
 				networkErr = errors.New("network unavailable")
 			}
 		}
-		if dockerErr != nil {
-			result = "prerequisites-unavailable"
-		} else if networkErr != nil {
+		if gatewayErr != nil || networkErr != nil {
 			result = "prerequisites-unavailable"
 		}
-		if dockerErr == nil && networkErr == nil {
+		if gatewayErr == nil && networkErr == nil {
 			ready = true
 			break
 		}
@@ -272,18 +388,7 @@ func (a Autostart) Run(ctx context.Context) (runErr error) {
 	if !ready {
 		return errors.New("autostart prerequisites unavailable after bounded retries")
 	}
-	run := a.lifecycle
-	if run == nil {
-		run = func(ctx context.Context, args []string) error {
-			b := &Bridge{options: BridgeOptions{Base: a.Base, Executable: filepath.Join(a.Repo, "scripts/vpnkit/vpnkit-local.sh"), Grace: 31 * time.Second}}
-			result, _ := b.lifecycle(ctx, "autostart", args, func(string) {})
-			if result.Reason != "ok" {
-				return errors.New("autostart lifecycle failed; inspect private diagnostics")
-			}
-			return nil
-		}
-	}
-	// Re-read intent after waiting, so disabling during network readiness wins.
+	// Re-read intent after waiting, so disabling during readiness wins.
 	current, err := a.Status(ctx)
 	if err != nil {
 		return err
@@ -293,17 +398,65 @@ func (a Autostart) Run(ctx context.Context) (runErr error) {
 		return nil
 	}
 	result = "failed"
-	if err = run(ctx, []string{"backend", "start"}); err != nil {
-		return err
-	}
-	current, err = a.Status(ctx)
-	if err != nil {
-		return err
-	}
-	if current.Connect {
-		result = "failed"
-		if err = run(ctx, []string{"start"}); err != nil {
+	if runtime == "native" {
+		start := a.nativeStart
+		if start == nil {
+			start = (NativeService{}).Start
+		}
+		if err = start(ctx); err != nil {
+			if contextErr := ctx.Err(); contextErr != nil {
+				return contextErr
+			}
+			return errors.New("native gateway autostart failed")
+		}
+		// Starting the notify service can take time. Re-read immediately before
+		// the optional desktop VPN mutation so a concurrent disable wins.
+		current, err = a.Status(ctx)
+		if err != nil {
 			return err
+		}
+		if !current.Gateway {
+			result = "disabled"
+			return nil
+		}
+		if current.Connect {
+			connect := a.nativeConnect
+			if connect == nil {
+				connect = func(ctx context.Context) error {
+					return (NetworkManager{Base: a.Base}).Run(ctx, "connect", true, io.Discard)
+				}
+			}
+			if err = connect(ctx); err != nil {
+				if contextErr := ctx.Err(); contextErr != nil {
+					return contextErr
+				}
+				return errors.New("NetworkManager autoconnect failed")
+			}
+		}
+	} else {
+		run := a.lifecycle
+		if run == nil {
+			run = func(ctx context.Context, args []string) error {
+				b := &Bridge{options: BridgeOptions{Base: a.Base, Executable: filepath.Join(a.Repo, "scripts/vpnkit/vpnkit-local.sh"), Grace: 31 * time.Second}}
+				result, _ := b.lifecycle(ctx, "autostart", args, func(string) {})
+				if result.Reason != "ok" {
+					return errors.New("autostart lifecycle failed; inspect private diagnostics")
+				}
+				return nil
+			}
+		}
+		if err = run(ctx, []string{"backend", "start"}); err != nil {
+			return err
+		}
+		current, err = a.Status(ctx)
+		if err != nil {
+			return err
+		}
+		if current.Connect {
+			result = "failed"
+			if err = run(ctx, []string{"start"}); err != nil {
+				return err
+			}
 		}
 	}
 	result = "ready"

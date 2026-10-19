@@ -1,0 +1,13 @@
+// Enrollment is explicit, administrator-authorized, and never done by pacman.
+// User-manager jobs may have no logind session; membership is the authority.
+polkit.addRule(function(action, subject) {
+    if (action.id !== "org.freedesktop.systemd1.manage-units" ||
+        !subject.isInGroup("local-vpn-kde-users")) return;
+    var unit = action.lookup("unit");
+    var verb = action.lookup("verb");
+    if ((unit === "local-vpn-kde-network.service" ||
+         unit === "local-vpn-kde-gateway.service") &&
+        (verb === "start" || verb === "stop")) {
+        return polkit.Result.YES;
+    }
+});

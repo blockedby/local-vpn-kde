@@ -114,6 +114,229 @@ test("connection requires healthy Docker and active KDE", () => {
   expect(cell("東京", 6)).toBe("東京  ");
   expect(Bun.stringWidth(cell("🇫🇮 Helsinki", 8))).toBe(8);
 });
+test("native runtime shows the supported lifecycle preview and native service prompts", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", gateway_state: "absent" };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    await t.renderOnce();
+    let frame = t.captureCharFrame();
+    expect(frame).toContain("NATIVE PREVIEW");
+    expect(frame).toContain("Native-служба");
+    expect(frame).toContain("Запустить native-службу");
+    expect(frame).not.toContain("Docker");
+    t.mockInput.pressKey("s");
+    await settle();
+    expect(b.calls.at(-1)?.action).toBe("backend/start");
+
+    b.status.gateway_state = "healthy";
+    await app.perform("status");
+    t.mockInput.pressKey("z");
+    await t.renderOnce();
+    frame = t.captureCharFrame();
+    expect(frame).toContain("остановить native-службу и отключить VPN?");
+    expect(frame).not.toContain("Docker");
+  } finally {
+    await app.close();
+  }
+});
+
+test("native mode guards unsupported actions before the backend request", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native" };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    const unsupported: [Action, string?][] = [
+      ["servers/list"],
+      ["servers/refresh"],
+      ["servers/check-batch", JSON.stringify({ ids: [] })],
+      ["servers/ping", rows[0]!.server_id],
+      ["servers/speed", rows[0]!.server_id],
+      ["servers/availability", JSON.stringify({ id: rows[0]!.server_id })],
+      ["servers/select", rows[0]!.server_id],
+      ["retest/select"],
+      ["toggle-mode"],
+      ["subscription/read"],
+      ["subscription", "https://example.invalid/new"],
+      ["diagnostics"],
+    ];
+    for (const [action, value] of unsupported) await app.perform(action, value);
+    t.mockInput.pressKey("v");
+    t.mockInput.pressKey("c");
+    t.mockInput.pressKey("d");
+    await settle();
+    await t.renderOnce();
+    expect(b.calls.map((call) => call.action)).toEqual(["status"]);
+    expect(t.captureCharFrame()).toContain("native preview");
+    expect(t.captureCharFrame()).not.toContain("Docker");
+  } finally {
+    await app.close();
+  }
+});
+
+test("installed native subscription setup uses the private editor and explicit confirmation", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = {
+    ...b.status,
+    runtime: "native",
+    installed: true,
+    subscription: "not configured",
+  };
+  const app = new App(t.renderer, b);
+  const value = "https://example.invalid/private-initial-subscription";
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("c");
+    await settle();
+    await t.renderOnce();
+    let frame = t.captureCharFrame();
+    expect(frame).toContain("настройка native-пакета");
+    expect(frame).toContain("Polkit");
+    expect(frame).toContain("несколько минут");
+    expect(frame).toContain("Подключить VPN");
+    expect(frame).toContain("автозапуск");
+    expect(frame).not.toContain("недоступна в native preview");
+    expect(b.calls.map((call) => call.action)).toEqual(["status"]);
+
+    t.mockInput.pressKey("u", { ctrl: true });
+    await t.mockInput.pasteBracketedText(value);
+    t.mockInput.pressEnter();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("подтверждение администратора");
+    expect(b.calls.map((call) => call.action)).toEqual(["status"]);
+
+    t.mockInput.pressKey("y");
+    await settle();
+    await t.renderOnce();
+    expect(b.calls.at(-1)).toEqual({ action: "subscription", value });
+    expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription"]);
+    expect(b.calls.some((call) => ["start", "backend/start", "autostart/read", "autostart/set"].includes(call.action))).toBe(false);
+    frame = t.captureCharFrame();
+    expect(frame).toContain("Native-пакет настроен");
+    expect(frame).toContain("нажмите «Подключить VPN» отдельно");
+    expect(frame).not.toContain(value);
+  } finally {
+    await app.close();
+  }
+});
+
+test("checkout native and native status without installed=true keep subscription setup disabled", async () => {
+  for (const installed of [undefined, false] as const) {
+    const t = await createTestRenderer({ width: 100, height: 28 });
+    const b = new FakeBackend();
+    b.status = { ...b.status, runtime: "native", installed };
+    const app = new App(t.renderer, b);
+    try {
+      await app.perform("status");
+      t.mockInput.pressKey("c");
+      await settle();
+      await t.renderOnce();
+      expect(t.captureCharFrame()).toContain("недоступна в native preview");
+      expect(t.captureCharFrame()).not.toContain("Enter сохранить");
+      expect(b.calls.map((call) => call.action)).toEqual(["status"]);
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test("native setup failures never echo the private editor value", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", installed: true };
+  const value = "https://example.invalid/private-failure-marker";
+  const original = b.request.bind(b);
+  b.request = async (action, requestValue) => {
+    const result = await original(action, requestValue);
+    if (action === "subscription")
+      return { ...result, ok: false, reason: value, status: { ...result.status, last_attempt: value } };
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("c");
+    await settle();
+    t.mockInput.pressKey("u", { ctrl: true });
+    await t.mockInput.pasteBracketedText(value);
+    t.mockInput.pressEnter();
+    t.mockInput.pressKey("y");
+    await settle();
+    await t.renderOnce();
+    const frame = t.captureCharFrame();
+    expect(frame).toContain("Не удалось настроить native-пакет");
+    expect(frame).not.toContain(value);
+    expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription"]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("native autostart edits retain the returned runtime and do not connect immediately", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native" };
+  let options = {
+    gateway: false,
+    connect: false,
+    runtime: "native" as const,
+    last_result: "ready",
+  };
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "autostart/set") options = { ...options, ...JSON.parse(value!) };
+    if (action === "autostart/read" || action === "autostart/set")
+      result.autostart = { ...options };
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("a");
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Запускать native-службу: нет");
+    t.mockInput.pressKey("g");
+    await settle();
+    const set = b.calls.find((call) => call.action === "autostart/set");
+    expect(set).toBeDefined();
+    expect(JSON.parse(set!.value!).runtime).toBe("native");
+    expect(options).toMatchObject({ gateway: true, connect: false, runtime: "native" });
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Запускать native-службу: да");
+    expect(b.calls.some((call) => ["start", "backend/start", "disconnect", "stop"].includes(call.action))).toBe(false);
+  } finally {
+    await app.close();
+  }
+});
+
+test("legacy status without runtime keeps Docker lifecycle wording", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  b.status.gateway_state = "absent";
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Запустить Docker");
+    expect(t.captureCharFrame()).not.toContain("NATIVE PREVIEW");
+    b.status.gateway_state = "healthy";
+    await app.perform("status");
+    t.mockInput.pressKey("z");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("остановить Docker и отключить VPN?");
+    expect(t.captureCharFrame()).not.toContain("native-службу");
+  } finally {
+    await app.close();
+  }
+});
+
 test("compact home has state-specific actions, no stale generic hints or refresh timestamp", async () => {
   const t = await createTestRenderer({ width: 80, height: 24 });
   const b = new FakeBackend();
@@ -1145,4 +1368,162 @@ test("failed autostart save requires rereading authoritative settings", async ()
     expect(t.captureCharFrame()).toContain("Загрузить настройки");
     expect(t.captureCharFrame()).not.toContain("Подключать VPN: да");
   } finally { await app.close(); }
+});
+
+test("autostart screen keeps saved intent separate from the actual disabled unit", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "autostart/read") {
+      result.autostart = { gateway: true, connect: true };
+      result.autostart_service = { enabled: "disabled", active: "inactive" };
+    }
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("a");
+    await settle();
+    await t.renderOnce();
+    const frame = t.captureCharFrame();
+    expect(frame).toContain("Запускать шлюз: да");
+    expect(frame).toContain("Подключать VPN: да");
+    expect(frame).toContain("Фактическое состояние службы: автозапуск отключён");
+    expect(frame).toContain("текущее состояние: неактивна");
+  } finally {
+    await app.close();
+  }
+});
+
+test("autostart screen renders failed and masked service states", async () => {
+  for (const service of [
+    { enabled: "enabled", active: "failed", expected: ["автозапуск включён", "текущее состояние: ошибка"] },
+    { enabled: "masked", active: "inactive", expected: ["автозапуск замаскирован", "текущее состояние: неактивна"] },
+    { enabled: "not-installed", active: "unknown", expected: ["служба не установлена", "текущее состояние: неизвестно"] },
+  ]) {
+    const t = await createTestRenderer({ width: 100, height: 28 });
+    const b = new FakeBackend();
+    const original = b.request.bind(b);
+    b.request = async (action, value) => {
+      const result = await original(action, value);
+      if (action === "autostart/read") {
+        result.autostart = { gateway: true, connect: false };
+        result.autostart_service = { enabled: service.enabled, active: service.active };
+      }
+      return result;
+    };
+    const app = new App(t.renderer, b);
+    try {
+      await app.perform("status");
+      t.mockInput.pressKey("a");
+      await settle();
+      await t.renderOnce();
+      const frame = t.captureCharFrame();
+      for (const expected of service.expected) expect(frame).toContain(expected);
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test("missing actual autostart status stays explicit and does not infer from saved intent", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "autostart/read")
+      result.autostart = { gateway: true, connect: false };
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("a");
+    await settle();
+    await t.renderOnce();
+    const frame = t.captureCharFrame();
+    expect(frame).toContain("Запускать шлюз: да");
+    expect(frame).toContain("не проверено");
+    expect(frame).toContain("недоступно");
+    expect(frame).not.toContain("Фактическое состояние службы: автозапуск включён");
+  } finally {
+    await app.close();
+  }
+});
+
+test("successful autostart saves refresh actual state and preserve native runtime payload", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native" };
+  let options = { gateway: true, connect: false, runtime: "native" as const };
+  let service = { enabled: "enabled", active: "active" };
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "autostart/set") {
+      options = { ...options, ...JSON.parse(value!) };
+      service = { enabled: options.gateway ? "enabled" : "disabled", active: "inactive" };
+    }
+    if (action === "autostart/read" || action === "autostart/set") {
+      result.autostart = { ...options };
+      result.autostart_service = { ...service };
+    }
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("a");
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("при входе в графическую сессию");
+    expect(t.captureCharFrame()).not.toContain("При входе в KDE");
+    t.mockInput.pressKey("g");
+    await settle();
+    await t.renderOnce();
+    const set = b.calls.find((call) => call.action === "autostart/set");
+    expect(set).toBeDefined();
+    expect(JSON.parse(set!.value!).runtime).toBe("native");
+    expect(t.captureCharFrame()).toContain("Запускать native-службу: нет");
+    expect(t.captureCharFrame()).toContain("автозапуск отключён");
+  } finally {
+    await app.close();
+  }
+});
+
+test("autostart errors clear a previously healthy actual state", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  let reads = 0;
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "autostart/read") {
+      reads++;
+      if (reads === 1) {
+        result.autostart = { gateway: true, connect: false };
+        result.autostart_service = { enabled: "enabled", active: "active" };
+      } else return { ...result, ok: false, reason: "autostart-unavailable" };
+    }
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("a");
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("автозапуск включён");
+    await app.perform("autostart/read");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("не проверено");
+    expect(t.captureCharFrame()).toContain("недоступно");
+    expect(t.captureCharFrame()).not.toContain("автозапуск включён");
+  } finally {
+    await app.close();
+  }
 });

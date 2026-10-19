@@ -6,7 +6,7 @@ import {
   type CliRenderer,
   type KeyEvent,
 } from "@opentui/core";
-import type { Action, Backend, Reply, Server, Status, AutostartOptions } from "./bridge";
+import type { Action, Backend, Reply, Server, Status, AutostartOptions, AutostartServiceState } from "./bridge";
 import { connection, failure, palette as p } from "./model";
 
 import { StyledText, t } from "@opentui/core";
@@ -56,6 +56,15 @@ const phases: Record<string, string> = {
   compensating: "Восстановление состояния",
 };
 const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const nativeSupportedActions: readonly Action[] = [
+  "status",
+  "backend/start",
+  "start",
+  "disconnect",
+  "stop",
+  "autostart/read",
+  "autostart/set",
+];
 const safeText = (s: string) =>
   s.replace(/[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, "");
 export function cell(text: string, width: number) {
@@ -75,6 +84,7 @@ export function cell(text: string, width: number) {
 export class App {
   private status?: Status;
   private autostart?: AutostartOptions;
+  private serviceState?: AutostartServiceState;
   private screen: Screen = "home";
   private tasks = new Map<string, { action: Action; measurement: boolean; started: number; phase: string }>();
   private nextTask = 0;
@@ -118,7 +128,8 @@ export class App {
   private error = false;
   private selected = 0;
   private serverMenu = false;
-  private confirmation: "disconnect" | "stop" = "disconnect";
+  private confirmation: "disconnect" | "stop" | "subscription" = "disconnect";
+  private pendingSubscription?: string;
   private serverID?: string;
   private servers: Server[] = [];
   private catalogLoaded = false;
@@ -257,7 +268,7 @@ export class App {
     backend.onProgress = (phase, id) => {
       const task = id ? this.tasks.get(id) : [...this.tasks.values()].at(-1);
       if (!task) return;
-      task.phase = phases[phase] ?? "";
+      task.phase = this.phaseLabel(phase);
       this.paint();
     };
     backend.onCheckProgress = (row, id) => {
@@ -305,8 +316,110 @@ export class App {
   private ready() {
     return (this.status?.gateway_state ?? this.status?.vpn_state) === "healthy";
   }
+  private runtime(): "docker" | "native" {
+    return this.status?.runtime === "native" ? "native" : "docker";
+  }
+  private nativeMode() {
+    return this.runtime() === "native";
+  }
+  private nativeInstalled() {
+    return this.nativeMode() && this.status?.installed === true;
+  }
+  private subscriptionAvailable() {
+    return !this.nativeMode() || this.nativeInstalled();
+  }
+  private serviceLabel(runtime: Status["runtime"] = this.status?.runtime) {
+    return runtime === "native" ? "native-служба" : "Docker";
+  }
+  private serviceObject(runtime: Status["runtime"] = this.status?.runtime) {
+    return runtime === "native" ? "native-службу" : "Docker";
+  }
+  private nativePreview() {
+    return this.nativeInstalled()
+      ? "Native-пакет: доступна первичная настройка подписки. Системное окно Polkit попросит подтверждение администратора.\nВыбор первого сервера может занять несколько минут; VPN запускается отдельно, автозапуск включается отдельно и только по желанию. Серверы, режим и диагностика пока не подключены."
+      : "Native preview: доступны статус, запуск/остановка native-службы, VPN и автозапуск.\nСерверы, подписка, режим и диагностика пока не подключены.";
+  }
+  private nativeUnavailable(action: Action) {
+    if (action.startsWith("servers/"))
+      return "В native preview каталог серверов, выбор и проверки пока не подключены.";
+    if (action === "subscription/read")
+      return "В native-пакете сохранённый адрес не показывается; задайте его через редактор настройки.";
+    if (action === "subscription")
+      return "В native preview настройка подписки доступна только в установленном native-пакете.";
+    if (action === "toggle-mode")
+      return "В native preview смена режима маршрутизации пока не подключена.";
+    if (action === "diagnostics")
+      return "В native preview адаптер диагностики пока не подключён.";
+    return "В native preview эта операция пока не подключена.";
+  }
+  private canPerform(action: Action) {
+    if (!this.nativeMode() || nativeSupportedActions.includes(action) ||
+        (this.nativeInstalled() && action === "subscription")) return true;
+    this.notify(this.nativeUnavailable(action), true);
+    return false;
+  }
+  private phaseLabel(phase: string) {
+    if (this.nativeMode()) {
+      const nativePhases: Record<string, string> = {
+        "compose-up": "Запуск native-службы",
+        "compose-up-done": "Native-служба запущена",
+        "compose-down": "Остановка native-службы",
+      };
+      return nativePhases[phase] ?? phases[phase] ?? "";
+    }
+    return phases[phase] ?? "";
+  }
+  private actionLabel(action: Action) {
+    if (this.nativeMode()) {
+      if (action === "backend/start") return "Запускаем native-службу";
+      if (action === "stop") return "Останавливаем native-службу";
+      if (this.nativeInstalled() && action === "subscription") return "Настраиваем native-пакет";
+    }
+    return names[action] ?? "Операция";
+  }
+  private autostartValue(gateway: boolean, connect: boolean) {
+    const value: {
+      gateway: boolean;
+      connect: boolean;
+      runtime?: "docker" | "native";
+    } = { gateway, connect };
+    if (this.autostart?.runtime !== undefined)
+      value.runtime = this.autostart.runtime;
+    return JSON.stringify(value);
+  }
+  private enabledServiceLabel(value: string) {
+    switch (value.trim().toLowerCase()) {
+      case "enabled": return "автозапуск включён";
+      case "disabled": return "автозапуск отключён";
+      case "masked": return "автозапуск замаскирован";
+      case "not-installed":
+      case "not-found": return "служба не установлена";
+      case "unknown": return "автозапуск: неизвестно";
+      default: return "автозапуск: неизвестно";
+    }
+  }
+  private activeServiceLabel(value: string) {
+    switch (value.trim().toLowerCase()) {
+      case "active": return "активна";
+      case "inactive":
+      case "dead": return "неактивна";
+      case "failed": return "ошибка";
+      case "activating": return "запускается";
+      case "deactivating": return "останавливается";
+      case "reloading": return "перечитывает конфигурацию";
+      case "unknown": return "неизвестно";
+      case "not-installed":
+      case "not-found": return "недоступно";
+      default: return "неизвестно";
+    }
+  }
+  private serviceStateLabel() {
+    if (!this.serviceState)
+      return "Фактическое состояние службы: не проверено · текущее состояние: недоступно";
+    return `Фактическое состояние службы: ${this.enabledServiceLabel(this.serviceState.enabled)}; текущее состояние: ${this.activeServiceLabel(this.serviceState.active)}`;
+  }
   private async loadPendingSubscription() {
-    if (this.closing || this.disposed || [...this.tasks.values()].some(task => !this.compatible("subscription/read", task.action))) return;
+    if (this.closing || this.disposed || this.nativeMode() || [...this.tasks.values()].some(task => !this.compatible("subscription/read", task.action))) return;
     const revision = this.pendingSubscriptionRevision;
     this.pendingSubscriptionRevision = undefined;
     if (revision !== undefined && revision === this.editorRevision &&
@@ -321,6 +434,10 @@ export class App {
   }
   private open(screen: Screen) {
     if (this.closing) return;
+    if (screen === "subscription" && !this.subscriptionAvailable()) {
+      this.notify(this.nativeUnavailable("subscription"), true);
+      return;
+    }
     if (this.screen === "subscription") this.draft = this.input.value;
     this.screen = screen;
     this.selected = 0;
@@ -328,7 +445,7 @@ export class App {
     this.navigationRevision++;
     if (screen === "subscription") {
       this.input.value = this.draft;
-      if (!this.loadedSubscription) {
+      if (!this.loadedSubscription && !this.nativeMode()) {
         this.pendingSubscriptionRevision = this.editorRevision;
         void this.loadPendingSubscription();
       }
@@ -342,7 +459,8 @@ export class App {
       this.status?.subscription === "configured" &&
       !this.catalogLoaded &&
       !this.busy &&
-      !this.batch
+      !this.batch &&
+      !this.nativeMode()
     )
       void this.perform(this.catalogStale ? "servers/refresh" : "servers/list");
     // Diagnostics immediately displays the cached evidence. Refresh is explicit.
@@ -351,14 +469,35 @@ export class App {
     this.confirmation = action;
     this.open("confirm");
   }
+  private confirmSubscription(value: string) {
+    this.pendingSubscription = value;
+    this.confirmation = "subscription";
+    this.open("confirm");
+  }
   private items(): Item[] {
     if (this.screen === "confirm")
       return [
-        { key: "n", label: "Нет", run: () => this.open("home") },
+        {
+          key: "n",
+          label: "Нет",
+          run: () => {
+            if (this.confirmation === "subscription") {
+              this.pendingSubscription = undefined;
+              this.open("subscription");
+            } else this.open("home");
+          },
+        },
         {
           key: "y",
           label: "Да",
           run: () => {
+            if (this.confirmation === "subscription") {
+              const value = this.pendingSubscription;
+              this.pendingSubscription = undefined;
+              this.open("home");
+              if (value) void this.perform("subscription", value);
+              return;
+            }
             const action = this.confirmation;
             this.open("home");
             void this.perform(action);
@@ -369,7 +508,7 @@ export class App {
     if (this.screen === "home")
       return [
         ...(!this.ready()
-          ? [{ key: "s", label: "Запустить Docker", run: run("backend/start") }]
+          ? [{ key: "s", label: `Запустить ${this.serviceObject()}`, run: run("backend/start") }]
           : []),
         ...(this.ready()
           ? [
@@ -391,26 +530,27 @@ export class App {
                   },
             ]
           : []),
-        { key: "t", label: this.inlineSpeed() ? `Тест скорости · ${this.homeTesting ? `${frames[this.frame % 10]} ${this.measurementAction === "servers/ping" ? "ping" : this.measurementAction === "servers/speed" ? "замер" : "подготовка"} · ` : ""}${this.homePing === undefined ? "—" : Math.round(this.homePing)}ms, ${this.homeSpeed === undefined ? "—" : (this.homeSpeed / 8.388608).toFixed(1)} MiB/s` : "Тест скорости", run: () => void this.testHomeSpeed() },
-        { key: "v", label: "Серверы", run: () => this.open("servers") },
-        { key: "c", label: "Подписка", run: () => this.open("subscription") },
-        { key: "d", label: "Диагностика", run: () => this.open("diagnostics") },
+        { key: "t", label: this.nativeMode() ? "Тест скорости · недоступно в native preview" : this.inlineSpeed() ? `Тест скорости · ${this.homeTesting ? `${frames[this.frame % 10]} ${this.measurementAction === "servers/ping" ? "ping" : this.measurementAction === "servers/speed" ? "замер" : "подготовка"} · ` : ""}${this.homePing === undefined ? "—" : Math.round(this.homePing)}ms, ${this.homeSpeed === undefined ? "—" : (this.homeSpeed / 8.388608).toFixed(1)} MiB/s` : "Тест скорости", run: () => void this.testHomeSpeed() },
+        { key: "v", label: this.nativeMode() ? "Серверы · native preview" : "Серверы", run: () => this.open("servers") },
+        { key: "c", label: this.nativeMode() ? (this.nativeInstalled() ? "Подписка · настройка native-пакета" : "Подписка · недоступна в native preview") : "Подписка", run: () => this.open("subscription") },
+        { key: "d", label: this.nativeMode() ? "Диагностика · недоступна в native" : "Диагностика", run: () => this.open("diagnostics") },
         { key: "a", label: "Автозапуск", run: () => this.open("autostart") },
         {
           key: "m",
-          label: `Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}`,
+          label: `Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}${this.nativeMode() ? " · недоступен в native" : ""}`,
           run: () => {
-            if (this.ready()) void this.perform("toggle-mode");
-            else this.notify("Смена режима доступна после запуска Docker.");
+            if (this.nativeMode()) void this.perform("toggle-mode");
+            else if (this.ready()) void this.perform("toggle-mode");
+            else this.notify(`Смена режима доступна после запуска ${this.serviceObject()}.`);
           },
         },
         ...(["healthy", "unhealthy", "running", "stopped", "starting"].includes(
-          this.status?.gateway_state ?? "",
+          this.status?.gateway_state ?? this.status?.vpn_state ?? "",
         )
           ? [
               {
                 key: "z",
-                label: "Остановить Docker и VPN",
+                label: `Остановить ${this.serviceObject()} и VPN`,
                 run: () => this.confirm("stop"),
               },
             ]
@@ -419,18 +559,22 @@ export class App {
     if (this.screen === "autostart") {
       if (!this.autostart) return [{ key: "u", label: "Загрузить настройки", run: run("autostart/read") }];
       return [
-        { key: "g", label: `Запускать шлюз: ${this.autostart.gateway ? "да" : "нет"}`, run: () => void this.perform("autostart/set", JSON.stringify({ gateway: !this.autostart!.gateway, connect: false })) },
-        { key: "a", label: `Подключать VPN: ${this.autostart.connect ? "да" : "нет"}`, run: () => void this.perform("autostart/set", JSON.stringify({ gateway: this.autostart!.gateway || !this.autostart!.connect, connect: !this.autostart!.connect })) },
+        { key: "g", label: `${this.nativeMode() || this.autostart.runtime === "native" ? "Запускать native-службу" : "Запускать шлюз"}: ${this.autostart.gateway ? "да" : "нет"}`, run: () => void this.perform("autostart/set", this.autostartValue(!this.autostart!.gateway, false)) },
+        { key: "a", label: `Подключать VPN: ${this.autostart.connect ? "да" : "нет"}`, run: () => void this.perform("autostart/set", this.autostartValue(this.autostart!.gateway || !this.autostart!.connect, !this.autostart!.connect)) },
       ];
     }
     if (this.screen === "diagnostics")
       return [
-        { key: "u", label: "Обновить диагностику", run: run("diagnostics") },
+        { key: "u", label: this.nativeMode() ? "Обновить диагностику · недоступно в native" : "Обновить диагностику", run: run("diagnostics") },
       ];
     if (this.screen === "servers") {
       if (!this.ready())
         return [
-          { key: "s", label: "Запустить Docker", run: run("backend/start") },
+          { key: "s", label: `Запустить ${this.serviceObject()}`, run: run("backend/start") },
+        ];
+      if (this.nativeMode())
+        return [
+          { key: "i", label: "Серверы и проверки · недоступны в native preview", run: () => this.notify(this.nativeUnavailable("servers/list"), true) },
         ];
       if (this.status?.subscription !== "configured")
         return [
@@ -466,7 +610,13 @@ export class App {
     const editor = this.screen === "subscription" || this.screen === "target";
     if (key.name === "escape") {
       key.preventDefault();
-      this.open(editor && this.screen === "target" ? "servers" : "home");
+      this.open(
+        editor && this.screen === "target"
+          ? "servers"
+          : this.screen === "confirm" && this.confirmation === "subscription"
+            ? "subscription"
+            : "home",
+      );
       return;
     }
     if (key.ctrl && key.name === "c") {
@@ -477,9 +627,16 @@ export class App {
     if (editor) {
       if (key.name === "return") {
         key.preventDefault();
-        if (this.screen === "subscription")
-          void this.perform("subscription", this.input.value.trim());
-        else {
+        if (this.screen === "subscription") {
+          const value = this.input.value.trim();
+          if (this.nativeInstalled()) {
+            if (!value || !/^https?:\/\//.test(value)) {
+              this.notify("Введите ссылку подписки.", true);
+              return;
+            }
+            this.confirmSubscription(value);
+          } else void this.perform("subscription", value);
+        } else {
           try {
             const u = new URL(this.input.value.trim());
             if (
@@ -694,6 +851,7 @@ export class App {
     insideBatch = false,
   ): Promise<Reply | undefined> {
     if (this.closing || this.disposed) return;
+    if (!this.canPerform(action)) return;
     const measurementActive = !!this.batch || this.homeTesting;
     const allowedDuringMeasurement = ["servers/select", "status", "subscription/read"].includes(action);
     if ((measurementActive && !insideBatch && !allowedDuringMeasurement) ||
@@ -710,6 +868,8 @@ export class App {
       return;
     }
     const requestID = `ui-${++this.nextTask}`;
+    const requestRuntime = this.status?.runtime;
+    const nativeSubscriptionSetup = action === "subscription" && this.nativeInstalled();
     this.tasks.set(requestID, { action, measurement: insideBatch, started: Date.now(), phase: "" });
     const selectionRevision = this.selectionRevision;
     const revision = this.editorRevision,
@@ -723,7 +883,10 @@ export class App {
         this.checked = Date.now();
       }
       if (reply.ok && reply.autostart) this.autostart = reply.autostart;
-      if (!reply.ok && action === "autostart/set") this.autostart = undefined;
+      if (action === "autostart/read" || action === "autostart/set") {
+        this.serviceState = reply.ok ? reply.autostart_service : undefined;
+        if (!reply.ok && action === "autostart/set") this.autostart = undefined;
+      }
       const previousMeasurements = this.homeTesting && action === "servers/list"
         ? new Map(this.servers.map(row => [row.server_id, row])) : undefined;
       const currentSelection = this.servers.find(row => row.selected)?.server_id;
@@ -745,7 +908,9 @@ export class App {
         }
       }
       if (!reply.ok && !insideBatch) {
-        this.notice = reply.reason === "autostart-unavailable" ? "Не удалось настроить автозапуск. Проверьте пользовательскую службу systemd." : failure(reply.reason, reply.code);
+        this.notice = nativeSubscriptionSetup
+          ? "Не удалось настроить native-пакет. Проверьте подтверждение администратора и повторите."
+          : reply.reason === "autostart-unavailable" ? "Не удалось настроить автозапуск. Проверьте пользовательскую службу systemd." : failure(reply.reason, reply.code, this.status?.runtime);
         this.noticeAttempt = [
           "start",
           "backend/start",
@@ -765,15 +930,21 @@ export class App {
       ) {
         const done: Partial<Record<Action, string>> = {
           "autostart/read": "",
-          "autostart/set": "Сохранено. Настройка применяется при следующем входе в KDE.",
-          "backend/start": "Docker готов. Можно проверять серверы.",
+          "autostart/set": this.nativeMode() || this.autostart?.runtime === "native"
+            ? "Сохранено. Настройка применяется при входе в графическую сессию."
+            : "Сохранено. Настройка применяется при следующем входе в KDE.",
+          "backend/start": this.nativeMode()
+            ? "Native-служба готова. Доступны VPN и автозапуск; серверы пока не подключены."
+            : "Docker готов. Можно проверять серверы.",
           start: "",
-          disconnect: "VPN отключён. Docker работает.",
-          stop: "Docker и VPN остановлены.",
+          disconnect: this.nativeMode() ? "VPN отключён. Native-служба работает." : "VPN отключён. Docker работает.",
+          stop: this.nativeMode() ? "Native-служба и VPN остановлены." : "Docker и VPN остановлены.",
           "servers/list": "Список загружен.",
           "servers/refresh": "Каталог обновлён. Результаты проверок сброшены.",
           "servers/select": "Сервер выбран.",
-          subscription: "Подписка сохранена. Обновите список серверов.",
+          subscription: nativeSubscriptionSetup
+            ? "Native-пакет настроен; первый сервер выбран, это могло занять несколько минут.\nVPN не подключён — нажмите «Подключить VPN» отдельно. Автозапуск не изменён — настройте его отдельно при желании."
+            : "Подписка сохранена. Обновите список серверов.",
           diagnostics: "Состояние компонентов обновлено.",
           "toggle-mode": "Режим изменён.",
         };
@@ -798,7 +969,16 @@ export class App {
       }
     } catch {
       if (!action.startsWith("servers/") && !action.startsWith("autostart/")) this.status = undefined;
-      this.notify(failure("backend-unavailable", null), true);
+      if (action === "autostart/read" || action === "autostart/set") {
+        this.serviceState = undefined;
+        if (action === "autostart/set") this.autostart = undefined;
+      }
+      this.notify(
+        nativeSubscriptionSetup
+          ? "Не удалось настроить native-пакет. Проверьте подтверждение администратора и повторите."
+          : failure("backend-unavailable", null, requestRuntime),
+        true,
+      );
     } finally {
       this.tasks.delete(requestID);
       this.paint();
@@ -813,7 +993,8 @@ export class App {
         this.screen === "servers" &&
         this.status?.subscription === "configured" &&
         !this.catalogLoaded &&
-        !this.batch
+        !this.batch &&
+        !this.nativeMode()
       ) {
         await this.perform(
           this.catalogStale ? "servers/refresh" : "servers/list",
@@ -828,7 +1009,8 @@ export class App {
   }
   private async testHomeSpeed() {
     if (this.busy || this.batch || this.homeTesting) return;
-    if (!this.ready()) { this.notify("Сначала запустите Docker.", true); return; }
+    if (this.nativeMode()) { this.notify(this.nativeUnavailable("servers/speed"), true); return; }
+    if (!this.ready()) { this.notify(`Сначала запустите ${this.serviceObject()}.`, true); return; }
     this.homeTesting = true;
     this.cancelled = false;
     this.homeSpeed = undefined;
@@ -873,8 +1055,12 @@ export class App {
       this.notify("Дождитесь завершения или отмените текущую операцию [k].");
       return;
     }
+    if (this.nativeMode()) {
+      this.notify(this.nativeUnavailable("servers/check-batch"), true);
+      return;
+    }
     if (!this.ready()) {
-      this.notify("Сначала запустите Docker.", true);
+      this.notify(`Сначала запустите ${this.serviceObject()}.`, true);
       return;
     }
     this.cancelled = false;
@@ -902,8 +1088,8 @@ export class App {
         this.batch = undefined;
         this.notify(
           result?.reason === "backend-outdated"
-            ? failure("backend-outdated", null)
-            : "Не удалось загрузить серверы. Проверьте подписку и Docker.",
+            ? failure("backend-outdated", null, this.status?.runtime)
+            : `Не удалось загрузить серверы. Проверьте подписку и ${this.serviceLabel()}.`,
           true,
         );
         if (this.closing && !this.tasks.size && !this.homeTesting && !this.batch) await this.finishClose();
@@ -974,7 +1160,7 @@ export class App {
     this.batch = undefined;
     this.notify(
       stoppedReason
-        ? `${failure(stoppedReason, null)} Проверено: ${done}/${total}.`
+        ? `${failure(stoppedReason, null, this.status?.runtime)} Проверено: ${done}/${total}.`
         : `${this.cancelled || this.closing ? "Остановлено" : "Завершено"}: ${done}/${total} · ошибок ${failed}. ${kind !== "speed" && (this.cancelled || this.closing) ? "Показаны полученные результаты; проход не сохранён." : "Результаты сохранены."}`,
       failed > 0 || !!stoppedReason,
     );
@@ -996,7 +1182,7 @@ export class App {
     const width = Math.max(10, this.renderer.terminalWidth - 2),
       state = connection(this.status);
     this.headline.content = cell(
-      `◈ VPNKIT${this.demo ? " · ДЕМО" : ""}    ${state.title}`,
+      `◈ VPNKIT${this.demo ? " · ДЕМО" : ""}${this.nativeMode() ? " · NATIVE PREVIEW" : ""}    ${state.title}`,
       width,
     );
     this.headline.fg = state.color;
@@ -1014,7 +1200,9 @@ export class App {
       running: "проверяется",
     };
     this.facts.content = cell(
-      `Docker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"} · Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}`,
+      this.nativeMode()
+        ? `Native-служба: ${gatewayNames[gateway ?? ""] ?? "неизвестно"} · runtime: native · Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}`
+        : `Docker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"} · Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}`,
       width,
     );
     const editor = this.screen === "subscription" || this.screen === "target";
@@ -1038,19 +1226,28 @@ export class App {
         : "";
     });
     this.summary.height = this.screen === "diagnostics" ? 6 : 2;
-    if (this.screen === "confirm")
-      this.summary.content =
-        this.confirmation === "disconnect"
-          ? "Точно хотите отключить VPN?"
-          : "Точно хотите остановить Docker и отключить VPN?";
+    if (this.screen === "confirm") {
+      if (this.confirmation === "subscription") {
+        this.summary.height = 4;
+        this.summary.content =
+          "Настроить native-пакет?\nСистемное окно Polkit попросит подтверждение администратора.\nПервичный выбор сервера может занять несколько минут.\nVPN не запускается; автозапуск не изменяется.";
+      } else {
+        this.summary.content =
+          this.confirmation === "disconnect"
+            ? "Точно хотите отключить VPN?"
+            : `Точно хотите остановить ${this.serviceObject()} и отключить VPN?`;
+      }
+    }
     if (this.screen === "home")
       this.summary.content = !this.status
         ? "Проверяем состояние…"
-        : !this.ready()
-          ? "Подписку можно настроить до запуска Docker."
-          : this.status.subscription !== "configured"
-            ? "Добавьте подписку, затем откройте серверы."
-            : "";
+        : this.nativeMode()
+          ? this.nativePreview()
+          : !this.ready()
+            ? "Подписку можно настроить до запуска Docker."
+            : this.status.subscription !== "configured"
+              ? "Добавьте подписку, затем откройте серверы."
+              : "";
     this.summary.visible = this.screen !== "home" || this.summary.chunks.some(chunk => chunk.text.length > 0);
     if (!this.summary.visible) this.summary.height = 0;
     const compactGauge = this.renderer.height < 25 || width < 29;
@@ -1064,29 +1261,44 @@ export class App {
       ...t`\n${cell(this.homeSpeedLabel, width).trimEnd()}${this.homeSpeedAt ? `\nПоследний замер: ${new Date(this.homeSpeedAt).toLocaleTimeString("ru-RU", { hour12: false })}` : ""}`.chunks,
     ]);
     if (this.screen === "autostart") {
-      const results: Record<string, string> = { ready: "выполнен", failed: "ошибка, откройте диагностику", "prerequisites-unavailable": "Docker или сеть не готовы", cancelled: "отменён", disabled: "отключён", running: "выполняется" };
-      this.summary.height = 3;
-      this.summary.content = `При входе в KDE\nОтключение автозапуска не отключает работающий VPN.\nПоследний запуск: ${results[this.autostart?.last_result ?? ""] ?? "не выполнялся"}`;
+      const nativeAutostart = this.nativeMode() || this.autostart?.runtime === "native";
+      const results: Record<string, string> = { ready: "выполнен", failed: "ошибка, откройте диагностику", "prerequisites-unavailable": `${nativeAutostart ? "Native-служба" : "Docker"} или сеть не готовы`, cancelled: "отменён", disabled: "отключён", running: "выполняется" };
+      const login = nativeAutostart
+        ? "Автозапуск native-службы при входе в графическую сессию"
+        : "При входе в KDE";
+      this.summary.height = nativeAutostart ? 5 : 4;
+      this.summary.content = `${login}\nОтключение автозапуска не отключает работающий VPN.\nПоследний запуск: ${results[this.autostart?.last_result ?? ""] ?? "не выполнялся"}${nativeAutostart ? "\nРежим: native-служба" : ""}\n${this.serviceStateLabel()}`;
     }
-    if (this.screen === "subscription")
-      this.summary.content =
-        this.busy === "subscription/read"
-          ? "Подписка · загрузка сохранённого адреса…"
-          : "Подписка";
+    if (this.screen === "subscription") {
+      this.summary.height = this.nativeInstalled() ? 4 : this.nativeMode() ? 3 : 2;
+      this.summary.content = this.nativeInstalled()
+        ? "Первичная настройка native-пакета\nСистемное окно Polkit попросит подтверждение администратора.\nВыбор первого сервера может занять несколько минут.\nПосле успеха нажмите «Подключить VPN» отдельно; автозапуск включается отдельно и не включается сам."
+        : this.nativeMode()
+          ? "Подписка\nВ native preview чтение и применение подписки пока не подключены."
+          : this.busy === "subscription/read"
+            ? "Подписка · загрузка сохранённого адреса…"
+            : "Подписка";
+    }
     if (this.screen === "target")
       this.summary.content =
         "Адрес для проверки доступности\nHTTPS-запрос через каждый сервер; это не тест скорости.";
     if (this.screen === "diagnostics")
-      this.summary.content = `OpenVPN / KDE: ${this.status?.networkmanager_active === "yes" ? "активен" : this.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nDocker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${this.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${this.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${this.status?.last_attempt ?? "—"}\nПроверка сайта и скорости — на экране серверов.`;
-    const table = this.screen === "servers" && this.ready();
+      this.summary.content = this.nativeMode()
+        ? `OpenVPN / KDE: ${this.status?.networkmanager_active === "yes" ? "активен" : this.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nNative-служба: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${this.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nАдаптер диагностики native: пока не подключён\nПоследняя попытка: ${this.status?.last_attempt ?? "—"}\nNative preview: серверы и проверки пока не подключены.`
+        : `OpenVPN / KDE: ${this.status?.networkmanager_active === "yes" ? "активен" : this.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nDocker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${this.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${this.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${this.status?.last_attempt ?? "—"}\nПроверка сайта и скорости — на экране серверов.`;
+    const table = this.screen === "servers" && this.ready() && !this.nativeMode();
     this.tableHeader.visible = table;
     if (this.screen === "servers")
-      this.summary.content = !this.ready()
-        ? "Для проверок нужен Docker. VPN подключать не требуется."
-        : this.status?.subscription !== "configured"
-          ? "Добавьте подписку для загрузки серверов."
-          : `${this.servers.length} серверов · Сортировка [o]: ${{ name: "имя ↑", ping: "ping ↑", speed: "скорость ↓", availability: "доступность ↓" }[this.sort]}${this.catalogStale ? " · каталог устарел" : ""}\nСайт: ${this.target}`;
-    if (compactServers && this.ready() && this.status?.subscription === "configured" && !this.catalogStale) {
+      this.summary.content = this.nativeMode()
+        ? !this.ready()
+          ? `Native-служба не готова. Запустите ${this.serviceObject()} для жизненного цикла VPN.\nВыбор серверов и проверки пока не подключены.`
+          : "Native preview: выбор серверов и проверки пока не подключены.\nЗапуск/остановка VPN и автозапуск доступны на главной."
+        : !this.ready()
+          ? "Для проверок нужен Docker. VPN подключать не требуется."
+          : this.status?.subscription !== "configured"
+            ? "Добавьте подписку для загрузки серверов."
+            : `${this.servers.length} серверов · Сортировка [o]: ${{ name: "имя ↑", ping: "ping ↑", speed: "скорость ↓", availability: "доступность ↓" }[this.sort]}${this.catalogStale ? " · каталог устарел" : ""}\nСайт: ${this.target}`;
+    if (compactServers && !this.nativeMode() && this.ready() && this.status?.subscription === "configured" && !this.catalogStale) {
       this.summary.visible = false;
       this.summary.height = 0;
     }
@@ -1140,7 +1352,7 @@ export class App {
       this.progress.content = `${frames[this.frame % 10]} ${detail}${this.cancelled ? " · отмена…" : " · [k] отменить"}`;
     }
     else if (activeTask) {
-      this.progress.content = `${frames[this.frame % 10]} ${names[activeTask.action] ?? "Операция"} · ${activeTask.phase || "выполняется"} · ${Math.floor((Date.now() - activeTask.started) / 1000)} с`;
+      this.progress.content = `${frames[this.frame % 10]} ${this.actionLabel(activeTask.action)} · ${activeTask.phase || "выполняется"} · ${Math.floor((Date.now() - activeTask.started) / 1000)} с`;
     }
     else
       this.progress.content =
@@ -1174,6 +1386,7 @@ export class App {
     this.closing = true;
     this.queued = undefined;
     this.input.blur();
+    this.pendingSubscription = undefined;
     this.draft = "";
     this.input.value = "";
     if (this.tasks.size || this.batch || this.homeTesting) {

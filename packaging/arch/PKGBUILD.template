@@ -1,0 +1,89 @@
+# Maintainer: local-vpn-kde contributors
+# Local-snapshot template. Run prepare-local-source.py; do not pass this file
+# directly to makepkg and do not publish it to AUR.
+pkgname=local-vpn-kde-native
+pkgver=@PKGVER@
+pkgrel=1
+pkgdesc='Docker-free local VPN gateway and OpenTUI client'
+arch=('x86_64')
+url='https://github.com/blockedby/local-vpn-kde'
+# Upstream has not yet supplied publishable license metadata.
+license=('custom:unlicensed')
+depends=(
+  'bun'
+  'openvpn'
+  'networkmanager'
+  'networkmanager-openvpn'
+  'nftables'
+  'iptables'
+  'iproute2'
+  'polkit'
+  'shadow'
+  'util-linux'
+  'systemd'
+  'sing-box>=1.13'
+  'sing-box<1.15'
+)
+makedepends=('go' 'bun')
+install=local-vpn-kde-native.install
+source=('@ARCHIVE@')
+sha256sums=('@SHA256@')
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  export CGO_ENABLED=0
+  export GOFLAGS='-buildvcs=false -trimpath'
+  go build -ldflags='-s -w' -o build/local-vpn-kde.bin ./cmd/local-vpn-kde
+  go build -ldflags='-s -w' -o build/vibe-vpn ./cmd/vibe-vpn
+  go build -ldflags='-s -w' -o build/vibe-vpn-server-op-supervisor ./cmd/vibe-vpn-server-op-supervisor
+
+  mkdir -p build/units
+  go run ./packaging/arch/generate-units build/units
+
+  cd scripts/vpnkit/tui
+  bun install --frozen-lockfile --production
+}
+
+check() {
+  cd "$srcdir/$pkgname-$pkgver"
+  go test ./packaging/arch/generate-units
+  test -s build/units/local-vpn-kde-network.service
+  test -s build/units/local-vpn-kde-gateway.service
+  ! grep -q '^\[Install\]' build/units/*.service
+  test -d scripts/vpnkit/tui/node_modules/@opentui/core
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  install -Dm755 build/local-vpn-kde.bin "$pkgdir/usr/libexec/local-vpn-kde/local-vpn-kde.bin"
+  install -Dm755 build/vibe-vpn "$pkgdir/usr/libexec/local-vpn-kde/vibe-vpn"
+  install -Dm755 build/vibe-vpn-server-op-supervisor "$pkgdir/usr/libexec/local-vpn-kde/vibe-vpn-server-op-supervisor"
+  ln -s /usr/bin/sing-box "$pkgdir/usr/libexec/local-vpn-kde/sing-box"
+
+  install -Dm755 packaging/arch/local-vpn-kde "$pkgdir/usr/bin/local-vpn-kde"
+  install -Dm644 build/units/*.service -t "$pkgdir/usr/lib/systemd/system"
+  install -Dm644 packaging/arch/local-vpn-kde-native.sysusers \
+    "$pkgdir/usr/lib/sysusers.d/local-vpn-kde-native.conf"
+  install -Dm644 packaging/arch/local-vpn-kde-native.tmpfiles \
+    "$pkgdir/usr/lib/tmpfiles.d/local-vpn-kde-native.conf"
+
+  install -Dm644 packaging/arch/org.local-vpn-kde.configure.policy \
+    "$pkgdir/usr/share/polkit-1/actions/org.local-vpn-kde.configure.policy"
+  install -Dm644 packaging/arch/49-local-vpn-kde.rules \
+    "$pkgdir/usr/share/polkit-1/rules.d/49-local-vpn-kde.rules"
+  install -Dm644 packaging/arch/local-vpn-kde-native.hook \
+    "$pkgdir/usr/share/libalpm/hooks/local-vpn-kde-native.hook"
+  install -Dm755 scripts/vpnkit/vpnkit-native.sh \
+    "$pkgdir/usr/share/local-vpn-kde/scripts/vpnkit/vpnkit-native.sh"
+  install -d "$pkgdir/usr/share/local-vpn-kde/scripts/vpnkit/tui"
+  cp -a --no-preserve=ownership scripts/vpnkit/tui/node_modules \
+    "$pkgdir/usr/share/local-vpn-kde/scripts/vpnkit/tui/"
+  find scripts/vpnkit/tui -maxdepth 1 -type f \
+    \( \( -name '*.ts' ! -name '*.test.ts' \) -o -name 'package.json' -o -name 'bun.lock' -o -name 'tsconfig.json' \) \
+    -exec install -Dm644 {} "$pkgdir/usr/share/local-vpn-kde/scripts/vpnkit/tui/" \;
+
+  install -d "$pkgdir/usr/share/local-vpn-kde/config"
+  cp -a --no-preserve=ownership config/openvpn config/sing-box "$pkgdir/usr/share/local-vpn-kde/config/"
+}
