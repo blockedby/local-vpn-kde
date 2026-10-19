@@ -152,3 +152,25 @@ func TestBrowserCatalogKeepsGenericDuplicatesUsableByOpaqueID(t *testing.T) {
 		}
 	}
 }
+
+func TestBrowserCatalogKeepsSameEndpointInSeparateProfiles(t *testing.T) {
+	salt := []byte("0123456789abcdef0123456789abcdef")
+	a := NodeResult{ProfileID: "profile_one", Name: "Private VPS", Host: "example.invalid", Port: 443, Network: "quic", Security: "tls", Link: "hy2://fixture@example.invalid"}
+	b := a
+	b.ProfileID = "profile_two"
+	catalog := NewBrowserCatalog(1, salt, []NodeResult{a, b, a})
+	if len(catalog.Servers) != 2 {
+		t.Fatal("cross-profile endpoint collapsed or duplicate retained")
+	}
+	if BrowserServerID(salt, a) == BrowserServerID(salt, b) {
+		t.Fatal("profiles share server identity")
+	}
+	response := catalog.SafeServers("")
+	seen := map[string]bool{}
+	for _, row := range response {
+		seen[row.ProfileID] = true
+	}
+	if !seen[a.ProfileID] || !seen[b.ProfileID] {
+		t.Fatal("response lost profile boundaries")
+	}
+}

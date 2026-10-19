@@ -397,11 +397,12 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 		}
 		r := profiles.Request{Action: strings.TrimPrefix(request.Action, "profiles/")}
 		if r.Action == "add" {
-			if json.Unmarshal([]byte(value), &r) != nil {
+			var err error
+			r, err = profiles.DecodeAddRequest(strings.NewReader(value))
+			if err != nil {
 				invalid()
 				break
 			}
-			r.Action = "add"
 		} else if r.Action != "list" {
 			r.ID = value
 		}

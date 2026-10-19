@@ -66,13 +66,8 @@ func NativeOperationsClient(ctx context.Context, args []string, output io.Writer
 func validateNativeOperation(args []string) error {
 	bad := errors.New("unsupported native operation")
 	if len(args) == 2 && args[0] == "profiles" {
-		var r profiles.Request
-		decoder := json.NewDecoder(strings.NewReader(args[1]))
-		decoder.DisallowUnknownFields()
-		if len(args[1]) > 32<<10 || decoder.Decode(&r) != nil {
-			return bad
-		}
-		return r.Validate()
+		_, err := profiles.DecodeRequest(strings.NewReader(args[1]))
+		return err
 	}
 	if len(args) == 1 {
 		switch args[0] {

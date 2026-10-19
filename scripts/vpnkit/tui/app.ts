@@ -87,23 +87,40 @@ export class App {
   private autostart?: AutostartOptions;
   private serviceState?: AutostartServiceState;
   private screen: Screen = "home";
- private profiles?: Reply["profiles"];
- private profileName = "";
- private profilePage = 0;
- private async browseProfile(id: string) {
-  const reply=await this.perform("profiles/open",id);
-  if (!reply?.ok) return;
-  this.servers=[];this.catalogLoaded=false;this.serverID=undefined;
-  this.open("servers");
- }
- private async addProfile(source: string) {
-  const reply=await this.perform("profiles/add",JSON.stringify({name:this.profileName,source}));
-  if (reply?.ok) { this.input.value="";this.servers=[];this.catalogLoaded=false;this.open("profiles"); }
- }
- private async removeProfile() {
-  const reply=await this.perform("profiles/remove",this.profiles?.active);
-  if (reply?.ok){this.servers=[];this.catalogLoaded=false;this.open("profiles");}
- }
+  private profiles?: Reply["profiles"];
+  private profileName = "";
+  private profilePage = 0;
+
+  private resetProfileCatalog() {
+    this.servers = [];
+    this.catalogLoaded = false;
+    this.serverID = undefined;
+  }
+
+  private async browseProfile(id: string) {
+    const reply = await this.perform("profiles/open", id);
+    if (!reply?.ok) return;
+    this.resetProfileCatalog();
+    this.open("servers");
+  }
+
+  private async addProfile(source: string) {
+    const reply = await this.perform(
+      "profiles/add",
+      JSON.stringify({ name: this.profileName, source }),
+    );
+    if (!reply?.ok) return;
+    this.input.value = "";
+    this.resetProfileCatalog();
+    this.open("profiles");
+  }
+
+  private async removeProfile() {
+    const reply = await this.perform("profiles/remove", this.profiles?.active);
+    if (!reply?.ok) return;
+    this.resetProfileCatalog();
+    this.open("profiles");
+  }
   private tasks = new Map<string, { action: Action; measurement: boolean; started: number; phase: string }>();
   private nextTask = 0;
   private selectionRevision = 0;

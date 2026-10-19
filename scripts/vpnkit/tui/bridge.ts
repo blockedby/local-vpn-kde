@@ -87,6 +87,7 @@ export class Bridge implements Backend {
   private sequence = 0;
   private buffer = "";
   private closed = false;
+  private childClosed = false;
   onProgress?: (phase: string, requestId?: string) => void;
   onCheckProgress?: (result: CheckProgress, requestId?: string) => void;
   constructor(args: string[] = [], child?: ChildProcessWithoutNullStreams) {
@@ -144,6 +145,10 @@ export class Bridge implements Backend {
     });
     this.child.on("error", () => this.fail());
     this.child.on("exit", () => this.fail());
+    this.child.once("close", () => {
+      this.childClosed = true;
+      this.fail();
+    });
     this.child.stdin.on("error", () => this.fail());
   }
   private fail() {
@@ -176,9 +181,9 @@ export class Bridge implements Backend {
     this.cancel();
     this.fail();
     this.child.stdin.end();
-    if (this.child.exitCode !== null || this.child.signalCode !== null) return;
+    if (this.childClosed || this.child.exitCode !== null || this.child.signalCode !== null) return;
     await new Promise<void>((resolve) =>
-      this.child.once("exit", () => resolve()),
+      this.child.once("close", () => resolve()),
     );
   }
 }
