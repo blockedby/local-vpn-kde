@@ -1121,7 +1121,7 @@ func prepareFixtureMode(real bool) error {
 
 	base := privateRoot + "/secrets"
 	if err := localvpn.Assets(localvpn.AssetOptions{
-		Base: base, TemplateDir: fixtureRoot + "/config/openvpn", Endpoint: "127.0.0.1",
+		Base: base, Runtime: "native", TemplateDir: fixtureRoot + "/config/openvpn", Endpoint: "127.0.0.1",
 		Port: nativegateway.LoopbackPort, DNS: "8.8.8.8", CertificateDays: 1,
 	}); err != nil {
 		return err

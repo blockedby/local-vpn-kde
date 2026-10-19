@@ -27,7 +27,7 @@ func availableNativeStatus() GatewayStatus {
 
 func TestNativeAutostartUnitAndRuntimeIntent(t *testing.T) {
 	a := configuredNativeAutostart(t, false)
-	unit, err := os.ReadFile(filepath.Join(a.ConfigHome, "systemd/user", autostartUnit))
+	unit, err := os.ReadFile(filepath.Join(a.ConfigHome, "systemd/user", a.unitName()))
 	if err != nil {
 		t.Fatal(err)
 	}

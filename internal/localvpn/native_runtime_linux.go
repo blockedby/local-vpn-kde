@@ -16,7 +16,7 @@ const nativeRuntimePath = "/run/local-vpn-kde"
 // process environment.
 func NativeRuntimeConfig() ContainerConfig {
 	return ContainerConfig{
-		CIDR:       "10.89.0.0/24",
+		CIDR:       "10.90.0.0/24",
 		Interface:  "sb-tun0",
 		Peer:       "172.19.0.2",
 		Table:      "101",

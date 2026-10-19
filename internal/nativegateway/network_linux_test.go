@@ -90,9 +90,9 @@ func TestPlanNetworkRendersRestrictedNFTablesRules(t *testing.T) {
 		`type nat hook output priority -100`,
 		`type nat hook postrouting priority 100`,
 		`type filter hook forward priority 0`,
-		`oifname "lo" ip saddr 127.0.0.1 ip daddr 127.0.0.1 udp dport 21194 dnat ip to 172.30.89.2:1194`,
-		`oifname "vpnkit-host" ip saddr 127.0.0.1 ip daddr 172.30.89.2 udp dport 1194 snat ip to 172.30.89.1`,
-		`iifname "vpnkit-host" oifname "enp5s0" ip saddr 172.30.89.2/32 masquerade`,
+		`oifname "lo" ip saddr 127.0.0.1 ip daddr 127.0.0.1 udp dport 31194 dnat ip to 172.30.90.2:1194`,
+		`oifname "vpnkit-host" ip saddr 127.0.0.1 ip daddr 172.30.90.2 udp dport 1194 snat ip to 172.30.90.1`,
+		`iifname "vpnkit-host" oifname "enp5s0" ip saddr 172.30.90.2/32 masquerade`,
 		`iifname "vpnkit-host" drop`,
 		`oifname "vpnkit-host" drop`,
 	}
@@ -143,7 +143,7 @@ func TestPlanNetworkRejectsInvalidInputs(t *testing.T) {
 		{name: "gateway outside prefix", uplink: Uplink{Interface: "eth0", AddressCIDR: "192.0.2.10/24", Gateway: "198.51.100.1"}},
 		{name: "gateway network address", uplink: Uplink{Interface: "eth0", AddressCIDR: "192.0.2.10/24", Gateway: "192.0.2.0"}},
 		{name: "gateway equals address", uplink: Uplink{Interface: "eth0", AddressCIDR: "192.0.2.10/24", Gateway: "192.0.2.10"}},
-		{name: "uplink overlaps transit", uplink: Uplink{Interface: "eth0", AddressCIDR: "172.30.89.1/24", Gateway: "172.30.89.254"}},
+		{name: "uplink overlaps transit", uplink: Uplink{Interface: "eth0", AddressCIDR: "172.30.90.1/24", Gateway: "172.30.90.254"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -160,12 +160,12 @@ func TestPlanNetworkRejectsForeignResourceCollisions(t *testing.T) {
 		snapshot Snapshot
 	}{
 		{name: "Docker interlock", snapshot: Snapshot{DockerGatewayActive: true}},
-		{name: "Docker overlap", snapshot: Snapshot{DockerNetworks: []string{"172.30.89.0/30"}}},
+		{name: "Docker overlap", snapshot: Snapshot{DockerNetworks: []string{"172.30.90.0/30"}}},
 		{name: "namespace", snapshot: Snapshot{Namespaces: []string{Namespace}}},
 		{name: "host veth", snapshot: Snapshot{Interfaces: []InterfaceState{{Name: HostInterface}}}},
 		{name: "guest veth", snapshot: Snapshot{Interfaces: []InterfaceState{{Name: GuestInterface}}}},
-		{name: "interface address overlap", snapshot: Snapshot{Interfaces: []InterfaceState{{Name: "br0", Addresses: []string{"172.30.89.0/29"}}}}},
-		{name: "route overlap", snapshot: Snapshot{Routes: []RouteState{{Table: 254, Destination: "172.30.89.2/32"}}}},
+		{name: "interface address overlap", snapshot: Snapshot{Interfaces: []InterfaceState{{Name: "br0", Addresses: []string{"172.30.90.0/29"}}}}},
+		{name: "route overlap", snapshot: Snapshot{Routes: []RouteState{{Table: 254, Destination: "172.30.90.2/32"}}}},
 		{name: "routing table", snapshot: Snapshot{Routes: []RouteState{{Table: RoutingTable, Destination: "default"}}}},
 		{name: "egress priority", snapshot: Snapshot{Rules: []RuleState{{Priority: EgressRulePriority}}}},
 		{name: "barrier priority", snapshot: Snapshot{Rules: []RuleState{{Priority: UnreachableRulePriority}}}},

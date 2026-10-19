@@ -104,7 +104,7 @@ func TestNativeGeneratedConfigurationUsesFixedNativePathsAndReturnsProfile(t *te
 	}
 
 	profile := string(generated.ClientProfile)
-	if !strings.Contains(profile, "remote 127.0.0.1 21194") || !strings.Contains(profile, "<ca>\n") || !strings.Contains(profile, "<cert>\n") || !strings.Contains(profile, "<key>\n") || !strings.Contains(profile, "<tls-auth>\n") {
+	if !strings.Contains(profile, "remote 127.0.0.1 31194") || !strings.Contains(profile, "<ca>\n") || !strings.Contains(profile, "<cert>\n") || !strings.Contains(profile, "<key>\n") || !strings.Contains(profile, "<tls-auth>\n") {
 		t.Fatal("generated client profile is incomplete")
 	}
 	if !strings.Contains(profile, "-----BEGIN RSA PRIVATE KEY-----") {

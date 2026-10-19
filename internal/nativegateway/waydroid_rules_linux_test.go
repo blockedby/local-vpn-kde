@@ -17,8 +17,8 @@ func TestSplitRuleSourcePrefixes(t *testing.T) {
 		blocked bool
 	}{
 		{`{"priority":100,"src":"192.168.240.0","srclen":24,"table":"main"}`, false},
-		{`{"priority":100,"src":"172.30.89.0","srclen":24,"table":"main"}`, true},
-		{`{"priority":100,"src":"172.30.89.2","table":"main"}`, true},
+		{`{"priority":100,"src":"172.30.90.0","srclen":24,"table":"main"}`, true},
+		{`{"priority":100,"src":"172.30.90.2","table":"main"}`, true},
 		{`{"priority":100,"src":"192.168.240.0","srclen":33,"table":"main"}`, true},
 		{`{"priority":100,"src":"192.168.240.0","srclen":24,"not":true,"table":"main"}`, true},
 		{`{"priority":100,"src":"all","dst":"192.168.240.0","dstlen":24,"table":"main"}`, true},

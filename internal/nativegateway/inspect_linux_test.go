@@ -58,7 +58,7 @@ func exactInspectFixture(t *testing.T) (map[string][]byte, *inspectFS) {
 		commandKey("ip", "-json", "address", "show"): []byte(`[
 			{"ifname":"lo","addr_info":[{"family":"inet","local":"127.0.0.1","prefixlen":8}]},
 			{"ifname":"enp5s0","addr_info":[{"family":"inet","local":"192.0.2.10","prefixlen":24}]},
-			{"ifname":"vpnkit-host","addr_info":[{"family":"inet","local":"172.30.89.1","prefixlen":30}]}
+			{"ifname":"vpnkit-host","addr_info":[{"family":"inet","local":"172.30.90.1","prefixlen":30}]}
 		]`),
 		commandKey("ip", "-json", "-4", "route", "show", "table", "21194"): []byte(`[
 			{"dst":"192.0.2.0/24","dev":"enp5s0","prefsrc":"192.0.2.10","scope":"link","table":21194,"protocol":89},
@@ -66,8 +66,8 @@ func exactInspectFixture(t *testing.T) (map[string][]byte, *inspectFS) {
 		]`),
 		commandKey("ip", "-json", "-4", "rule", "show"): []byte(`[
 			{"priority":0,"src":"all","table":"local"},
-			{"priority":5000,"src":"172.30.89.2/32","iif":"vpnkit-host","table":21194,"protocol":89,"action":"lookup"},
-			{"priority":5001,"src":"172.30.89.2/32","protocol":89,"action":"unreachable"}
+			{"priority":5000,"src":"172.30.90.2/32","iif":"vpnkit-host","table":21194,"protocol":89,"action":"lookup"},
+			{"priority":5001,"src":"172.30.90.2/32","protocol":89,"action":"unreachable"}
 		]`),
 		commandKey("ip", "-n", Namespace, "-json", "-details", "link", "show"): []byte(`[
 			{"ifname":"lo","ifindex":1,"flags":["LOOPBACK","UP"]},
@@ -75,10 +75,10 @@ func exactInspectFixture(t *testing.T) (map[string][]byte, *inspectFS) {
 		]`),
 		commandKey("ip", "-n", Namespace, "-json", "address", "show"): []byte(`[
 			{"ifname":"lo","addr_info":[{"family":"inet","local":"127.0.0.1","prefixlen":8}]},
-			{"ifname":"vpnkit-ns","addr_info":[{"family":"inet","local":"172.30.89.2","prefixlen":30}]}
+			{"ifname":"vpnkit-ns","addr_info":[{"family":"inet","local":"172.30.90.2","prefixlen":30}]}
 		]`),
 		commandKey("ip", "-n", Namespace, "-json", "-4", "route", "show", "table", "main"): []byte(`[
-			{"dst":"default","gateway":"172.30.89.1","dev":"vpnkit-ns","table":"main","protocol":"boot"}
+			{"dst":"default","gateway":"172.30.90.1","dev":"vpnkit-ns","table":"main","protocol":"boot"}
 		]`),
 		commandKey("ip", "netns", "exec", Namespace, "sysctl", "-n", "net.ipv6.conf.all.disable_ipv6"):     []byte("1\n"),
 		commandKey("ip", "netns", "exec", Namespace, "sysctl", "-n", "net.ipv6.conf.default.disable_ipv6"): []byte("1\n"),
@@ -242,7 +242,7 @@ func TestLinuxNetworkInspectorRejectsWrongRoutesRulesAndExtraNFT(t *testing.T) {
 			o[commandKey("ip", "-json", "-4", "route", "show", "table", "21194")] = []byte(`[{"dst":"default","gateway":"192.0.2.1","dev":"enp5s0","table":21194,"protocol":88}]`)
 		}},
 		{name: "rule priority selector", kind: EffectEgressRule, mutate: func(o map[string][]byte) {
-			o[commandKey("ip", "-json", "-4", "rule", "show")] = []byte(`[{"priority":4999,"src":"172.30.89.2/32","iif":"vpnkit-host","table":21194,"protocol":89}]`)
+			o[commandKey("ip", "-json", "-4", "rule", "show")] = []byte(`[{"priority":4999,"src":"172.30.90.2/32","iif":"vpnkit-host","table":21194,"protocol":89}]`)
 		}},
 		{name: "nft extra rule", kind: EffectNFTTable, mutate: func(o map[string][]byte) {
 			var doc map[string]any

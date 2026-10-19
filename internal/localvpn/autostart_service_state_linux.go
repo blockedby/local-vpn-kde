@@ -53,7 +53,7 @@ func (a Autostart) ServiceState(parent context.Context) (AutostartServiceState, 
 
 	result := make(chan autostartServiceStateCallResult, 1)
 	go func() {
-		data, err := a.call(ctx, "systemctl", "--user", "show", autostartUnit, "--property="+autostartServiceStateProperties)
+		data, err := a.call(ctx, "systemctl", "--user", "show", a.unitName(), "--property="+autostartServiceStateProperties)
 		result <- autostartServiceStateCallResult{data: data, err: err}
 	}()
 	var data []byte

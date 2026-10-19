@@ -47,6 +47,13 @@ func (a Autostart) call(ctx context.Context, name string, args ...string) ([]byt
 	}
 	return hostCommand(ctx, name, args...)
 }
+func (a Autostart) unitName() string {
+	if runtime, _ := a.runtime(); runtime == "native" {
+		return "local-vpn-kde-native-autostart.service"
+	}
+	return autostartUnit
+}
+
 func (a Autostart) configDir() (int, error) {
 	home := a.ConfigHome
 	if home == "" {
@@ -255,7 +262,7 @@ func (a Autostart) Configure(ctx context.Context, options AutostartOptions) erro
 		return err
 	}
 	defer unix.Close(dir)
-	old, err := readAt(dir, autostartUnit)
+	old, err := readAt(dir, a.unitName())
 	if err != nil && !errors.Is(err, unix.ENOENT) {
 		return err
 	}
@@ -270,11 +277,11 @@ func (a Autostart) Configure(ctx context.Context, options AutostartOptions) erro
 	}
 	if options.Runtime == "native" && len(old) != 0 && strings.Contains(string(old), "WantedBy=default.target") {
 		// Remove the old boot/user-manager link without stopping an active VPN.
-		if _, err = a.call(ctx, "systemctl", "--user", "disable", autostartUnit); err != nil {
+		if _, err = a.call(ctx, "systemctl", "--user", "disable", a.unitName()); err != nil {
 			return errors.New("could not migrate login autostart target")
 		}
 	}
-	if err = atomicWrite(dir, autostartUnit, []byte(unit)); err != nil {
+	if err = atomicWrite(dir, a.unitName(), []byte(unit)); err != nil {
 		return err
 	}
 	if _, err = a.call(ctx, "systemctl", "--user", "daemon-reload"); err != nil {
@@ -284,7 +291,7 @@ func (a Autostart) Configure(ctx context.Context, options AutostartOptions) erro
 	if options.Gateway {
 		action = "enable"
 	}
-	if _, err = a.call(ctx, "systemctl", "--user", action, autostartUnit); err != nil {
+	if _, err = a.call(ctx, "systemctl", "--user", action, a.unitName()); err != nil {
 		return errors.New("could not configure login autostart")
 	}
 	data, _ = json.Marshal(options)
@@ -423,7 +430,7 @@ func (a Autostart) Run(ctx context.Context) (runErr error) {
 			connect := a.nativeConnect
 			if connect == nil {
 				connect = func(ctx context.Context) error {
-					return (NetworkManager{Base: a.Base}).Run(ctx, "connect", true, io.Discard)
+					return (NetworkManager{Base: a.Base, Native: true}).Run(ctx, "connect", true, io.Discard)
 				}
 			}
 			if err = connect(ctx); err != nil {

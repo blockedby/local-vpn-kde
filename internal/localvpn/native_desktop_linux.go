@@ -45,7 +45,7 @@ type nativeDesktopDependencies struct {
 var newNativeDesktopDependencies = func(base string) nativeDesktopDependencies {
 	return nativeDesktopDependencies{
 		service: NativeService{},
-		nm:      NetworkManager{Base: base},
+		nm:      NetworkManager{Base: base, Native: true},
 	}
 }
 

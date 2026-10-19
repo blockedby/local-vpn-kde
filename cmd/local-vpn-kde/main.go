@@ -206,7 +206,7 @@ func run(args []string) error {
 			}
 		})
 		if !explicitPort {
-			*port = 21194
+			*port = 31194
 		}
 	}
 	root, err := filepath.Abs(*repo)
@@ -280,7 +280,7 @@ func run(args []string) error {
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 		defer cancel()
-		manager := localvpn.NetworkManager{Base: selected, Timeout: time.Duration(seconds) * time.Second}
+		manager := localvpn.NetworkManager{Base: selected, Native: *runtimeMode == "native", Timeout: time.Duration(seconds) * time.Second}
 		if !installed && filepath.Base(root) == "local-vpn-kde" {
 			previous := filepath.Join(filepath.Dir(root), "vibe-practicum-vpn")
 			if path, err := localvpn.SecretRoot(previous, "secrets/vpnkit-local", false); err == nil {

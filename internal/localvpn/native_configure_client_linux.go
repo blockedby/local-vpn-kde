@@ -84,7 +84,7 @@ func configureNativeDesktop(ctx context.Context, base, subscription string) erro
 	return runNativeDesktopProtocol(bounded, process, nativeConfigurationRequest{Subscription: subscription, StatePath: base}, func(finalize context.Context) error {
 		// These are intentionally unprivileged operations on the caller-owned
 		// profile and subscription copy. They grant no authority to the helper.
-		manager := NetworkManager{Base: base, Timeout: 30 * time.Second}
+		manager := NetworkManager{Base: base, Native: true, Timeout: 30 * time.Second}
 		if err := manager.Run(finalize, "import", true, io.Discard); err != nil {
 			return errors.New("native configuration installed but profile import failed")
 		}

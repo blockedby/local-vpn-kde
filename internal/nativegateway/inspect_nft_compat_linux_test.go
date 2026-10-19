@@ -20,33 +20,33 @@ const realNFTListTableFixture = `{
       {"match":{"op":"==","left":{"meta":{"key":"oifname"}},"right":"lo"}},
       {"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"saddr"}},"right":"127.0.0.1"}},
       {"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"daddr"}},"right":"127.0.0.1"}},
-      {"match":{"op":"==","left":{"payload":{"protocol":"udp","field":"dport"}},"right":21194}},
-      {"dnat":{"family":"ip","addr":"172.30.89.2","port":1194}}
+      {"match":{"op":"==","left":{"payload":{"protocol":"udp","field":"dport"}},"right":31194}},
+      {"dnat":{"family":"ip","addr":"172.30.90.2","port":1194}}
     ]}},
     {"rule":{"family":"inet","table":"vpnkit_native","chain":"postrouting_nat","handle":5,"expr":[
       {"match":{"op":"==","left":{"meta":{"key":"oifname"}},"right":"vpnkit-host"}},
       {"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"saddr"}},"right":"127.0.0.1"}},
-      {"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"daddr"}},"right":"172.30.89.2"}},
+      {"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"daddr"}},"right":"172.30.90.2"}},
       {"match":{"op":"==","left":{"payload":{"protocol":"udp","field":"dport"}},"right":1194}},
-      {"snat":{"family":"ip","addr":"172.30.89.1"}}
+      {"snat":{"family":"ip","addr":"172.30.90.1"}}
     ]}},
     {"rule":{"family":"inet","table":"vpnkit_native","chain":"postrouting_nat","handle":6,"expr":[
       {"match":{"op":"==","left":{"meta":{"key":"iifname"}},"right":"vpnkit-host"}},
       {"match":{"op":"==","left":{"meta":{"key":"oifname"}},"right":"lab-uplink"}},
-      {"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"saddr"}},"right":"172.30.89.2"}},
+      {"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"saddr"}},"right":"172.30.90.2"}},
       {"masquerade":null}
     ]}},
     {"rule":{"family":"inet","table":"vpnkit_native","chain":"forward","handle":7,"expr":[
       {"match":{"op":"==","left":{"meta":{"key":"iifname"}},"right":"vpnkit-host"}},
       {"match":{"op":"==","left":{"meta":{"key":"oifname"}},"right":"lab-uplink"}},
-      {"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"saddr"}},"right":"172.30.89.2"}},
+      {"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"saddr"}},"right":"172.30.90.2"}},
       {"match":{"op":"in","left":{"ct":{"key":"state"}},"right":["established","related","new"]}},
       {"accept":null}
     ]}},
     {"rule":{"family":"inet","table":"vpnkit_native","chain":"forward","handle":8,"expr":[
       {"match":{"op":"==","left":{"meta":{"key":"iifname"}},"right":"lab-uplink"}},
       {"match":{"op":"==","left":{"meta":{"key":"oifname"}},"right":"vpnkit-host"}},
-      {"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"daddr"}},"right":"172.30.89.2"}},
+      {"match":{"op":"==","left":{"payload":{"protocol":"ip","field":"daddr"}},"right":"172.30.90.2"}},
       {"match":{"op":"in","left":{"ct":{"key":"state"}},"right":["established","related"]}},
       {"accept":null}
     ]}},
@@ -122,10 +122,10 @@ func TestNFTExactInspectorStillRejectsConflictingRealOutput(t *testing.T) {
 			t.Fatal("forward chain not found")
 		}},
 		{name: "changed dnat address", mutate: func(t *testing.T, document map[string]any) {
-			changeNFTAddress(t, document, "dnat", "172.30.89.3")
+			changeNFTAddress(t, document, "dnat", "172.30.90.3")
 		}},
 		{name: "changed snat address", mutate: func(t *testing.T, document map[string]any) {
-			changeNFTAddress(t, document, "snat", "172.30.89.3")
+			changeNFTAddress(t, document, "snat", "172.30.90.3")
 		}},
 	}
 

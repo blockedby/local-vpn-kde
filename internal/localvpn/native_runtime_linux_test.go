@@ -19,7 +19,7 @@ func TestNativeRuntimeConfigIsFixed(t *testing.T) {
 
 	got := NativeRuntimeConfig()
 	want := ContainerConfig{
-		CIDR:       "10.89.0.0/24",
+		CIDR:       "10.90.0.0/24",
 		Interface:  "sb-tun0",
 		Peer:       "172.19.0.2",
 		Table:      "101",

@@ -14,7 +14,7 @@ func TestNativeAssetsUseFixedServicePKIAndLocalEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	o := AssetOptions{Base: t.TempDir(), TemplateDir: template, Runtime: "native", Endpoint: "127.0.0.1", Port: 21194, DNS: "8.8.8.8", CertificateDays: 30}
+	o := AssetOptions{Base: t.TempDir(), TemplateDir: template, Runtime: "native", Endpoint: "127.0.0.1", Port: 31194, DNS: "8.8.8.8", CertificateDays: 30}
 	if err := Assets(o); err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestNativeAssetsUseFixedServicePKIAndLocalEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(profile), "remote 127.0.0.1 21194") {
+	if !strings.Contains(string(profile), "remote 127.0.0.1 31194") {
 		t.Fatal("native profile does not use fixed loopback endpoint")
 	}
 	o.Base = t.TempDir()

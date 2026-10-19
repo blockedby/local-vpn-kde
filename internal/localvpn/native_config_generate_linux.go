@@ -107,7 +107,7 @@ func generateNativeConfigurationStaged(ctx context.Context, subscriptionURL stri
 		TemplateDir:     filepath.Join(assetsRoot, "config/openvpn"),
 		Runtime:         "native",
 		Endpoint:        "127.0.0.1",
-		Port:            21194,
+		Port:            31194,
 		DNS:             "8.8.8.8",
 		CertificateDays: 825,
 	}); err != nil {

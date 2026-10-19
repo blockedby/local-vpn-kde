@@ -25,7 +25,7 @@ var nativeClientProfileDirectives = map[string]string{
 	"client":                "",
 	"dev":                   "tun",
 	"proto":                 "udp",
-	"remote":                "127.0.0.1 21194",
+	"remote":                "127.0.0.1 31194",
 	"resolv-retry":          "infinite",
 	"nobind":                "",
 	"persist-key":           "",

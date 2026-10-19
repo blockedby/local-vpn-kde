@@ -152,7 +152,7 @@ func TestProbeNetworkRejectsUnknownEarlyGuestRule(t *testing.T) {
 	fixture := validProbeFixture()
 	fixture[commandKey("ip", "-json", "-4", "rule", "show")] = []byte(`[
   {"priority":0,"src":"all","table":"local"},
-  {"priority":1000,"src":"172.30.89.0/24","table":100},
+  {"priority":1000,"src":"172.30.90.0/24","table":100},
   {"priority":32766,"src":"all","table":"main"}
 ]`)
 	if _, _, err := ProbeNetwork(context.Background(), &fixtureRunner{outputs: fixture}); err == nil || !strings.Contains(err.Error(), "may affect native guest routing") {
@@ -217,11 +217,11 @@ func TestProbedKernelOverlapIsRejectedByPlannerWithoutDocker(t *testing.T) {
   {"ifname":"lo","addr_info":[{"family":"inet","local":"127.0.0.1","prefixlen":8}]},
   {"ifname":"enp5s0","addr_info":[{"family":"inet","local":"192.0.2.10","prefixlen":24}]},
   {"ifname":"tun0","addr_info":[{"family":"inet","local":"10.8.0.2","prefixlen":24}]},
-  {"ifname":"docker0","addr_info":[{"family":"inet","local":"172.30.89.1","prefixlen":24}]}
+  {"ifname":"docker0","addr_info":[{"family":"inet","local":"172.30.90.1","prefixlen":24}]}
 ]`)
 	fixture[commandKey("ip", "-json", "-4", "route", "show", "table", "all")] = []byte(`[
   {"dst":"default","gateway":"192.0.2.1","dev":"enp5s0","protocol":"dhcp","prefsrc":"192.0.2.10"},
-  {"dst":"172.30.89.0/24","dev":"docker0","protocol":"kernel","scope":"link","prefsrc":"172.30.89.1"}
+  {"dst":"172.30.90.0/24","dev":"docker0","protocol":"kernel","scope":"link","prefsrc":"172.30.90.1"}
 ]`)
 	uplink, snapshot, err := ProbeNetwork(context.Background(), &fixtureRunner{outputs: fixture})
 	if err != nil {

@@ -9,7 +9,7 @@ import (
 )
 
 func TestInspectorNormalizesElidedBootProtocol(t *testing.T) {
-	fixture := linkFixture(`[{"dst":"default","gateway":"172.30.89.1","dev":"vpnkit-ns","flags":[]}]`)
+	fixture := linkFixture(`[{"dst":"default","gateway":"172.30.90.1","dev":"vpnkit-ns","flags":[]}]`)
 	routes, ok, err := NewLinuxNetworkInspector(fixture).readInspectRoutes(context.Background(), "ip", "-n", Namespace, "-json", "-4", "route", "show", "table", "main")
 	if err != nil || !ok || len(routes) != 1 {
 		t.Fatalf("parse default route ok=%v err=%v", ok, err)

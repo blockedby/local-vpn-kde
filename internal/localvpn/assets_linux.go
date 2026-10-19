@@ -29,8 +29,8 @@ func Assets(o AssetOptions) error {
 	if o.Runtime != "" && o.Runtime != "docker" && o.Runtime != "native" {
 		return errors.New("invalid runtime")
 	}
-	if o.Runtime == "native" && o.Port != 21194 {
-		return errors.New("native KDE endpoint requires port 21194")
+	if o.Runtime == "native" && o.Port != 31194 {
+		return errors.New("native KDE endpoint requires port 31194")
 	}
 	if o.Endpoint != "127.0.0.1" && o.Endpoint != "localhost" {
 		return errors.New("local endpoint required")
@@ -121,6 +121,7 @@ func Assets(o AssetOptions) error {
 	}
 	server := strings.ReplaceAll(string(serverTemplate), "{{OPENVPN_PUSH_DNS}}", o.DNS)
 	if o.Runtime == "native" {
+		server = strings.ReplaceAll(server, "server 10.89.0.0 255.255.255.0", "server 10.90.0.0 255.255.255.0")
 		for _, directive := range []string{"ca /etc/openvpn/pki/ca.crt", "cert /etc/openvpn/pki/server.crt", "key /etc/openvpn/pki/server.key", "tls-auth /etc/openvpn/pki/ta.key 0"} {
 			if strings.Count(server, directive) != 1 {
 				return errors.New("unexpected native OpenVPN PKI template")

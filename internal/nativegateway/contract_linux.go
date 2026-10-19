@@ -9,10 +9,10 @@ const (
 	Namespace      = "vpnkit-native"
 	HostInterface  = "vpnkit-host"
 	GuestInterface = "vpnkit-ns"
-	TransitCIDR    = "172.30.89.0/30"
-	HostAddress    = "172.30.89.1"
-	GuestAddress   = "172.30.89.2"
-	LoopbackPort   = 21194
+	TransitCIDR    = "172.30.90.0/30"
+	HostAddress    = "172.30.90.1"
+	GuestAddress   = "172.30.90.2"
+	LoopbackPort   = 31194
 	GatewayPort    = 1194
 	NetworkUnit    = "local-vpn-kde-network.service"
 	GatewayUnit    = "local-vpn-kde-gateway.service"

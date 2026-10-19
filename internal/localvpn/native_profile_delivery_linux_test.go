@@ -29,7 +29,7 @@ func testNativeDeliveryProfile(t *testing.T) []byte {
 		nativeDeliveryProfile = []byte(fmt.Sprintf(`client
 dev tun
 proto udp
-remote 127.0.0.1 21194
+remote 127.0.0.1 31194
 resolv-retry infinite
 nobind
 persist-key
@@ -298,7 +298,7 @@ func TestDeliverNativeClientProfileRejectsInvalidAuthorityPathAndProfile(t *test
 	if err := f.deliver(dangerous); err == nil {
 		t.Fatal("script directive was accepted")
 	}
-	wrongRemote := []byte(strings.Replace(string(profile), "remote 127.0.0.1 21194", "remote 127.0.0.1 1194", 1))
+	wrongRemote := []byte(strings.Replace(string(profile), "remote 127.0.0.1 31194", "remote 127.0.0.1 1194", 1))
 	if err := f.deliver(wrongRemote); err == nil {
 		t.Fatal("wrong endpoint was accepted")
 	}
