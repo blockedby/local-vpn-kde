@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -474,10 +475,19 @@ func parseNMDevices(data []byte) (map[string]nmDevice, error) {
 			continue
 		}
 		fields, err := splitEscaped(line, ':')
-		if err != nil || len(fields) != 3 || !safeInterfaceName(fields[0]) {
+		if err != nil || len(fields) != 3 {
 			return nil, errors.New("malformed nmcli device snapshot")
 		}
 		typeName := strings.ToLower(fields[1])
+		// NetworkManager lists Bluetooth devices by MAC, not kernel interface name.
+		if typeName == "bt" {
+			if address, err := net.ParseMAC(fields[0]); err == nil && len(address) == 6 {
+				continue
+			}
+		}
+		if !safeInterfaceName(fields[0]) {
+			return nil, errors.New("malformed nmcli device snapshot")
+		}
 		physical := typeName == "ethernet" || typeName == "wifi" || typeName == "802-3-ethernet" || typeName == "802-11-wireless"
 		state := nmDevice{physical: physical, connected: strings.HasPrefix(strings.ToLower(fields[2]), "connected")}
 		if old, exists := result[fields[0]]; exists && old != state {

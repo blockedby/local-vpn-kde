@@ -29,3 +29,10 @@ func TestSplitRuleSourcePrefixes(t *testing.T) {
 		}
 	}
 }
+
+func TestBluetoothDeviceDoesNotBlockWifiUplink(t *testing.T) {
+	devices, err := parseNMDevices([]byte("wlan0:wifi:connected\n4C\\:4F\\:EE\\:13\\:1F\\:47:bt:disconnected\n"))
+	if err != nil || !devices["wlan0"].physical {
+		t.Fatalf("devices=%v err=%v", devices, err)
+	}
+}
