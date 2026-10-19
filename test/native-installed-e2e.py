@@ -48,6 +48,7 @@ if args.package:
         try:
             remote('cat > ' + shlex.quote(path), stdin=package)
             guest_test('native-hot-upgrade-vm-test.py', shlex.quote(path))
+            remote('pacman -Q local-vpn-kde-native')
         finally:
             remote('rm -f -- ' + shlex.quote(path))
 for script in ('native-policy-installed-vm-test.py', 'native-profiles-installed-vm-test.py',
