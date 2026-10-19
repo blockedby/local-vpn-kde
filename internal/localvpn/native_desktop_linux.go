@@ -246,6 +246,16 @@ func RunNativeDesktop(ctx context.Context, base string, action string, yes bool,
 		if statusErr != nil {
 			return fmt.Errorf("native gateway readiness capture failed: %w", statusErr)
 		}
+		// A recovered gateway has new OpenVPN state. NM may still label
+		// the old owned tunnel active, so invalidate it before recovery.
+		if !before.Ready {
+			if err = nativeDesktopPhase(output, "networkmanager-disconnect-stale"); err != nil {
+				return err
+			}
+			if err = dependencies.nm.Run(ctx, "disconnect", true, io.Discard); err != nil {
+				return err
+			}
+		}
 		if err = nativeDesktopPhase(output, "gateway-start"); err != nil {
 			return err
 		}

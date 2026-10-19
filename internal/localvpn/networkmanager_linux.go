@@ -725,6 +725,24 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 			if err = n.checkOtherVPN(ctx, cap.UUID); err != nil {
 				return err
 			}
+			// Repeated native start must not ask NM to activate an already
+			// active UUID. Prove its owned TUN mapping and full routes first;
+			// a stale or partial connection must never become silent success.
+			active, e := n.active(ctx, cap.UUID)
+			if e != nil {
+				return e
+			}
+			if active {
+				device, e := n.activeDevice(ctx, cap.UUID)
+				if e != nil {
+					return e
+				}
+				if e = hostRoutes(ctx, device); e != nil {
+					return fmt.Errorf("already active native VPN routes are not ready: %w", e)
+				}
+				fmt.Fprintf(output, "networkmanager_connect=already-connected\nconnection=%s\ndevice=%s\n", n.connectionName(), device)
+				return nil
+			}
 		}
 		if _, err = n.call(ctx, "--wait", "0", "connection", "up", "uuid", cap.UUID); err != nil {
 			return err

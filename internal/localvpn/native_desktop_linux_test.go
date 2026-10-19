@@ -86,7 +86,7 @@ func TestRunNativeDesktopLifecycleOrdering(t *testing.T) {
 		want   []string
 	}{
 		{"backend-start", []string{"service-start"}},
-		{"start", []string{"service-status", "service-start", "nm-connect"}},
+		{"start", []string{"service-status", "nm-disconnect", "service-start", "nm-connect"}},
 		{"disconnect", []string{"nm-disconnect"}},
 		{"stop", []string{"nm-disconnect", "service-stop"}},
 	}
@@ -129,7 +129,7 @@ func TestRunNativeDesktopStartRollbackIgnoresCancellationAndIsBounded(t *testing
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want cancellation", err)
 	}
-	want := []string{"service-status", "service-start", "nm-connect", "service-stop"}
+	want := []string{"service-status", "nm-disconnect", "service-start", "nm-connect", "service-stop"}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %#v, want %#v", events, want)
 	}
@@ -284,5 +284,33 @@ func TestNativePolicyReconnectsOnlyPreviouslyActiveOwnedProfile(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestRunNativeDesktopRecoveryDisconnectsStaleTunnelBeforeGatewayStart(t *testing.T) {
+	events := []string{}
+	service := &fakeNativeDesktopService{events: &events, status: GatewayStatus{Gateway: "active", Ready: false}}
+	nm := &fakeNativeDesktopNM{events: &events, status: "configured=yes\nactive=yes\n"}
+	installNativeDesktopFakes(t, service, nm)
+	if err := RunNativeDesktop(context.Background(), t.TempDir(), "start", true, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"service-status", "nm-disconnect", "service-start", "nm-connect"}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("events=%v want=%v", events, want)
+	}
+}
+
+func TestRunNativeDesktopRecoveryRefusesForeignProfileBeforeGatewayStart(t *testing.T) {
+	events := []string{}
+	service := &fakeNativeDesktopService{events: &events}
+	refused := errors.New("foreign owned-profile capability")
+	nm := &fakeNativeDesktopNM{events: &events, errors: map[string]error{"disconnect": refused}}
+	installNativeDesktopFakes(t, service, nm)
+	if err := RunNativeDesktop(context.Background(), t.TempDir(), "start", true, io.Discard); !errors.Is(err, refused) {
+		t.Fatalf("error=%v", err)
+	}
+	if !reflect.DeepEqual(events, []string{"service-status", "nm-disconnect"}) {
+		t.Fatalf("events=%v", events)
 	}
 }
