@@ -80,6 +80,9 @@ package() {
   install -d "$pkgdir/usr/share/local-vpn-kde/scripts/vpnkit/tui"
   cp -a --no-preserve=ownership scripts/vpnkit/tui/node_modules \
     "$pkgdir/usr/share/local-vpn-kde/scripts/vpnkit/tui/"
+  # Bun may inherit a private build umask; installed dependencies must be
+  # readable by desktop users while retaining executable file bits.
+  chmod -R a+rX "$pkgdir/usr/share/local-vpn-kde/scripts/vpnkit/tui/node_modules"
   find scripts/vpnkit/tui -maxdepth 1 -type f \
     \( \( -name '*.ts' ! -name '*.test.ts' \) -o -name 'package.json' -o -name 'bun.lock' -o -name 'tsconfig.json' \) \
     -exec install -Dm644 {} "$pkgdir/usr/share/local-vpn-kde/scripts/vpnkit/tui/" \;
