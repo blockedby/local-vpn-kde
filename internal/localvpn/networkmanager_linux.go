@@ -37,6 +37,8 @@ type NetworkManager struct {
 }
 
 var ErrForeignNMProfile = errors.New("existing vpnkit-local profile belongs to another installation; ownership migration could not be verified")
+var ErrOtherVPNActive = errors.New("another VPN profile is active; disconnect it before connecting native VPN")
+
 var ErrActiveNMMigration = errors.New("disconnect the previous local VPN before migrating its profile")
 
 // migrateOwnership reads the previous installation without changing it. A name
@@ -719,6 +721,11 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 		fmt.Fprintf(output, "networkmanager_mapping=pass\nowned_uuid_ip4_tun=pass\nopenvpn_handshake=pass\ndevice=%s\n", device)
 		return nil
 	case "connect":
+		if n.Native {
+			if err = n.checkOtherVPN(ctx, cap.UUID); err != nil {
+				return err
+			}
+		}
 		if _, err = n.call(ctx, "--wait", "0", "connection", "up", "uuid", cap.UUID); err != nil {
 			return err
 		}
@@ -764,4 +771,18 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 		return nil
 	}
 	return errors.New("unsupported NetworkManager action")
+}
+
+// Service startup never calls this: only explicit desktop VPN activation does.
+func (n NetworkManager) checkOtherVPN(ctx context.Context, owned string) error {
+	rows, err := n.inventory(ctx, true)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if row.UUID != owned && row.Type == "vpn" {
+			return ErrOtherVPNActive
+		}
+	}
+	return nil
 }

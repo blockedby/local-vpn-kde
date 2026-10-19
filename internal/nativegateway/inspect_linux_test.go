@@ -67,8 +67,8 @@ func exactInspectFixture(t *testing.T) (map[string][]byte, *inspectFS) {
 		]`),
 		commandKey("ip", "-json", "-4", "rule", "show"): []byte(`[
 			{"priority":0,"src":"all","table":"local"},
-			{"priority":5000,"src":"172.30.90.2/32","iif":"vpnkit-host","table":21194,"protocol":89,"action":"lookup"},
-			{"priority":5001,"src":"172.30.90.2/32","protocol":89,"action":"unreachable"}
+			{"priority":900,"src":"172.30.90.2/32","iif":"vpnkit-host","table":21194,"protocol":89,"action":"lookup"},
+			{"priority":901,"src":"172.30.90.2/32","protocol":89,"action":"unreachable"}
 		]`),
 		commandKey("ip", "-n", Namespace, "-json", "-details", "link", "show"): []byte(`[
 			{"ifname":"lo","ifindex":1,"flags":["LOOPBACK","UP"]},

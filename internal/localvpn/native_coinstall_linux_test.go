@@ -101,3 +101,19 @@ func TestNativeAutostartPreservesDockerUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNativeConnectGuardPreservesOtherVPN(t *testing.T) {
+	n := NetworkManager{Native: true}
+	n.command = func(_ context.Context, args ...string) (string, error) {
+		if strings.Join(args, " ") != "-t -f NAME,UUID,TYPE,DEVICE connection show --active" {
+			t.Fatalf("guard attempted mutation: %v", args)
+		}
+		return "vpnkit-local:11111111-1111-4111-8111-111111111111:vpn:tun0\n", nil
+	}
+	if err := n.checkOtherVPN(context.Background(), "22222222-2222-4222-8222-222222222222"); err != ErrOtherVPNActive {
+		t.Fatal(err)
+	}
+	if err := n.checkOtherVPN(context.Background(), "11111111-1111-4111-8111-111111111111"); err != nil {
+		t.Fatal(err)
+	}
+}

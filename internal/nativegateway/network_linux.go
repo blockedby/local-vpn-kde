@@ -15,9 +15,10 @@ import (
 // them before applying a plan and keep an ownership journal before attempting
 // cleanup; the creation plan alone is not proof that a resource may be deleted.
 const (
-	RoutingTable            = 21194
-	EgressRulePriority      = 5000
-	UnreachableRulePriority = 5001
+	RoutingTable = 21194
+	// Precede Docker underlay rules (998+) without affecting host-originated traffic.
+	EgressRulePriority      = 900
+	UnreachableRulePriority = 901
 	RouteProtocol           = 89
 	NFTFamily               = "inet"
 	NFTTable                = "vpnkit_native"
@@ -203,7 +204,7 @@ func validateSnapshot(snapshot Snapshot, transit netip.Prefix) error {
 		if err != nil {
 			return fmt.Errorf("invalid route destination in snapshot: %q", route.Destination)
 		}
-		if prefix.Addr().Is4() && prefixesOverlap(prefix.Masked(), transit) {
+		if prefix.Addr().Is4() && prefix.Bits() > 1 && prefixesOverlap(prefix.Masked(), transit) {
 			return errors.New("existing route overlaps native transit network")
 		}
 	}

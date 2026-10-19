@@ -73,7 +73,16 @@ trap cleanup_inner EXIT INT TERM
 ip link add "$uplink" type dummy
 ip addr add 192.0.2.10/24 dev "$uplink"
 ip link set "$uplink" up
-ip route add default via 192.0.2.1 dev "$uplink"
+ip route add default via 192.0.2.1 dev "$uplink" metric 100
+# Model a connected desktop VPN and the Docker underlay policy alongside it.
+ip link add lab-vpn type dummy
+ip addr add 10.89.0.2/24 dev lab-vpn
+ip link set lab-vpn up
+ip route add default via 10.89.0.1 dev lab-vpn metric 50
+ip rule add pref 998 to 172.30.89.0/24 lookup main suppress_prefixlength 0
+ip rule add pref 999 to 172.30.89.0/24 unreachable
+ip rule add pref 1000 from 172.30.89.0/24 lookup 51840
+ip rule add pref 1001 from 172.30.89.0/24 unreachable
 ip link add "$unrelated" type dummy
 ip addr add 203.0.113.10/24 dev "$unrelated"
 ip link set "$unrelated" up

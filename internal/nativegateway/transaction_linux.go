@@ -33,7 +33,7 @@ type NetworkInspector interface {
 }
 
 const (
-	NetworkJournalVersion = 3
+	NetworkJournalVersion = 4
 	MaxNetworkEffects     = 21
 )
 

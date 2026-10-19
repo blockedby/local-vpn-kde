@@ -517,7 +517,9 @@ func selectUplink(routes []routeFact, addresses map[string][]netip.Prefix, devic
 		}
 		device := devices[route.device]
 		if !device.physical {
-			return Uplink{}, fmt.Errorf("non-physical or VPN default route on interface %q", route.device)
+			// The service pins only its namespace source to a dedicated table.
+			// Host VPN defaults remain untouched and are not underlay candidates.
+			continue
 		}
 		if !device.connected || route.destination != "default" {
 			return Uplink{}, fmt.Errorf("physical underlay interface %q is not an unambiguous connected default", route.device)

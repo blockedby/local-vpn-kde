@@ -49,6 +49,7 @@ export function failure(
   const native = runtime === "native";
   const service = native ? "native-служба" : "Docker";
   const explanations: Record<string, string> = {
+    "other-vpn-active": "Другой VPN уже подключён. Отключите его перед подключением native-профиля. Native-служба может работать отдельно.",
     "backend-outdated": native
       ? "Нужен обновлённый native-бэкенд. Перезапустите native-службу."
       : "Нужен обновлённый Docker-бэкенд. Остановите его и запустите заново.",

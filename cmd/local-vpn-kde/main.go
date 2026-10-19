@@ -359,6 +359,10 @@ func run(args []string) error {
 }
 func main() {
 	if err := run(os.Args[1:]); err != nil {
+		if errors.Is(err, localvpn.ErrOtherVPNActive) {
+			fmt.Fprintln(os.Stderr, "native-other-vpn-active")
+			os.Exit(20)
+		}
 		if len(os.Args) > 1 && os.Args[1] == "networkmanager" {
 			if errors.Is(err, localvpn.ErrForeignNMProfile) {
 				fmt.Fprintln(os.Stderr, "networkmanager_failure=foreign-profile")
@@ -367,7 +371,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, "networkmanager_failure=previous-profile-active")
 			}
 			fmt.Fprintln(os.Stderr, "NetworkManager:", err)
-		} else if len(os.Args) > 1 && (os.Args[1] == "host-smoke" || os.Args[1] == "native-network") {
+		} else if len(os.Args) > 1 && (os.Args[1] == "host-smoke" || os.Args[1] == "native-network" || os.Args[1] == "native-desktop") {
 			// Preserve network preflight and lifecycle reasons in the service
 			// journal; these commands never include subscription configuration.
 			fmt.Fprintln(os.Stderr, err)

@@ -72,6 +72,17 @@ func runLab() (runErr error) {
 	reads := readOnlyRunner{}
 	inspector := nativegateway.NewLinuxNetworkInspector(reads)
 
+	hostBefore, err := commandOutput(commandDeadline, nil, "ip", "-4", "route", "get", externalTarget)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(string(hostBefore), "dev lab-vpn") {
+		return errors.New("host VPN fixture not active")
+	}
+	discovered, _, err := nativegateway.ProbeNetwork(context.Background(), reads)
+	if err != nil || discovered != uplink {
+		return fmt.Errorf("physical underlay with active VPN: %v %#v", err, discovered)
+	}
 	initial, err := inspectSnapshot(inspector)
 	if err != nil {
 		return fmt.Errorf("capture complete initial snapshot: %w", err)
@@ -106,6 +117,10 @@ func runLab() (runErr error) {
 		return controller.Start(ctx, uplink)
 	}); err != nil {
 		return err
+	}
+	hostAfter, err := commandOutput(commandDeadline, nil, "ip", "-4", "route", "get", externalTarget)
+	if err != nil || !bytes.Equal(hostBefore, hostAfter) {
+		return errors.New("service start changed host VPN route")
 	}
 	firstStartMutations := mutations.count
 	if firstStartMutations == 0 {

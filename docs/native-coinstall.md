@@ -2,10 +2,15 @@
 
 Keep the Docker VPN running while installing/configuring the native package.
 The package does not start the gateway or connect NetworkManager automatically.
-Before starting the native gateway, stop/disconnect the Docker VPN using its
-existing TUI. Native preflight still refuses a VPN default route; this change
-supports separate installations and deliberate switching, not two competing
-full-tunnel connections. The Docker engine and unrelated containers may stay up.
+The native gateway can start while the Docker VPN remains connected. Its
+namespace traffic uses a dedicated physical-underlay table through source-scoped
+rules at priorities 900/901, ahead of Docker rules at 998+. Host routes and the
+active NetworkManager profile remain unchanged. Only explicit native profile
+activation checks for another active NetworkManager VPN and asks the user to
+disconnect it first. The Docker engine and unrelated containers may stay up.
+Unknown rules preceding 900, missing/ambiguous physical defaults, and reserved
+resource collisions still block startup. This is not a claim of compatibility
+with arbitrary third-party VPN firewalls.
 
 | Resource | Docker installation | Native installation |
 |---|---|---|
@@ -27,7 +32,7 @@ address and physical interface; it does not change the policy or Docker chains.
 The existing native nft table still restricts ingress to established return
 traffic. Both rules participate in the ownership journal and are removed only
 when their exact contents and uniqueness are verified. Network journal schema
-is now version 3. The package's old-version pre-upgrade hook must stop the old
+is now version 4. The package's old-version pre-upgrade hook must stop the old
 native gateway before replacing its binaries; do not copy binaries over an
 active old service. Restarting/changing host firewalls during a native session
 is outside the ownership transaction's concurrency guarantee.
@@ -57,3 +62,7 @@ logging in; the new native unit remains independently opt-in.
 These are isolated lab results, not proof of a live workstation cutover.
 KDE authorization, local subscription setup and the eventual real switch must
 be recorded separately. No stable release is implied.
+
+The coexistence kernel lab also includes an active VPN default and Docker
+underlay rules. It checks physical egress for the native namespace, unchanged
+host route lookup during startup, and complete restoration after stop.

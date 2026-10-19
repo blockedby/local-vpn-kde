@@ -17,6 +17,7 @@ import (
 var diagnosticReasons = []struct{ message, reason string }{
 	{"A vpnkit-local profile already exists", "foreign-profile"},
 	{"Disconnect the previous local VPN before migrating", "previous-profile-active"},
+	{"native-other-vpn-active", "other-vpn-active"},
 	{"underlay installation failed", "underlay-install-failed"},
 	{"underlay verification failed", "underlay-verify-failed"},
 	{"NetworkManager profile import failed", "profile-import-failed"},

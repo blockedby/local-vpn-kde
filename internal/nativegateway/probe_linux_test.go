@@ -121,9 +121,6 @@ func TestProbeNetworkRejectsUnprovenAndAmbiguousDefaults(t *testing.T) {
 		name   string
 		change func(map[string][]byte)
 	}{
-		{name: "VPN default", change: func(f map[string][]byte) {
-			f[routeKey] = []byte(`[{"dst":"default","gateway":"192.0.2.1","dev":"enp5s0","table":"main"},{"dst":"default","dev":"tun0","table":100}]`)
-		}},
 		{name: "no physical default", change: func(f map[string][]byte) {
 			f[routeKey] = []byte(`[{"dst":"192.0.2.0/24","dev":"enp5s0","protocol":"kernel"}]`)
 		}},
@@ -152,7 +149,7 @@ func TestProbeNetworkRejectsUnknownEarlyGuestRule(t *testing.T) {
 	fixture := validProbeFixture()
 	fixture[commandKey("ip", "-json", "-4", "rule", "show")] = []byte(`[
   {"priority":0,"src":"all","table":"local"},
-  {"priority":1000,"src":"172.30.90.0/24","table":100},
+  {"priority":800,"src":"172.30.90.0/24","table":100},
   {"priority":32766,"src":"all","table":"main"}
 ]`)
 	if _, _, err := ProbeNetwork(context.Background(), &fixtureRunner{outputs: fixture}); err == nil || !strings.Contains(err.Error(), "may affect native guest routing") {
@@ -164,7 +161,7 @@ func TestProbeNetworkAllowsEarlyRuleScopedAwayFromGuest(t *testing.T) {
 	fixture := validProbeFixture()
 	fixture[commandKey("ip", "-json", "-4", "rule", "show")] = []byte(`[
   {"priority":0,"src":"all","table":"local"},
-  {"priority":1000,"src":"10.0.0.0/8","table":100},
+  {"priority":800,"src":"10.0.0.0/8","table":100},
   {"priority":32766,"src":"all","table":"main"}
 ]`)
 	if _, _, err := ProbeNetwork(context.Background(), &fixtureRunner{outputs: fixture}); err != nil {
@@ -229,5 +226,26 @@ func TestProbedKernelOverlapIsRejectedByPlannerWithoutDocker(t *testing.T) {
 	}
 	if _, err := PlanNetwork(uplink, snapshot); err == nil || !strings.Contains(err.Error(), "overlaps native transit") {
 		t.Fatalf("planner did not reject kernel-visible overlap: %v", err)
+	}
+}
+
+func TestProbeNetworkAllowsHostVPNWithoutSelectingIt(t *testing.T) {
+	for _, routes := range []string{
+		`[{"dst":"default","gateway":"192.0.2.1","dev":"enp5s0","table":"main"},{"dst":"default","dev":"tun0","table":"main","metric":1}]`,
+		`[{"dst":"default","gateway":"192.0.2.1","dev":"enp5s0","table":"main"},{"dst":"0.0.0.0/1","dev":"tun0","table":"main"},{"dst":"128.0.0.0/1","dev":"tun0","table":"main"}]`,
+	} {
+		fixture := validProbeFixture()
+		fixture[commandKey("ip", "-json", "-4", "route", "show", "table", "all")] = []byte(routes)
+		fixture[commandKey("ip", "-json", "-4", "rule", "show")] = []byte(`[{"priority":0,"src":"all","table":"local"},{"priority":998,"dst":"172.30.89.0/24","table":"main"},{"priority":999,"dst":"172.30.89.0/24","action":"unreachable"},{"priority":1000,"src":"172.30.89.0/24","table":51840}]`)
+		uplink, snapshot, err := ProbeNetwork(context.Background(), &fixtureRunner{outputs: fixture})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if uplink.Interface != "enp5s0" {
+			t.Fatalf("selected VPN: %#v", uplink)
+		}
+		if _, err := PlanNetwork(uplink, snapshot); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
