@@ -85,6 +85,19 @@ func copyRuntimeBinary(ctx context.Context, dst int, source, name string, expect
 		return errors.New("unsafe runtime binary")
 	}
 	tmp := name + ".new"
+	// A power loss may leave an incomplete private temporary. Never follow a
+	// symlink or remove somebody else's inode while recovering it.
+	var stale unix.Stat_t
+	if e := unix.Fstatat(dst, tmp, &stale, unix.AT_SYMLINK_NOFOLLOW); e == nil {
+		if stale.Uid != expectedUID || stale.Mode&unix.S_IFMT != unix.S_IFREG || stale.Mode&0022 != 0 || stale.Nlink != 1 {
+			return errors.New("unsafe runtime staging temporary")
+		}
+		if e := unix.Unlinkat(dst, tmp, 0); e != nil {
+			return e
+		}
+	} else if !errors.Is(e, unix.ENOENT) {
+		return e
+	}
 	outfd, err := unix.Openat(dst, tmp, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0700)
 	if err != nil {
 		return err

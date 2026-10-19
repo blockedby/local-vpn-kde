@@ -44,6 +44,9 @@ func TestRuntimeSnapshotSurvivesPackageReplacement(t *testing.T) {
 	if string(b) != "old executable" {
 		t.Fatal("cancellation destroyed live snapshot")
 	}
+	if err := os.WriteFile(filepath.Join(dst, "sing-box.new"), []byte("interrupted snapshot"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := copyRuntimeBinary(context.Background(), fd, src, "sing-box", uint32(os.Getuid())); err != nil {
 		t.Fatal(err)
 	}
