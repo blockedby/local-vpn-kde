@@ -9,12 +9,29 @@ import subprocess
 import time
 
 assert not os.path.exists('/usr/share/local-vpn-kde/scripts/vpnkit/tui/node_modules')
+assert not os.path.exists('/usr/share/local-vpn-kde/scripts/vpnkit/tui/index.ts')
 # Compile regression must run without the system Bun or sing-box executable.
 for binary in ('/usr/bin/bun', '/usr/bin/sing-box'):
     if os.path.exists(binary):
         os.rename(binary, binary + '.portable-lab-disabled')
 
 subprocess.run(['/usr/libexec/local-vpn-kde/sing-box', 'version'], check=True, stdout=subprocess.DEVNULL)
+
+def descendants(pid):
+    try:
+        with open(f'/proc/{pid}/task/{pid}/children') as source:
+            children = [int(value) for value in source.read().split()]
+    except FileNotFoundError:
+        return []
+    result = []
+    for child in children:
+        try:
+            with open(f'/proc/{child}/cmdline', 'rb') as source:
+                result.append(source.read())
+        except FileNotFoundError:
+            continue
+        result.extend(descendants(child))
+    return result
 
 for arguments in (['--demo'], []):
     master, slave = pty.openpty()
@@ -43,6 +60,10 @@ for arguments in (['--demo'], []):
                 break
         assert b'VPNKIT' in output, output.decode(errors='replace')[-3000:]
         assert child.poll() is None, output.decode(errors='replace')[-3000:]
+        if not arguments:
+            commands = descendants(child.pid)
+            expected = b'/usr/libexec/local-vpn-kde/local-vpn-kde.bin\0bridge\0--repo\0/usr/share/local-vpn-kde/'
+            assert any(command.startswith(expected) for command in commands), commands
         os.write(master, b'\x03')
         child.wait(timeout=8)
         assert child.returncode == 0, (child.returncode, output.decode(errors='replace')[-2000:])
