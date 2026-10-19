@@ -27,3 +27,9 @@ test("only enrolled users may start/stop the two fixed units", () => {
   }
   expect(decision("org.freedesktop.systemd1.manage-unit-files", "local-vpn-kde-network.service", "start")).toBeUndefined();
 });
+
+test("native operations require explicit enrollment", () => {
+  expect(decision("org.local-vpn-kde.operation", "", "")).toBe("yes");
+  expect(decision("org.local-vpn-kde.operation", "", "", false)).toBeUndefined();
+  expect(decision("org.local-vpn-kde.configure", "", "")).toBeUndefined();
+});

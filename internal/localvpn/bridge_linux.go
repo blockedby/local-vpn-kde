@@ -351,7 +351,7 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 	if b.options.Runtime == "native" {
 		switch request.Action {
 		case "status", "backend/start", "start", "disconnect", "stop", "autostart/read", "autostart/set":
-		case "subscription", "subscription/read":
+		case "subscription", "subscription/read", "servers/list", "servers/refresh", "servers/current", "servers/select", "servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "toggle-mode", "diagnostics":
 			if b.options.Repo != InstalledAssetRoot {
 				reply["ok"], reply["reason"], reply["status"] = false, "unsupported-native-action", b.Status()
 				return reply, nil

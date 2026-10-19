@@ -9,6 +9,12 @@ if [[ $repo == /usr/share/local-vpn-kde ]]; then
   base="${VPNKIT_LOCAL_SECRETS_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/local-vpn-kde}"
 fi
 case "${1:-}" in
+  servers|diagnostics)
+    exec "$binary" native-operation-client "$@" ;;
+  toggle)
+    [[ $# -eq 2 && "$2" == mode ]] || exit 2
+    exec "$binary" native-operation-client toggle-mode ;;
+
   status)
     [[ $# -eq 1 || ( $# -eq 2 && "$2" == --json ) ]] || exit 2
     action=status ;;

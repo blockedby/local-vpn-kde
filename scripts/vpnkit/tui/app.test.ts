@@ -201,20 +201,20 @@ test("installed native subscription setup uses the private editor and explicit c
     expect(frame).toContain("Подключить VPN");
     expect(frame).toContain("автозапуск");
     expect(frame).not.toContain("недоступна в native preview");
-    expect(b.calls.map((call) => call.action)).toEqual(["status"]);
+    expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription/read"]);
 
     t.mockInput.pressKey("u", { ctrl: true });
     await t.mockInput.pasteBracketedText(value);
     t.mockInput.pressEnter();
     await t.renderOnce();
     expect(t.captureCharFrame()).toContain("подтверждение администратора");
-    expect(b.calls.map((call) => call.action)).toEqual(["status"]);
+    expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription/read"]);
 
     t.mockInput.pressKey("y");
     await settle();
     await t.renderOnce();
     expect(b.calls.at(-1)).toEqual({ action: "subscription", value });
-    expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription"]);
+    expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription/read", "subscription"]);
     expect(b.calls.some((call) => ["start", "backend/start", "autostart/read", "autostart/set"].includes(call.action))).toBe(false);
     frame = t.captureCharFrame();
     expect(frame).toContain("Native-пакет настроен");
@@ -271,7 +271,7 @@ test("native setup failures never echo the private editor value", async () => {
     const frame = t.captureCharFrame();
     expect(frame).toContain("Не удалось настроить native-пакет");
     expect(frame).not.toContain(value);
-    expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription"]);
+    expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription/read", "subscription"]);
   } finally {
     await app.close();
   }
@@ -1526,4 +1526,28 @@ test("autostart errors clear a previously healthy actual state", async () => {
   } finally {
     await app.close();
   }
+});
+
+test("installed native reuses the server table, selection, checks and mode controls", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", installed: true };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v"); await settle(); await t.renderOnce();
+    const frame=t.captureCharFrame();
+    expect(frame).toContain("Amsterdam");
+    expect(frame).toContain("Ping всех");
+    expect(frame).not.toContain("пока не подключены");
+    t.mockInput.pressEnter(); await settle();
+    expect(b.calls.at(-1)?.action).toBe("servers/select");
+    await app.perform("servers/ping",rows[0]!.server_id);
+    expect(b.calls.at(-1)?.action).toBe("servers/ping");
+    t.mockInput.pressEscape(); await Bun.sleep(60);
+    t.mockInput.pressKey("m"); await settle();
+    expect(b.calls.at(-1)?.action).toBe("toggle-mode");
+    t.resize(70,18);await t.renderOnce();
+    expect(t.captureCharFrame()).not.toContain("недоступен в native");
+  } finally { await app.close(); }
 });

@@ -54,7 +54,7 @@ type supervisorConfig struct {
 }
 
 func newProductionSupervisor() *supervisor {
-	return newSupervisor(supervisorConfig{
+	config := supervisorConfig{
 		stateRoot:    productionStateRoot,
 		runner:       productionRunner,
 		worker:       productionWorker,
@@ -64,7 +64,14 @@ func newProductionSupervisor() *supervisor {
 		killGrace:    10 * time.Second,
 		pollInterval: 10 * time.Millisecond,
 		outputLimit:  defaultOutputLimit,
-	})
+	}
+	if executable, _ := os.Executable(); executable == "/usr/libexec/local-vpn-kde/vibe-vpn-server-op-supervisor" {
+		config.stateRoot = "/run/local-vpn-kde/server-operations"
+		config.runner = executable
+		config.worker = "/usr/libexec/local-vpn-kde/vibe-vpn"
+		config.workerConfig = "/etc/local-vpn-kde/vibe-vpn/config.yaml"
+	}
+	return newSupervisor(config)
 }
 
 type operationRequest struct {

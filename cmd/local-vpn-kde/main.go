@@ -26,6 +26,18 @@ func env(name, fallback string) string {
 	return fallback
 }
 func run(args []string) error {
+	if len(args) > 0 && (args[0] == "native-operation" || args[0] == "native-operation-client") {
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer cancel()
+		if args[0] == "native-operation" {
+			if len(args) != 1 {
+				return fmt.Errorf("native operation takes protocol input")
+			}
+			return localvpn.RunNativeOperation(ctx, os.Stdin, os.Stdout)
+		}
+		return localvpn.NativeOperationsClient(ctx, args[1:], os.Stdout)
+	}
+
 	if len(args) > 0 && (args[0] == "native-configure" || args[0] == "native-configure-client" || args[0] == "native-profile-transaction") {
 		if len(args) != 1 {
 			return fmt.Errorf("native configuration helper accepts no arguments")
@@ -355,9 +367,9 @@ func main() {
 				fmt.Fprintln(os.Stderr, "networkmanager_failure=previous-profile-active")
 			}
 			fmt.Fprintln(os.Stderr, "NetworkManager:", err)
-		} else if len(os.Args) > 1 && os.Args[1] == "host-smoke" {
-			// HostSmoke returns a fixed diagnostic vocabulary, never raw tool
-			// output. Preserve these reasons for the private TUI classifier.
+		} else if len(os.Args) > 1 && (os.Args[1] == "host-smoke" || os.Args[1] == "native-network") {
+			// Preserve network preflight and lifecycle reasons in the service
+			// journal; these commands never include subscription configuration.
 			fmt.Fprintln(os.Stderr, err)
 		} else {
 			fmt.Fprintln(os.Stderr, "local VPN operation failed closed")

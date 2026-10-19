@@ -325,6 +325,7 @@ export class App {
   private nativeInstalled() {
     return this.nativeMode() && this.status?.installed === true;
   }
+  private nativePreviewOnly() { return this.nativeMode() && !this.nativeInstalled(); }
   private subscriptionAvailable() {
     return !this.nativeMode() || this.nativeInstalled();
   }
@@ -336,7 +337,7 @@ export class App {
   }
   private nativePreview() {
     return this.nativeInstalled()
-      ? "Native-пакет: доступна первичная настройка подписки. Системное окно Polkit попросит подтверждение администратора.\nВыбор первого сервера может занять несколько минут; VPN запускается отдельно, автозапуск включается отдельно и только по желанию. Серверы, режим и диагностика пока не подключены."
+      ? "Native-пакет: доступна первичная настройка подписки. Системное окно Polkit попросит подтверждение администратора.\nВыбор первого сервера может занять несколько минут; VPN запускается отдельно, автозапуск включается отдельно и только по желанию."
       : "Native preview: доступны статус, запуск/остановка native-службы, VPN и автозапуск.\nСерверы, подписка, режим и диагностика пока не подключены.";
   }
   private nativeUnavailable(action: Action) {
@@ -353,7 +354,7 @@ export class App {
     return "В native preview эта операция пока не подключена.";
   }
   private canPerform(action: Action) {
-    if (!this.nativeMode() || nativeSupportedActions.includes(action) ||
+    if (!this.nativeMode() || this.nativeInstalled() || nativeSupportedActions.includes(action) ||
         (this.nativeInstalled() && action === "subscription")) return true;
     this.notify(this.nativeUnavailable(action), true);
     return false;
@@ -419,7 +420,7 @@ export class App {
     return `Фактическое состояние службы: ${this.enabledServiceLabel(this.serviceState.enabled)}; текущее состояние: ${this.activeServiceLabel(this.serviceState.active)}`;
   }
   private async loadPendingSubscription() {
-    if (this.closing || this.disposed || this.nativeMode() || [...this.tasks.values()].some(task => !this.compatible("subscription/read", task.action))) return;
+    if (this.closing || this.disposed || this.nativePreviewOnly() || [...this.tasks.values()].some(task => !this.compatible("subscription/read", task.action))) return;
     const revision = this.pendingSubscriptionRevision;
     this.pendingSubscriptionRevision = undefined;
     if (revision !== undefined && revision === this.editorRevision &&
@@ -445,7 +446,7 @@ export class App {
     this.navigationRevision++;
     if (screen === "subscription") {
       this.input.value = this.draft;
-      if (!this.loadedSubscription && !this.nativeMode()) {
+      if (!this.loadedSubscription && !this.nativePreviewOnly()) {
         this.pendingSubscriptionRevision = this.editorRevision;
         void this.loadPendingSubscription();
       }
@@ -460,7 +461,7 @@ export class App {
       !this.catalogLoaded &&
       !this.busy &&
       !this.batch &&
-      !this.nativeMode()
+      !this.nativePreviewOnly()
     )
       void this.perform(this.catalogStale ? "servers/refresh" : "servers/list");
     // Diagnostics immediately displays the cached evidence. Refresh is explicit.
@@ -530,14 +531,14 @@ export class App {
                   },
             ]
           : []),
-        { key: "t", label: this.nativeMode() ? "Тест скорости · недоступно в native preview" : this.inlineSpeed() ? `Тест скорости · ${this.homeTesting ? `${frames[this.frame % 10]} ${this.measurementAction === "servers/ping" ? "ping" : this.measurementAction === "servers/speed" ? "замер" : "подготовка"} · ` : ""}${this.homePing === undefined ? "—" : Math.round(this.homePing)}ms, ${this.homeSpeed === undefined ? "—" : (this.homeSpeed / 8.388608).toFixed(1)} MiB/s` : "Тест скорости", run: () => void this.testHomeSpeed() },
-        { key: "v", label: this.nativeMode() ? "Серверы · native preview" : "Серверы", run: () => this.open("servers") },
+        { key: "t", label: this.nativePreviewOnly() ? "Тест скорости · недоступно в native preview" : this.inlineSpeed() ? `Тест скорости · ${this.homeTesting ? `${frames[this.frame % 10]} ${this.measurementAction === "servers/ping" ? "ping" : this.measurementAction === "servers/speed" ? "замер" : "подготовка"} · ` : ""}${this.homePing === undefined ? "—" : Math.round(this.homePing)}ms, ${this.homeSpeed === undefined ? "—" : (this.homeSpeed / 8.388608).toFixed(1)} MiB/s` : "Тест скорости", run: () => void this.testHomeSpeed() },
+        { key: "v", label: this.nativePreviewOnly() ? "Серверы · native preview" : "Серверы", run: () => this.open("servers") },
         { key: "c", label: this.nativeMode() ? (this.nativeInstalled() ? "Подписка · настройка native-пакета" : "Подписка · недоступна в native preview") : "Подписка", run: () => this.open("subscription") },
-        { key: "d", label: this.nativeMode() ? "Диагностика · недоступна в native" : "Диагностика", run: () => this.open("diagnostics") },
+        { key: "d", label: this.nativePreviewOnly() ? "Диагностика · недоступна в native" : "Диагностика", run: () => this.open("diagnostics") },
         { key: "a", label: "Автозапуск", run: () => this.open("autostart") },
         {
           key: "m",
-          label: `Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}${this.nativeMode() ? " · недоступен в native" : ""}`,
+          label: `Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}${this.nativePreviewOnly() ? " · недоступен в native" : ""}`,
           run: () => {
             if (this.nativeMode()) void this.perform("toggle-mode");
             else if (this.ready()) void this.perform("toggle-mode");
@@ -565,14 +566,14 @@ export class App {
     }
     if (this.screen === "diagnostics")
       return [
-        { key: "u", label: this.nativeMode() ? "Обновить диагностику · недоступно в native" : "Обновить диагностику", run: run("diagnostics") },
+        { key: "u", label: this.nativePreviewOnly() ? "Обновить диагностику · недоступно в native" : "Обновить диагностику", run: run("diagnostics") },
       ];
     if (this.screen === "servers") {
       if (!this.ready())
         return [
           { key: "s", label: `Запустить ${this.serviceObject()}`, run: run("backend/start") },
         ];
-      if (this.nativeMode())
+      if (this.nativePreviewOnly())
         return [
           { key: "i", label: "Серверы и проверки · недоступны в native preview", run: () => this.notify(this.nativeUnavailable("servers/list"), true) },
         ];
@@ -994,7 +995,7 @@ export class App {
         this.status?.subscription === "configured" &&
         !this.catalogLoaded &&
         !this.batch &&
-        !this.nativeMode()
+        !this.nativePreviewOnly()
       ) {
         await this.perform(
           this.catalogStale ? "servers/refresh" : "servers/list",
@@ -1009,7 +1010,7 @@ export class App {
   }
   private async testHomeSpeed() {
     if (this.busy || this.batch || this.homeTesting) return;
-    if (this.nativeMode()) { this.notify(this.nativeUnavailable("servers/speed"), true); return; }
+    if (this.nativePreviewOnly()) { this.notify(this.nativeUnavailable("servers/speed"), true); return; }
     if (!this.ready()) { this.notify(`Сначала запустите ${this.serviceObject()}.`, true); return; }
     this.homeTesting = true;
     this.cancelled = false;
@@ -1055,7 +1056,7 @@ export class App {
       this.notify("Дождитесь завершения или отмените текущую операцию [k].");
       return;
     }
-    if (this.nativeMode()) {
+    if (this.nativePreviewOnly()) {
       this.notify(this.nativeUnavailable("servers/check-batch"), true);
       return;
     }
@@ -1182,7 +1183,7 @@ export class App {
     const width = Math.max(10, this.renderer.terminalWidth - 2),
       state = connection(this.status);
     this.headline.content = cell(
-      `◈ VPNKIT${this.demo ? " · ДЕМО" : ""}${this.nativeMode() ? " · NATIVE PREVIEW" : ""}    ${state.title}`,
+      `◈ VPNKIT${this.demo ? " · ДЕМО" : ""}${this.nativeMode() ? (this.nativeInstalled() ? " · NATIVE" : " · NATIVE PREVIEW") : ""}    ${state.title}`,
       width,
     );
     this.headline.fg = state.color;
@@ -1241,10 +1242,10 @@ export class App {
     if (this.screen === "home")
       this.summary.content = !this.status
         ? "Проверяем состояние…"
-        : this.nativeMode()
+        : this.nativePreviewOnly()
           ? this.nativePreview()
           : !this.ready()
-            ? "Подписку можно настроить до запуска Docker."
+            ? `Подписку можно настроить до запуска ${this.serviceObject()}.`
             : this.status.subscription !== "configured"
               ? "Добавьте подписку, затем откройте серверы."
               : "";
@@ -1284,21 +1285,21 @@ export class App {
         "Адрес для проверки доступности\nHTTPS-запрос через каждый сервер; это не тест скорости.";
     if (this.screen === "diagnostics")
       this.summary.content = this.nativeMode()
-        ? `OpenVPN / KDE: ${this.status?.networkmanager_active === "yes" ? "активен" : this.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nNative-служба: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${this.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nАдаптер диагностики native: пока не подключён\nПоследняя попытка: ${this.status?.last_attempt ?? "—"}\nNative preview: серверы и проверки пока не подключены.`
+        ? `OpenVPN / KDE: ${this.status?.networkmanager_active === "yes" ? "активен" : this.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nNative-служба: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${this.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${this.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${this.status?.last_attempt ?? "—"}\nПроверки сайта и скорости — на экране серверов.`
         : `OpenVPN / KDE: ${this.status?.networkmanager_active === "yes" ? "активен" : this.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nDocker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${this.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${this.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${this.status?.last_attempt ?? "—"}\nПроверка сайта и скорости — на экране серверов.`;
-    const table = this.screen === "servers" && this.ready() && !this.nativeMode();
+    const table = this.screen === "servers" && this.ready() && !this.nativePreviewOnly();
     this.tableHeader.visible = table;
     if (this.screen === "servers")
-      this.summary.content = this.nativeMode()
+      this.summary.content = this.nativePreviewOnly()
         ? !this.ready()
           ? `Native-служба не готова. Запустите ${this.serviceObject()} для жизненного цикла VPN.\nВыбор серверов и проверки пока не подключены.`
           : "Native preview: выбор серверов и проверки пока не подключены.\nЗапуск/остановка VPN и автозапуск доступны на главной."
         : !this.ready()
-          ? "Для проверок нужен Docker. VPN подключать не требуется."
+          ? `Для проверок запустите ${this.serviceObject()}. VPN подключать не требуется.`
           : this.status?.subscription !== "configured"
             ? "Добавьте подписку для загрузки серверов."
             : `${this.servers.length} серверов · Сортировка [o]: ${{ name: "имя ↑", ping: "ping ↑", speed: "скорость ↓", availability: "доступность ↓" }[this.sort]}${this.catalogStale ? " · каталог устарел" : ""}\nСайт: ${this.target}`;
-    if (compactServers && !this.nativeMode() && this.ready() && this.status?.subscription === "configured" && !this.catalogStale) {
+    if (compactServers && !this.nativePreviewOnly() && this.ready() && this.status?.subscription === "configured" && !this.catalogStale) {
       this.summary.visible = false;
       this.summary.height = 0;
     }

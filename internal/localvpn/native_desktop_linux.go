@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -157,16 +158,30 @@ func runNativeDesktopStatus(ctx context.Context, base string, output io.Writer, 
 			return err
 		}
 	}
+	policy := "strict"
+	if executable, _ := os.Executable(); executable == InstalledCLI {
+		var data bytes.Buffer
+		if NativeOperationsClient(ctx, []string{"policy-status"}, &data) == nil {
+			var result struct {
+				Policy string `json:"routing_policy"`
+			}
+			if json.Unmarshal(data.Bytes(), &result) == nil && result.Policy == "smart" {
+				policy = "smart"
+			}
+		}
+	}
 	status := struct {
 		Container                string `json:"container"`
 		NetworkManagerConfigured string `json:"networkmanager_configured"`
 		NetworkManagerActive     string `json:"networkmanager_active"`
 		Runtime                  string `json:"runtime"`
+		RoutingPolicy            string `json:"routing_policy"`
 	}{
 		Container:                nativeDesktopGatewayState(gateway),
 		NetworkManagerConfigured: configured,
 		NetworkManagerActive:     active,
 		Runtime:                  "native",
+		RoutingPolicy:            policy,
 	}
 	if err = json.NewEncoder(output).Encode(status); err != nil {
 		return fmt.Errorf("write native desktop status: %w", err)
