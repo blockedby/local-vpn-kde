@@ -359,19 +359,19 @@ def _build_config(template_path: str, policy: str, ruleset_mode: str, selected_o
     dns_servers["remote-dns"].update(
         {
             "type": "https",
-            "server": "1.1.1.1",
+            "server": "8.8.8.8",
             "server_port": 443,
             "path": "/dns-query",
-            "tls": {"enabled": True, "server_name": "cloudflare-dns.com"},
+            "tls": {"enabled": True, "server_name": "dns.google"},
         }
     )
     dns_servers["remote-dns-fallback"].update(
         {
             "type": "https",
-            "server": "8.8.8.8",
+            "server": "1.1.1.1",
             "server_port": 443,
             "path": "/dns-query",
-            "tls": {"enabled": True, "server_name": "dns.google"},
+            "tls": {"enabled": True, "server_name": "cloudflare-dns.com"},
         }
     )
     if selected_outbound_mode == "direct-fixture":

@@ -60,9 +60,9 @@ func (c ContainerConfig) watchDNS(ctx context.Context, output io.Writer) {
 	defer ticker.Stop()
 	for {
 		target := ""
-		if probeDNS(ctx, "cloudflare-dns.com", "1.1.1.1") {
+		if probeDNS(ctx, "dns.google", "8.8.8.8") {
 			target = "remote-dns"
-		} else if probeDNS(ctx, "dns.google", "8.8.8.8") {
+		} else if probeDNS(ctx, "cloudflare-dns.com", "1.1.1.1") {
 			target = "remote-dns-fallback"
 		}
 		if target != "" {

@@ -209,7 +209,7 @@ func buildConfig(template []byte, o RenderOptions) ([]byte, error) {
 	}
 	// HTTP/2 DoH reuses a gRPC stream whose request context can be canceled.
 	// HTTP/1.1 keeps DNS connections independent while preserving TLS and detour.
-	for _, spec := range []struct{ tag, ip, host string }{{"remote-dns", "1.1.1.1", "cloudflare-dns.com"}, {"remote-dns-fallback", "8.8.8.8", "dns.google"}} {
+	for _, spec := range []struct{ tag, ip, host string }{{"remote-dns", "8.8.8.8", "dns.google"}, {"remote-dns-fallback", "1.1.1.1", "cloudflare-dns.com"}} {
 		found := false
 		for _, value := range servers {
 			server, ok := value.(map[string]any)

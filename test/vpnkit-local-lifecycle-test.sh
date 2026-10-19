@@ -93,10 +93,10 @@ import json,sys
 cfg=json.load(open(sys.argv[1], encoding='utf-8')); policy=sys.argv[2]
 assert cfg['route']['final']=='selected-native-out'
 dns={server['tag']:server for server in cfg['dns']['servers']}
-assert dns['remote-dns']['type']=='https' and dns['remote-dns']['server']=='1.1.1.1' and dns['remote-dns']['detour']=='selected-native-out'
-assert dns['remote-dns']['tls']['server_name']=='cloudflare-dns.com'
-assert dns['remote-dns-fallback']['type']=='https' and dns['remote-dns-fallback']['server']=='8.8.8.8'
-assert dns['remote-dns-fallback']['tls']['server_name']=='dns.google'
+assert dns['remote-dns']['type']=='https' and dns['remote-dns']['server']=='8.8.8.8' and dns['remote-dns']['detour']=='selected-native-out'
+assert dns['remote-dns']['tls']['server_name']=='dns.google'
+assert dns['remote-dns-fallback']['type']=='https' and dns['remote-dns-fallback']['server']=='1.1.1.1'
+assert dns['remote-dns-fallback']['tls']['server_name']=='cloudflare-dns.com'
 rules=cfg['route']['rules']
 if policy=='strict':
     assert not any('rule_set' in rule for rule in rules)
