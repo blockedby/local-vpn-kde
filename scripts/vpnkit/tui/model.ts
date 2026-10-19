@@ -49,6 +49,7 @@ export function failure(
   const native = runtime === "native";
   const service = native ? "native-служба" : "Docker";
   const explanations: Record<string, string> = {
+ "profiles-failed":"Не удалось сохранить профиль. Проверьте имя и ссылку; повторяющиеся источники и неподдерживаемые параметры не принимаются.",
     "other-vpn-active": "Другой VPN уже подключён. Отключите его перед подключением native-профиля. Native-служба может работать отдельно.",
     "backend-outdated": native
       ? "Нужен обновлённый native-бэкенд. Перезапустите native-службу."

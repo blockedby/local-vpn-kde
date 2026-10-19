@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/blockedby/local-vpn-kde/internal/sharelink"
 	"golang.org/x/sys/unix"
 )
 
@@ -195,6 +196,10 @@ func validateNativeGenerationSubscriptionURL(value string) error {
 		if strings.Contains(lower, encodedControl) {
 			return errors.New("invalid subscription URL")
 		}
+	}
+	if sharelink.Supported(value) {
+		_, err := sharelink.Parse(value)
+		return err
 	}
 	if strings.ContainsRune(value, '#') {
 		return errors.New("invalid subscription URL")

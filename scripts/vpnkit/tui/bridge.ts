@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 export type Action =
+ | "profiles/list" | "profiles/add" | "profiles/open" | "profiles/remove"
   | "autostart/read"
   | "autostart/set"
   | "status"
@@ -34,6 +35,7 @@ export interface Status {
   last_attempt?: string;
 }
 export interface Server {
+ profile_id?: string;
   server_id: string;
   display_name: string;
   selected: boolean;
@@ -47,7 +49,9 @@ export interface Server {
 }
 export interface AutostartOptions { gateway: boolean; connect: boolean; last_result?: string; runtime?: "docker" | "native" }
 export interface AutostartServiceState { enabled: string; active: string }
+export interface Profile { id: string; name: string; kind: "subscription" | "server"; count: number; stale: boolean }
 export interface Reply {
+ profiles?: { active: string; items: Profile[] };
   autostart?: AutostartOptions;
   autostart_service?: AutostartServiceState;
   ok: boolean;

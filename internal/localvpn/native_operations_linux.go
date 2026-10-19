@@ -3,6 +3,7 @@
 package localvpn
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/blockedby/local-vpn-kde/internal/nativegateway"
+	"github.com/blockedby/local-vpn-kde/internal/profiles"
 )
 
 // NativeOperationsClient retains the protocol pipe until the privileged worker
@@ -63,6 +65,15 @@ func NativeOperationsClient(ctx context.Context, args []string, output io.Writer
 
 func validateNativeOperation(args []string) error {
 	bad := errors.New("unsupported native operation")
+	if len(args) == 2 && args[0] == "profiles" {
+		var r profiles.Request
+		decoder := json.NewDecoder(strings.NewReader(args[1]))
+		decoder.DisallowUnknownFields()
+		if len(args[1]) > 32<<10 || decoder.Decode(&r) != nil {
+			return bad
+		}
+		return r.Validate()
+	}
 	if len(args) == 1 {
 		switch args[0] {
 		case "diagnostics", "policy-status", "toggle-mode":
@@ -152,7 +163,7 @@ func RunNativeOperation(parent context.Context, input io.Reader, output io.Write
 		return err
 	}
 	go func() { _, _ = protocol.reader.ReadByte(); cancel() }()
-	exclusive := args[0] == "toggle-mode"
+	exclusive := args[0] == "toggle-mode" || args[0] == "profiles"
 	release, err := acquireNativeConfigurationLock(ctx, exclusive)
 	if err != nil {
 		return err
@@ -170,6 +181,18 @@ func RunNativeOperation(parent context.Context, input io.Reader, output io.Write
 	}
 	if args[0] == "toggle-mode" {
 		return toggleNativePolicy(ctx, uint32(uid), output)
+	}
+	if args[0] == "profiles" {
+		identity, err := user.Lookup(nativegateway.ServiceUser)
+		if err != nil {
+			return err
+		}
+		command := []string{"--no-new-privs", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--reuid", identity.Uid, "--regid", identity.Gid, "--clear-groups", "--", nativegateway.LibexecDir + "/vibe-vpn", "--config", "/etc/local-vpn-kde/vibe-vpn/config.yaml", "profiles"}
+		result := runProcessInput(ctx, "/usr/bin/setpriv", command, []string{"PATH=/usr/bin:/usr/sbin:/bin:/sbin", "LC_ALL=C", "HOME=/var/lib/local-vpn-kde"}, bytes.NewBufferString(args[1]), output, io.Discard, time.Second, true)
+		if result.Reason != "ok" {
+			return errors.New("native profile operation failed")
+		}
+		return nil
 	}
 	service := NativeService{}
 	if err = service.mutationPreflight(ctx); err != nil {

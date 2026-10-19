@@ -248,7 +248,7 @@ test("checkout native and native status without installed=true keep subscription
 test("native setup failures never echo the private editor value", async () => {
   const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
-  b.status = { ...b.status, runtime: "native", installed: true };
+  b.status = { ...b.status, runtime: "native", installed: true, subscription: "not configured" };
   const value = "https://example.invalid/private-failure-marker";
   const original = b.request.bind(b);
   b.request = async (action, requestValue) => {
@@ -1532,10 +1532,13 @@ test("installed native reuses the server table, selection, checks and mode contr
   const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true };
+  const original=b.request.bind(b);
+  b.request=async(action,value)=>{const r=await original(action,value);if(action.startsWith("profiles/"))r.profiles={active:"profile_legacy1",items:[{id:"profile_legacy1",name:"Existing",kind:"subscription",count:2,stale:false}]};return r};
   const app = new App(t.renderer, b);
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v"); await settle(); await t.renderOnce();
+    t.mockInput.pressKey("v"); await settle();
+    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
     const frame=t.captureCharFrame();
     expect(frame).toContain("Amsterdam");
     expect(frame).toContain("Ping всех");
@@ -1544,10 +1547,34 @@ test("installed native reuses the server table, selection, checks and mode contr
     expect(b.calls.at(-1)?.action).toBe("servers/select");
     await app.perform("servers/ping",rows[0]!.server_id);
     expect(b.calls.at(-1)?.action).toBe("servers/ping");
-    t.mockInput.pressEscape(); await Bun.sleep(60);
+    t.mockInput.pressKey("h"); await Bun.sleep(60);
     t.mockInput.pressKey("m"); await settle();
     expect(b.calls.at(-1)?.action).toBe("toggle-mode");
     t.resize(70,18);await t.renderOnce();
     expect(t.captureCharFrame()).not.toContain("недоступен в native");
   } finally { await app.close(); }
+});
+
+test("native profiles show separate server lists and adding a link does not connect", async () => {
+ const t=await createTestRenderer({width:100,height:28});const b=new FakeBackend();
+ b.status={...b.status,runtime:"native",installed:true};
+ let active="profile_one";
+ const items=[{id:"profile_one",name:"Subscription",kind:"subscription" as const,count:1,stale:true},{id:"profile_two",name:"My VPS",kind:"server" as const,count:1,stale:false}];
+ b.rows=[{...rows[0]!,profile_id:"profile_one"},{...rows[1]!,profile_id:"profile_two"}];
+ const original=b.request.bind(b);
+ b.request=async(action,value)=>{const r=await original(action,value);if(action==="profiles/open")active=value!;if(action.startsWith("profiles/"))r.profiles={active,items};return r};
+ const app=new App(t.renderer,b);
+ try{
+  await app.perform("status");t.mockInput.pressKey("c");await settle();await t.renderOnce();
+  expect(t.captureCharFrame()).toContain("My VPS");expect(t.captureCharFrame()).toContain("сохранённый список");
+  t.mockInput.pressKey("2");await settle();await t.renderOnce();
+  expect(t.captureCharFrame()).toContain("Amsterdam");expect(t.captureCharFrame()).not.toContain("Tokyo");
+  expect(b.calls.some(c=>c.action==="start" || c.action==="servers/select")).toBe(false);
+  t.mockInput.pressKey("c");await settle();t.mockInput.pressKey("n");await settle();
+  t.mockInput.typeText("Other VPS");t.mockInput.pressEnter();await settle();
+  t.mockInput.typeText("hy2://private-marker@example.invalid#VPS");t.mockInput.pressEnter();await settle();await t.renderOnce();
+  const added=b.calls.find(c=>c.action==="profiles/add");expect(JSON.parse(added!.value!).name).toBe("Other VPS");
+  expect(t.captureCharFrame()).not.toContain("private-marker");
+  t.resize(70,18);await t.renderOnce();expect(t.captureCharFrame()).toContain("Добавить профиль");
+ }finally{await app.close()}
 });

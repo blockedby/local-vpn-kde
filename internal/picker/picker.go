@@ -3,6 +3,7 @@ package picker
 import "github.com/blockedby/local-vpn-kde/internal/vless"
 
 type NodeResult struct {
+	ProfileID      string         `json:"profile_id,omitempty"`
 	Availability   string         `json:"availability,omitempty"`
 	PingMS         int            `json:"ping_ms,omitempty"`
 	PingStatus     string         `json:"ping_status,omitempty"`

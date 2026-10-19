@@ -13,6 +13,7 @@ import { StyledText, t } from "@opentui/core";
 import { speedometer } from "./speedometer";
 
 type Screen =
+ | "profiles" | "profile-name" | "profile-source" | "profile-remove"
   | "autostart"
   | "home"
   | "servers"
@@ -86,6 +87,23 @@ export class App {
   private autostart?: AutostartOptions;
   private serviceState?: AutostartServiceState;
   private screen: Screen = "home";
+ private profiles?: Reply["profiles"];
+ private profileName = "";
+ private profilePage = 0;
+ private async browseProfile(id: string) {
+  const reply=await this.perform("profiles/open",id);
+  if (!reply?.ok) return;
+  this.servers=[];this.catalogLoaded=false;this.serverID=undefined;
+  this.open("servers");
+ }
+ private async addProfile(source: string) {
+  const reply=await this.perform("profiles/add",JSON.stringify({name:this.profileName,source}));
+  if (reply?.ok) { this.input.value="";this.servers=[];this.catalogLoaded=false;this.open("profiles"); }
+ }
+ private async removeProfile() {
+  const reply=await this.perform("profiles/remove",this.profiles?.active);
+  if (reply?.ok){this.servers=[];this.catalogLoaded=false;this.open("profiles");}
+ }
   private tasks = new Map<string, { action: Action; measurement: boolean; started: number; phase: string }>();
   private nextTask = 0;
   private selectionRevision = 0;
@@ -434,6 +452,7 @@ export class App {
     this.paint();
   }
   private open(screen: Screen) {
+    if(screen==="servers" && this.nativeInstalled() && !this.profiles && this.status?.subscription==="configured") screen="profiles";
     if (this.closing) return;
     if (screen === "subscription" && !this.subscriptionAvailable()) {
       this.notify(this.nativeUnavailable("subscription"), true);
@@ -451,6 +470,8 @@ export class App {
         void this.loadPendingSubscription();
       }
     }
+    if(screen==="profiles") void this.perform("profiles/list");
+    if(screen==="profile-name" || screen==="profile-source") this.input.value="";
     if (screen === "autostart") void this.perform("autostart/read");
     if (screen === "target") this.input.value = this.target;
     this.paint();
@@ -476,6 +497,20 @@ export class App {
     this.open("confirm");
   }
   private items(): Item[] {
+    if(this.screen==="profile-remove") return [
+      {key:"y",label:"Удалить профиль из приложения",run:()=>void this.removeProfile()},
+      {key:"n",label:"Отмена",run:()=>this.open("profiles")},
+    ];
+    if(this.screen==="profiles") {
+      const profiles=this.profiles?.items ?? [];
+      const pages=Math.max(1,Math.ceil(profiles.length/4));this.profilePage=Math.min(this.profilePage,pages-1);
+      return [
+        ...profiles.slice(this.profilePage*4,this.profilePage*4+4).map((profile,i)=>({key:String(i+1),label:`${profile.id===this.profiles?.active?"● ":""}${profile.name} · ${profile.kind==="server"?"сервер":"подписка"} · ${profile.count}${profile.stale?" · сохранённый список":""}`,run:()=>void this.browseProfile(profile.id)})),
+        {key:"n",label:"Добавить профиль",run:()=>this.open("profile-name")},
+        ...(this.profiles?.active?[{key:"x",label:"Удалить выбранный профиль",run:()=>this.open("profile-remove")}]:[]),
+        ...(pages>1?[{key:"[",label:"Предыдущие профили",run:()=>{this.profilePage=(this.profilePage+pages-1)%pages;this.selected=0;this.paint()}},{key:"]",label:"Следующие профили",run:()=>{this.profilePage=(this.profilePage+1)%pages;this.selected=0;this.paint()}}]:[]),
+      ];
+    }
     if (this.screen === "confirm")
       return [
         {
@@ -533,7 +568,7 @@ export class App {
           : []),
         { key: "t", label: this.nativePreviewOnly() ? "Тест скорости · недоступно в native preview" : this.inlineSpeed() ? `Тест скорости · ${this.homeTesting ? `${frames[this.frame % 10]} ${this.measurementAction === "servers/ping" ? "ping" : this.measurementAction === "servers/speed" ? "замер" : "подготовка"} · ` : ""}${this.homePing === undefined ? "—" : Math.round(this.homePing)}ms, ${this.homeSpeed === undefined ? "—" : (this.homeSpeed / 8.388608).toFixed(1)} MiB/s` : "Тест скорости", run: () => void this.testHomeSpeed() },
         { key: "v", label: this.nativePreviewOnly() ? "Серверы · native preview" : "Серверы", run: () => this.open("servers") },
-        { key: "c", label: this.nativeMode() ? (this.nativeInstalled() ? "Подписка · настройка native-пакета" : "Подписка · недоступна в native preview") : "Подписка", run: () => this.open("subscription") },
+        { key: "c", label: this.nativeInstalled() && this.status?.subscription==="configured" ? "Профили · подписки и серверы" : this.nativeMode() ? (this.nativeInstalled() ? "Подписка · настройка native-пакета" : "Подписка · недоступна в native preview") : "Подписка", run: () => this.open(this.nativeInstalled() && this.status?.subscription==="configured"?"profiles":"subscription") },
         { key: "d", label: this.nativePreviewOnly() ? "Диагностика · недоступна в native" : "Диагностика", run: () => this.open("diagnostics") },
         { key: "a", label: "Автозапуск", run: () => this.open("autostart") },
         {
@@ -608,11 +643,13 @@ export class App {
   }
   private onKey = (key: KeyEvent) => {
     if (key.eventType === "release") return;
-    const editor = this.screen === "subscription" || this.screen === "target";
+    const editor = this.screen === "subscription" || this.screen === "target" || this.screen === "profile-name" || this.screen === "profile-source";
     if (key.name === "escape") {
       key.preventDefault();
       this.open(
-        editor && this.screen === "target"
+        this.screen.startsWith("profile-") || this.screen==="servers" && !!this.profiles
+          ? "profiles"
+          : editor && this.screen === "target"
           ? "servers"
           : this.screen === "confirm" && this.confirmation === "subscription"
             ? "subscription"
@@ -628,10 +665,15 @@ export class App {
     if (editor) {
       if (key.name === "return") {
         key.preventDefault();
+        if(this.screen==="profile-name") {
+          const value=this.input.value.trim();if(!value || [...value].length>60){this.notify("Введите имя профиля: до 60 символов.",true);return}
+          this.profileName=value;this.open("profile-source");return;
+        }
+        if(this.screen==="profile-source") {void this.addProfile(this.input.value.trim());return}
         if (this.screen === "subscription") {
           const value = this.input.value.trim();
           if (this.nativeInstalled()) {
-            if (!value || !/^https?:\/\//.test(value)) {
+            if (!value || !/^(https?:|vless:|hysteria2:|hy2:)\/\//.test(value)) {
               this.notify("Введите ссылку подписки.", true);
               return;
             }
@@ -670,7 +712,7 @@ export class App {
     const screenKeys: Record<string, Screen> = {
       h: "home",
       v: "servers",
-      c: "subscription",
+      c: this.nativeInstalled() && this.status?.subscription==="configured"?"profiles":"subscription",
       d: "diagnostics",
     };
     if (screenKeys[key.name]) {
@@ -801,7 +843,7 @@ export class App {
           };
       }
     } else if (reply.catalog?.servers) {
-      this.servers = reply.catalog.servers.map((s) => ({
+      this.servers = reply.catalog.servers.filter(s=>!this.profiles || (s.profile_id ?? "profile_legacy1")===this.profiles.active).map((s) => ({
         ...s,
         // Persisted catalog failures are not measurements from this UI session.
         status: "untested",
@@ -864,7 +906,7 @@ export class App {
       if (action !== "status") this.notify("Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k].");
       return;
     }
-    if (action === "subscription" && (!value || !/^https?:\/\//.test(value))) {
+    if (action === "subscription" && (!value || !/^(https?:|vless:|hysteria2:|hy2:)\/\//.test(value))) {
       this.notify("Введите ссылку подписки.", true);
       return;
     }
@@ -879,7 +921,7 @@ export class App {
     let reply: Reply | undefined;
     try {
       reply = await this.backend.request(action, value, requestID);
-      if (!action.startsWith("servers/") && !action.startsWith("autostart/") && action !== "subscription/read") {
+      if (!action.startsWith("servers/") && !action.startsWith("autostart/") && action !== "subscription/read" && !action.startsWith("profiles/")) {
         this.status = reply.status;
         this.checked = Date.now();
       }
@@ -901,6 +943,7 @@ export class App {
           download_mbps: previous.download_mbps, download_seconds: previous.download_seconds,
           downloaded_bytes: previous.downloaded_bytes } : row;
       });
+      if(reply.ok && reply.profiles) this.profiles=reply.profiles;
       if (action === "subscription/read" && reply.ok) {
         this.loadedSubscription = true;
         if (revision === this.editorRevision) {
@@ -930,6 +973,7 @@ export class App {
         !insideBatch
       ) {
         const done: Partial<Record<Action, string>> = {
+          "profiles/list":"", "profiles/open":"Профиль открыт. Активный сервер не изменён.", "profiles/add":"Профиль добавлен.", "profiles/remove":"Профиль удалён. Активное подключение не изменено.",
           "autostart/read": "",
           "autostart/set": this.nativeMode() || this.autostart?.runtime === "native"
             ? "Сохранено. Настройка применяется при входе в графическую сессию."
@@ -969,7 +1013,7 @@ export class App {
         }
       }
     } catch {
-      if (!action.startsWith("servers/") && !action.startsWith("autostart/")) this.status = undefined;
+      if (!action.startsWith("servers/") && !action.startsWith("autostart/") && !action.startsWith("profiles/")) this.status = undefined;
       if (action === "autostart/read" || action === "autostart/set") {
         this.serviceState = undefined;
         if (action === "autostart/set") this.autostart = undefined;
@@ -1001,6 +1045,10 @@ export class App {
           this.catalogStale ? "servers/refresh" : "servers/list",
         );
       }
+    }
+    if(action==="servers/refresh" && reply?.ok && this.profiles){
+      await this.perform("profiles/list");
+      if(this.profiles.items.find(p=>p.id===this.profiles?.active)?.stale) this.notify("Источник недоступен. Показаны ранее сохранённые серверы.");
     }
     await this.loadPendingSubscription();
     return reply;
@@ -1206,7 +1254,7 @@ export class App {
         : `Docker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"} · Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}`,
       width,
     );
-    const editor = this.screen === "subscription" || this.screen === "target";
+    const editor = this.screen === "subscription" || this.screen === "target" || this.screen === "profile-name" || this.screen === "profile-source";
     this.input.visible = editor;
     this.editorHint.visible = editor;
     if (editor && !this.closing) this.input.focus();
@@ -1280,6 +1328,10 @@ export class App {
             ? "Подписка · загрузка сохранённого адреса…"
             : "Подписка";
     }
+    if(this.screen==="profiles") this.summary.content="Профили · у каждого свой список серверов\nВыбор профиля не меняет активное VPN-подключение.";
+    if(this.screen==="profile-name") this.summary.content="Новый профиль · имя\nНапример: Моя VPS или Основная подписка";
+    if(this.screen==="profile-source") this.summary.content=`${this.profileName} · ссылка\nHTTPS-подписка, vless://, hysteria2:// или hy2://`;
+    if(this.screen==="profile-remove") this.summary.content="Удалить выбранный профиль?\nЭто не останавливает уже работающий сервер.";
     if (this.screen === "target")
       this.summary.content =
         "Адрес для проверки доступности\nHTTPS-запрос через каждый сервер; это не тест скорости.";
@@ -1298,8 +1350,8 @@ export class App {
           ? `Для проверок запустите ${this.serviceObject()}. VPN подключать не требуется.`
           : this.status?.subscription !== "configured"
             ? "Добавьте подписку для загрузки серверов."
-            : `${this.servers.length} серверов · Сортировка [o]: ${{ name: "имя ↑", ping: "ping ↑", speed: "скорость ↓", availability: "доступность ↓" }[this.sort]}${this.catalogStale ? " · каталог устарел" : ""}\nСайт: ${this.target}`;
-    if (compactServers && !this.nativePreviewOnly() && this.ready() && this.status?.subscription === "configured" && !this.catalogStale) {
+            : `${this.profiles?.items.find(p=>p.id===this.profiles?.active)?.name ?? "Серверы"} · ${this.servers.length} серверов · Сортировка [o]: ${{ name: "имя ↑", ping: "ping ↑", speed: "скорость ↓", availability: "доступность ↓" }[this.sort]}${this.catalogStale ? " · каталог устарел" : ""}\nСайт: ${this.target}`;
+    if (compactServers && !this.profiles && !this.nativePreviewOnly() && this.ready() && this.status?.subscription === "configured" && !this.catalogStale) {
       this.summary.visible = false;
       this.summary.height = 0;
     }

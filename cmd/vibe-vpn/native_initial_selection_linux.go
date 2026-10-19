@@ -16,9 +16,9 @@ import (
 
 	"github.com/blockedby/local-vpn-kde/internal/config"
 	"github.com/blockedby/local-vpn-kde/internal/picker"
+	"github.com/blockedby/local-vpn-kde/internal/sharelink"
 	"github.com/blockedby/local-vpn-kde/internal/singbox"
 	"github.com/blockedby/local-vpn-kde/internal/state"
-	"github.com/blockedby/local-vpn-kde/internal/vless"
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
 )
@@ -219,7 +219,7 @@ func runNativeInitialSelection(ctx context.Context, o *cliOptions, cfg config.Co
 	}
 	// Parse the exact persisted winner link rather than trusting denormalized
 	// result fields or an outbound map supplied by persisted benchmark data.
-	node, err := vless.Parse(winner.Link)
+	node, err := sharelink.Parse(winner.Link)
 	if err != nil {
 		return fmt.Errorf("parse selected benchmark winner: %w", err)
 	}
