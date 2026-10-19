@@ -1651,3 +1651,101 @@ test("removing the active source browses its fallback without changing the VPN",
     expect(b.calls.some(call => ["start", "stop", "disconnect", "servers/select"].includes(call.action))).toBe(false);
   } finally { await app.close(); }
 });
+
+// Real input/rendering with a deterministic backend; no installed-system claim.
+test("installed native separates service startup, connection, disconnect and shutdown", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", installed: true, gateway_state: "absent" };
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    if (action === "backend/start") b.status.gateway_state = "healthy";
+    if (action === "start") b.status.networkmanager_active = "yes";
+    if (action === "disconnect") b.status.networkmanager_active = "no";
+    if (action === "stop") b.status.gateway_state = "stopped";
+    return original(action, value);
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("s"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("VPN отключён");
+    expect(t.captureCharFrame()).toContain("Подключить VPN");
+    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start"]);
+    t.mockInput.pressKey("s"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("VPN подключён");
+    t.mockInput.pressKey("x"); await settle();
+    expect(b.calls.at(-1)?.action).toBe("start");
+    t.mockInput.pressKey("n"); await settle();
+    expect(b.status.networkmanager_active).toBe("yes");
+    t.mockInput.pressKey("x"); t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Native-служба работает");
+    expect(b.status.gateway_state).toBe("healthy");
+    t.mockInput.pressKey("z"); await settle();
+    expect(b.calls.at(-1)?.action).toBe("disconnect");
+    t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Native-служба и VPN остановлены");
+    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start", "start", "disconnect", "stop"]);
+  } finally { await app.close(); }
+});
+
+test("installed native mode failure preserves strict state and retry shows smart then strict", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", installed: true };
+  let fail = true;
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    if (action === "toggle-mode") {
+      if (fail) { fail = false; return { ...reply(b.status), ok: false, reason: "dns-failed" }; }
+      b.status.routing_mode = b.status.routing_mode === "strict" ? "smart" : "strict";
+    }
+    return original(action, value);
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("m"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Проверка DNS после подключения не прошла");
+    expect(t.captureCharFrame()).toContain("Режим: строгий");
+    t.mockInput.pressKey("m"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Режим: умный");
+    expect(t.captureCharFrame()).not.toContain("Проверка DNS после подключения не прошла");
+    t.mockInput.pressKey("m"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Режим: строгий");
+    expect(b.calls.some(call => ["start", "backend/start", "disconnect", "stop"].includes(call.action))).toBe(false);
+  } finally { await app.close(); }
+});
+
+test("installed native diagnostics failure can be retried without changing connectivity", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", installed: true, networkmanager_active: "yes" };
+  let attempts = 0;
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "diagnostics") {
+      if (++attempts === 1) return { ...result, ok: false, reason: "diagnostics-unavailable" };
+      b.status.diagnostics = "available";
+      return reply(b.status);
+    }
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("d"); await settle();
+    t.mockInput.pressKey("u"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Не удалось создать журнал");
+    t.mockInput.pressKey("u"); await settle(); await t.renderOnce();
+    const frame = t.captureCharFrame();
+    expect(frame).toContain("Native-служба:");
+    expect(frame).toContain("Проверка: выполнена");
+    expect(frame).not.toContain("Docker");
+    expect(frame).not.toContain("Не удалось создать журнал");
+    t.mockInput.pressKey("h"); await Bun.sleep(60); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("VPN подключён");
+    expect(b.calls.some(call => ["start", "backend/start", "disconnect", "stop"].includes(call.action))).toBe(false);
+  } finally { await app.close(); }
+});

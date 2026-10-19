@@ -1118,6 +1118,12 @@ func prepareFixtureMode(real bool) error {
 	if err := copyFile(fixtureRoot+"/vibe-vpn", nativegateway.LibexecDir+"/vibe-vpn", 0555); err != nil {
 		return fmt.Errorf("install fixture helper: %w", err)
 	}
+	// Production runs this root-only ExecStartPre before starting the restricted
+	// gateway service. Model it in the lab too: runtime restarts execute the
+	// pinned binaries rather than mutable package paths.
+	if err := localvpn.StageNativeRuntime(context.Background()); err != nil {
+		return fmt.Errorf("stage fixture runtime: %w", err)
+	}
 
 	base := privateRoot + "/secrets"
 	if err := localvpn.Assets(localvpn.AssetOptions{

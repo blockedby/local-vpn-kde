@@ -9,7 +9,8 @@ import hashlib
 import json
 import os
 import pathlib
-import select
+import queue
+import threading
 import subprocess
 
 assert os.environ.get("VPNKIT_NATIVE_VM_LAB") == "1", "disposable-lab opt-in required"
@@ -27,6 +28,7 @@ def digest(path):
 paths = [
     "/var/lib/local-vpn-kde/vibe-vpn/current-node.json",
     "/etc/local-vpn-kde/sing-box/config.json",
+    "/var/lib/local-vpn-kde/sing-box/config.json",
 ]
 before = [digest(path) for path in paths]
 process = subprocess.Popen(
@@ -37,6 +39,8 @@ process = subprocess.Popen(
     text=True,
     bufsize=1,
 )
+replies = queue.Queue()
+threading.Thread(target=lambda: [replies.put(json.loads(line)) for line in process.stdout], daemon=True).start()
 sequence = 0
 created = None
 original = None
@@ -52,10 +56,7 @@ def run(action, value=None, ok=True):
     process.stdin.write(json.dumps(request) + "\n")
     process.stdin.flush()
     while True:
-        assert select.select([process.stdout], [], [], 60)[0], "bridge request timed out"
-        line = process.stdout.readline()
-        assert line, "bridge exited without reply"
-        reply = json.loads(line)
+        reply = replies.get(timeout=90)
         if "ok" not in reply:
             continue
         assert reply["id"] == request["id"], "reply id mismatch"
@@ -84,6 +85,35 @@ try:
         refreshed = run("servers/refresh")["catalog"]
         matching = [row for row in refreshed["servers"] if row.get("profile_id") == created]
         assert len(matching) == 1, "catalog source boundary lost"
+        # A second installed bridge proves persistence across UI sessions.
+        persisted = subprocess.run(
+            ["/usr/bin/local-vpn-kde", "bridge"],
+            input=json.dumps({"id": "persisted", "action": "profiles/list"}) + "\n",
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30, check=True,
+        )
+        snapshot = next(json.loads(line)["profiles"] for line in persisted.stdout.splitlines()
+                        if "profiles" in json.loads(line))
+        assert snapshot == added, "profile cache did not persist across bridge sessions"
+        # An unreachable HTTPS source must mark only that source stale, while
+        # retaining the cached direct source and never selecting runtime nodes.
+        failed = run("profiles/add", json.dumps({"name": "Lab unavailable subscription",
+                     "source": "https://127.0.0.1:9/unavailable"}))["profiles"]
+        failed_id = failed["active"]
+        try:
+            run("servers/refresh")  # Cached catalog remains usable despite failed source fetch.
+            after_failure = run("profiles/list")["profiles"]
+            failed_item = next(item for item in after_failure["items"] if item["id"] == failed_id)
+            cached_item = next(item for item in after_failure["items"] if item["id"] == created)
+            assert failed_item["stale"] and failed_item["count"] == 0
+            assert cached_item["count"] == 1 and not cached_item["stale"], "foreign profile cache changed"
+            run("profiles/open", created)
+            cached = run("servers/list")["catalog"]["servers"]
+            assert any(row.get("profile_id") == created for row in cached), "cached source disappeared"
+        finally:
+            run("profiles/remove", failed_id)
+            run("profiles/open", created)
+        run("profiles/open", "profile_missing", ok=False)
+        run("profiles/remove", "profile_missing", ok=False)
         run("profiles/add", json.dumps({"name": name, "source": source}), ok=False)
         run(
             "profiles/add",
@@ -113,11 +143,15 @@ try:
     assert len(final["items"]) == len(first["items"]), "source cleanup mismatch"
     (private / "summary.json").write_text(json.dumps(summary, indent=2))
     print("INSTALLED_NATIVE_PROFILE_BOUNDARIES=passed; protocols=hysteria2,vless; "
-          "strict-input=passed; runtime-preserved=passed; cleanup=passed")
+          "strict-input=passed; session-persistence=passed; refresh-failure-isolation=passed; runtime-preserved=passed; cleanup=passed")
 finally:
-    if created:
-        run("profiles/remove", created)
-    if original:
-        run("profiles/open", original)
-    process.stdin.close()
-    process.wait(timeout=35)
+    try:
+        try:
+            if created:
+                run("profiles/remove", created)
+        finally:
+            if original:
+                run("profiles/open", original)
+    finally:
+        process.stdin.close()
+        process.wait(timeout=35)
