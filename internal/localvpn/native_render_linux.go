@@ -38,6 +38,17 @@ func nativeSingBoxConfig(data []byte) ([]byte, error) {
 		return nil, errors.New("sing-box config must be a JSON object")
 	}
 
+	// A namespace cannot use the host's systemd-resolved link identifiers.
+	// Keep bootstrap DNS independent of the not-yet-running proxy/rule sets.
+	if dns, ok := config["dns"].(map[string]any); ok {
+		if servers, ok := dns["servers"].([]any); ok {
+			for i, raw := range servers {
+				if server, ok := raw.(map[string]any); ok && server["tag"] == "direct-dns" && server["type"] == "local" {
+					servers[i] = map[string]any{"tag": "direct-dns", "type": "udp", "server": "8.8.8.8", "server_port": 53}
+				}
+			}
+		}
+	}
 	rawRoute, ok := config["route"]
 	if !ok {
 		return marshalNativeSingBoxConfig(config)

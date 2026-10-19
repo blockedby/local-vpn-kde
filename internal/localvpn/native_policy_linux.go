@@ -88,7 +88,7 @@ func toggleNativePolicy(ctx context.Context, uid uint32, output io.Writer) error
 	if err != nil {
 		return err
 	}
-	if status.Gateway != "inactive" && !status.Ready {
+	if status.Gateway != "inactive" && status.Gateway != "failed" && !status.Ready {
 		return errors.New("native gateway must be ready or stopped")
 	}
 	bundle, err := loadNativePolicyBundle(uid)
@@ -132,31 +132,49 @@ func toggleNativePolicy(ctx context.Context, uid uint32, output io.Writer) error
 		_, err := service.call(ctx, "systemctl", "stop", nativegateway.GatewayUnit)
 		return err
 	}
-	start := func(ctx context.Context) error { return service.Start(ctx) }
-	if status.Ready {
-		if err = stop(ctx); err != nil {
+	start := func(ctx context.Context) error {
+		if _, err := service.call(ctx, "systemctl", "reset-failed", nativegateway.GatewayUnit); err != nil {
 			return err
 		}
+		return service.Start(ctx)
 	}
-	restore := func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		_ = stop(cleanup)
-		bundle.Files["sing-box/config.json"] = old
-		if PublishNativeConfiguration(cleanup, bundle) == nil && status.Ready {
-			_ = start(cleanup)
-		}
+	publish := func(ctx context.Context, data []byte) error {
+		bundle.Files["sing-box/config.json"] = data
+		return PublishNativeConfiguration(ctx, bundle)
 	}
-	bundle.Files["sing-box/config.json"] = append(next, '\n')
-	if err = PublishNativeConfiguration(ctx, bundle); err != nil {
-		restore()
+	// Stop failed units too: Restart=on-failure must not race publication.
+	if err := stop(ctx); err != nil {
 		return err
 	}
-	if status.Ready {
-		if err = start(ctx); err != nil {
-			restore()
-			return err
-		}
+	if err := applyNativePolicy(ctx, old, append(next, '\n'), status.Ready, publish, stop, start); err != nil {
+		return err
 	}
 	return json.NewEncoder(output).Encode(map[string]string{"routing_policy": policy})
+}
+
+// Roll back using a fresh context even if the initiating UI has disconnected.
+// Report rollback failures instead of presenting a successful recovery.
+func applyNativePolicy(ctx context.Context, old, next []byte, running bool,
+	publish func(context.Context, []byte) error, stop, start func(context.Context) error) error {
+	err := publish(ctx, next)
+	if err == nil && running {
+		err = start(ctx)
+	}
+	if err == nil {
+		return nil
+	}
+	cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if e := stop(cleanup); e != nil {
+		return errors.Join(err, errors.New("policy rollback stop failed"), e)
+	}
+	if e := publish(cleanup, old); e != nil {
+		return errors.Join(err, errors.New("policy rollback publication failed"), e)
+	}
+	if running {
+		if e := start(cleanup); e != nil {
+			return errors.Join(err, errors.New("policy rollback restart failed"), e)
+		}
+	}
+	return err
 }

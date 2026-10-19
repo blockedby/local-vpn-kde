@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -249,4 +250,39 @@ func slicesContain(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func TestNativePolicyReconnectsOnlyPreviouslyActiveOwnedProfile(t *testing.T) {
+	for _, active := range []bool{false, true} {
+		for _, fails := range []bool{false, true} {
+			t.Run(fmt.Sprintf("active=%v/fails=%v", active, fails), func(t *testing.T) {
+				var events []string
+				state := "no"
+				if active {
+					state = "yes"
+				}
+				nm := &fakeNativeDesktopNM{events: &events, status: "configured=yes\nactive=" + state + "\n"}
+				service := &fakeNativeDesktopService{events: &events, status: GatewayStatus{Ready: true}}
+				failure := errors.New("candidate failed and was restored")
+				d := nativeDesktopDependencies{service: service, nm: nm, policy: func(context.Context, io.Writer) error {
+					events = append(events, "policy")
+					if fails {
+						return failure
+					}
+					return nil
+				}}
+				err := runNativeDesktopPolicy(context.Background(), io.Discard, d)
+				if (err != nil) != fails {
+					t.Fatalf("unexpected result %v", err)
+				}
+				want := []string{"nm-status", "policy"}
+				if active {
+					want = []string{"nm-status", "nm-disconnect", "policy", "service-status", "nm-connect"}
+				}
+				if !reflect.DeepEqual(events, want) {
+					t.Fatalf("events %v want %v", events, want)
+				}
+			})
+		}
+	}
 }

@@ -38,6 +38,21 @@ func TestNativeSingBoxConfigAdaptsBuildConfig(t *testing.T) {
 					t.Fatal(err)
 				}
 				assertNativeRuleSetPaths(t, before, after)
+				dns := after["dns"].(map[string]any)["servers"].([]any)
+				var found bool
+				for _, raw := range dns {
+					server := raw.(map[string]any)
+					if server["tag"] == "direct-dns" {
+						found = true
+						if server["type"] != "udp" || server["server"] != "8.8.8.8" {
+							t.Fatal("namespace bootstrap DNS still depends on host resolver")
+						}
+					}
+				}
+				if !found {
+					t.Fatal("bootstrap resolver missing")
+				}
+				before["dns"] = after["dns"]
 				if !reflect.DeepEqual(before, after) {
 					t.Fatalf("native adaptation changed config semantics:\nbefore=%v\nafter=%v", before, after)
 				}

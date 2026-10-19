@@ -37,6 +37,7 @@ type nativeDesktopNetworkManager interface {
 type nativeDesktopDependencies struct {
 	service nativeDesktopService
 	nm      nativeDesktopNetworkManager
+	policy  func(context.Context, io.Writer) error
 }
 
 // This private factory is the dependency seam used by unit tests. Production
@@ -45,7 +46,10 @@ type nativeDesktopDependencies struct {
 var newNativeDesktopDependencies = func(base string) nativeDesktopDependencies {
 	return nativeDesktopDependencies{
 		service: NativeService{},
-		nm:      NetworkManager{Base: base, Native: true},
+		policy: func(ctx context.Context, out io.Writer) error {
+			return NativeOperationsClient(ctx, []string{"toggle-mode"}, out)
+		},
+		nm: NetworkManager{Base: base, Native: true},
 	}
 }
 
@@ -201,7 +205,7 @@ func RunNativeDesktop(ctx context.Context, base string, action string, yes bool,
 	}
 	switch action {
 	case "status":
-	case "backend-start", "start", "disconnect", "stop":
+	case "backend-start", "start", "disconnect", "stop", "toggle-mode":
 		if !yes {
 			return errors.New("native desktop mutation requires explicit authorization (--yes)")
 		}
@@ -227,6 +231,8 @@ func RunNativeDesktop(ctx context.Context, base string, action string, yes bool,
 	switch action {
 	case "status":
 		return runNativeDesktopStatus(ctx, base, output, dependencies, baseMissing)
+	case "toggle-mode":
+		return runNativeDesktopPolicy(ctx, output, dependencies)
 	case "backend-start":
 		if err = nativeDesktopPhase(output, "gateway-start"); err != nil {
 			return err
@@ -281,4 +287,41 @@ func RunNativeDesktop(ctx context.Context, base string, action string, yes bool,
 		return dependencies.service.Stop(ctx)
 	}
 	return errors.New("invalid native desktop action")
+}
+
+// A gateway restart invalidates the existing OpenVPN session even if NM still
+// labels its persistent tun interface active. Reconnect only our owned profile
+// when it was active, including after a successful policy rollback.
+func runNativeDesktopPolicy(ctx context.Context, output io.Writer, d nativeDesktopDependencies) error {
+	if d.policy == nil {
+		return errors.New("native policy operation unavailable")
+	}
+	capture := &nativeDesktopLimitWriter{remain: nativeDesktopStatusLimit}
+	if err := d.nm.Run(ctx, "status", true, capture); err != nil {
+		return err
+	}
+	_, active, err := parseNativeDesktopNMStatus(capture.buffer.Bytes())
+	if err != nil {
+		return err
+	}
+	connected := active == "yes"
+	if connected {
+		if err := d.nm.Run(ctx, "disconnect", true, io.Discard); err != nil {
+			return err
+		}
+	}
+	operationErr := d.policy(ctx, output)
+	if !connected {
+		return operationErr
+	}
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), nativeDesktopCompensateTimeout)
+	defer cancel()
+	status, err := d.service.Status(cleanup)
+	if err != nil {
+		return errors.Join(operationErr, err)
+	}
+	if !status.Ready {
+		return errors.Join(operationErr, errors.New("native gateway unavailable after policy change"))
+	}
+	return errors.Join(operationErr, d.nm.Run(cleanup, "connect", true, io.Discard))
 }

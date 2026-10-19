@@ -13,7 +13,7 @@ case "${1:-}" in
     exec "$binary" native-operation-client "$@" ;;
   toggle)
     [[ $# -eq 2 && "$2" == mode ]] || exit 2
-    exec "$binary" native-operation-client toggle-mode ;;
+    action=toggle-mode ;;
 
   status)
     [[ $# -eq 1 || ( $# -eq 2 && "$2" == --json ) ]] || exit 2
