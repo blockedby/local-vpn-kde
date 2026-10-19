@@ -34,6 +34,7 @@ TimeoutStartSec=90s
 User=` + ServiceUser + `
 Group=` + ServiceUser + `
 NetworkNamespacePath=/run/netns/` + Namespace + `
+ExecStartPre=+` + LibexecDir + `/local-vpn-kde.bin native-package --action stage-runtime
 ExecStart=` + LibexecDir + `/local-vpn-kde.bin native-serve
 Restart=on-failure
 RestartSec=5s
@@ -61,7 +62,7 @@ ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectControlGroups=yes
 ReadOnlyPaths=` + ConfigDir + `
-ReadWritePaths=` + StateDir + ` /run/local-vpn-kde
+ReadWritePaths=` + StateDir + ` /run/local-vpn-kde /var/lib/local-vpn-kde-runtime
 `
 
 // UnitFiles returns the fixed native service artifacts. Callers may decide

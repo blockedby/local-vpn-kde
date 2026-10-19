@@ -8,8 +8,6 @@ import (
 	"io"
 	"reflect"
 	"testing"
-
-	"github.com/blockedby/local-vpn-kde/internal/nativegateway"
 )
 
 func TestNativeRuntimeConfigIsFixed(t *testing.T) {
@@ -31,13 +29,13 @@ func TestNativeRuntimeConfigIsFixed(t *testing.T) {
 		Request:    "/run/local-vpn-kde/restart-sing-box",
 		Ack:        "/run/local-vpn-kde/sing-box-generation.ack",
 		Vibe:       "/etc/local-vpn-kde/vibe-vpn/config.yaml",
-		Binary:     "/usr/libexec/local-vpn-kde/sing-box",
+		Binary:     nativePinnedRuntime + "/sing-box",
 		IPv6:       "block",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("NativeRuntimeConfig() = %#v, want %#v", got, want)
 	}
-	if got.Binary != nativegateway.LibexecDir+"/sing-box" {
+	if got.Binary != nativePinnedRuntime+"/sing-box" {
 		t.Fatal("native sing-box binary is not rooted in the fixed libexec directory")
 	}
 
@@ -45,7 +43,7 @@ func TestNativeRuntimeConfigIsFixed(t *testing.T) {
 	if !options.ownedChildrenHealth {
 		t.Fatal("native readiness must use owned children, not global pgrep")
 	}
-	if options.helper != nativegateway.LibexecDir+"/vibe-vpn" {
+	if options.helper != nativePinnedRuntime+"/vibe-vpn" {
 		t.Fatalf("native helper = %q", options.helper)
 	}
 	if options.helperConfig != got.Vibe {

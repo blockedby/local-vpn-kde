@@ -28,7 +28,7 @@ func NativeRuntimeConfig() ContainerConfig {
 		Request:    nativeRuntimePath + "/restart-sing-box",
 		Ack:        nativeRuntimePath + "/sing-box-generation.ack",
 		Vibe:       nativegateway.ConfigDir + "/vibe-vpn/config.yaml",
-		Binary:     nativegateway.LibexecDir + "/sing-box",
+		Binary:     nativePinnedRuntime + "/sing-box",
 		IPv6:       "block",
 	}
 }
@@ -52,7 +52,7 @@ func nativeGatewayRuntimeOptions(c ContainerConfig) gatewayRuntimeOptions {
 		}
 	}
 	return gatewayRuntimeOptions{
-		helper:              nativegateway.LibexecDir + "/vibe-vpn",
+		helper:              nativePinnedRuntime + "/vibe-vpn",
 		helperConfig:        c.Vibe,
 		ownedChildrenHealth: true,
 		onReady:             nativeReady,

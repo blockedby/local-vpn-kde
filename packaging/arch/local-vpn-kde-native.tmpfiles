@@ -8,3 +8,6 @@ d /var/lib/local-vpn-kde             0700 local-vpn-kde local-vpn-kde -
 d /var/lib/local-vpn-kde/sing-box    0700 local-vpn-kde local-vpn-kde -
 d /var/lib/local-vpn-kde/vibe-vpn    0700 local-vpn-kde local-vpn-kde -
 d /var/lib/local-vpn-kde-network     0700 root          root          -
+
+# Root-owned binary snapshot survives package upgrades, refreshed only on service start.
+d /var/lib/local-vpn-kde-runtime 0755 root root -

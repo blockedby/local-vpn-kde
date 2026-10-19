@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Upgrade
+Type = Package
+Target = local-vpn-kde-native
+
+[Action]
+Description = Preserving native VPN while upgrading application files...
+When = PreTransaction
+Exec = /usr/libexec/local-vpn-kde/local-vpn-kde.bin native-package --action pre-upgrade
+AbortOnFail
