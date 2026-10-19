@@ -138,6 +138,7 @@ func TestGatewayUnitUsesPreparedNamespaceAndBoundedPrivileges(t *testing.T) {
 		"NotifyAccess":          "main",
 		"TimeoutStartSec":       "90s",
 		"ExecStart":             "/usr/libexec/local-vpn-kde/local-vpn-kde.bin native-serve",
+		"ExecStartPre":          "+/usr/libexec/local-vpn-kde/local-vpn-kde.bin native-package --action stage-runtime",
 		"Restart":               "on-failure",
 		"RestartSec":            "5s",
 		"TimeoutStopSec":        "30s",
@@ -167,7 +168,7 @@ func TestGatewayUnitUsesPreparedNamespaceAndBoundedPrivileges(t *testing.T) {
 		"ProtectKernelLogs=yes",
 		"ProtectControlGroups=yes",
 		"ReadOnlyPaths=" + ConfigDir,
-		"ReadWritePaths=" + StateDir + " /run/local-vpn-kde",
+		"ReadWritePaths=" + StateDir + " /run/local-vpn-kde /var/lib/local-vpn-kde-runtime",
 	} {
 		requireUnitLine(t, unit, line)
 	}

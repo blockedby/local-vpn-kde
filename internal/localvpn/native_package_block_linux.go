@@ -88,5 +88,8 @@ func completeNativePackageChangeLocked(ctx context.Context) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return errors.New("cannot inspect system manager")
 	}
+	if err := checkRunningNativeContract(ctx); err != nil {
+		return err
+	}
 	return setNativePackageBlock(false)
 }

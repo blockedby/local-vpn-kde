@@ -1,6 +1,5 @@
 [Trigger]
 Operation = Remove
-Operation = Upgrade
 Type = Package
 Target = local-vpn-kde-native
 

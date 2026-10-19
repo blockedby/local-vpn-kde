@@ -91,6 +91,8 @@ package() {
     "$pkgdir/usr/share/polkit-1/rules.d/49-local-vpn-kde.rules"
   install -Dm644 packaging/arch/local-vpn-kde-native.hook \
     "$pkgdir/usr/share/libalpm/hooks/local-vpn-kde-native.hook"
+  install -Dm644 packaging/arch/local-vpn-kde-native-upgrade.hook \
+    "$pkgdir/usr/share/libalpm/hooks/local-vpn-kde-native-upgrade.hook"
   install -Dm755 scripts/vpnkit/vpnkit-native.sh \
     "$pkgdir/usr/share/local-vpn-kde/scripts/vpnkit/vpnkit-native.sh"
   install -Dm644 /usr/share/licenses/bun/LICENSE.md "$pkgdir/usr/share/licenses/$pkgname/bun.LICENSE.md"

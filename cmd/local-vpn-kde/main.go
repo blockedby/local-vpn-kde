@@ -53,11 +53,17 @@ func run(args []string) error {
 		return localvpn.RunNativeConfigurationClient(ctx, os.Stdin)
 	}
 	if len(args) > 0 && args[0] == "native-package" {
-		if len(args) != 3 || args[1] != "--action" || (args[2] != "pre-remove" && args[2] != "post-change" && args[2] != "recover") {
-			return fmt.Errorf("native-package accepts --action pre-remove, post-change or recover")
+		if len(args) != 3 || args[1] != "--action" || (args[2] != "stage-runtime" && args[2] != "pre-upgrade" && args[2] != "pre-remove" && args[2] != "post-change" && args[2] != "recover") {
+			return fmt.Errorf("native-package accepts --action pre-remove, pre-upgrade, stage-runtime, post-change or recover")
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 		defer cancel()
+		if args[2] == "stage-runtime" {
+			return localvpn.StageNativeRuntime(ctx)
+		}
+		if args[2] == "pre-upgrade" {
+			return localvpn.PrepareNativePackageUpgrade(ctx)
+		}
 		if args[2] == "recover" {
 			return localvpn.RecoverNativePackageChange(ctx)
 		}
