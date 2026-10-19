@@ -90,3 +90,38 @@ func TestCheckStreamRejectsForeignDuplicateOutOfOrderAndMalformedEvents(t *testi
 		})
 	}
 }
+
+func TestSpeedCheckStreamProgressAndMetricBounds(t *testing.T) {
+	id := "srv_" + strings.Repeat("a", 27)
+	var final bytes.Buffer
+	var events []CheckProgress
+	stream := NewCheckStream([]string{id}, &final, func(p CheckProgress) error { events = append(events, p); return nil })
+	for _, p := range []CheckProgress{
+		{Event: "server-check", ServerID: id, Stage: "ping", PingStatus: "ready", LatencyMS: 12, Availability: "untested"},
+		{Event: "server-check", ServerID: id, Stage: "speed", PingStatus: "ready", LatencyMS: 12, Availability: "failed"},
+		{Event: "server-check", ServerID: id, Stage: "complete", PingStatus: "ready", LatencyMS: 12, Availability: "failed", Status: "ready", DownloadMbps: 8, DownloadSeconds: 3, DownloadedBytes: 3000000},
+	} {
+		data, _ := json.Marshal(p)
+		if _, err := stream.Write(append(data, '\n')); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := stream.Write([]byte("{}\n")); err != nil || stream.Finish() != nil {
+		t.Fatal("valid speed stream rejected", err)
+	}
+	if len(events) != 3 || events[2].DownloadedBytes != 3000000 || events[2].Availability != "failed" {
+		t.Fatal("mixed speed/site evidence lost", events)
+	}
+	for _, payload := range []string{
+		`"stage":"speed","ping_status":"ready","latency_ms":1,"availability":"ready","download_mbps":1`,
+		`"stage":"speed","ping_status":"ready","latency_ms":1,"availability":"untested"`,
+		`"stage":"complete","ping_status":"ready","latency_ms":1,"availability":"ready","download_seconds":-1`,
+		`"stage":"complete","ping_status":"ready","latency_ms":1,"availability":"ready","download_mbps":1e20`,
+		`"stage":"complete","ping_status":"ready","latency_ms":1,"availability":"ready","downloaded_bytes":9007199254740993`,
+	} {
+		s := NewCheckStream([]string{id}, &bytes.Buffer{}, nil)
+		if _, err := s.Write([]byte(`{"event":"server-check","server_id":"` + id + `",` + payload + "}\n")); err == nil {
+			t.Fatal("invalid speed evidence accepted", payload)
+		}
+	}
+}

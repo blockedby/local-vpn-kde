@@ -18,6 +18,7 @@ export type Action =
   | "servers/list"
   | "servers/refresh"
   | "servers/check-batch"
+  | "servers/speed-batch"
   | "servers/ping"
   | "servers/speed"
   | "servers/availability"
@@ -62,9 +63,13 @@ export interface Reply {
   catalog?: { status: string; servers?: Server[]; server?: Server };
 }
 export interface CheckProgress {
+  status?: string;
+  download_mbps?: number;
+  download_seconds?: number;
+  downloaded_bytes?: number;
   event: "server-check";
   server_id: string;
-  stage: "start" | "ping" | "complete";
+  stage: "start" | "ping" | "speed" | "complete";
   ping_status: "untested" | "ready" | "failed";
   latency_ms: number;
   availability: "ready" | "failed" | "untested";
@@ -270,13 +275,14 @@ export class DemoBackend implements Backend {
     if (action === "subscription/read") reply.value = this.subscription;
       if (action === "servers/list" || action === "servers/refresh")
         reply.catalog = { status: "ok", servers: structuredClone(this.servers) };
-      if (action === "servers/check-batch") {
+      if (action === "servers/check-batch" || action === "servers/speed-batch") {
         const ids: string[] = JSON.parse(value ?? "{}").ids;
         const rows = this.servers.filter((s) => ids.includes(s.server_id));
         for (const row of rows) {
           row.ping_status = "ready";
           row.latency_ms = 20;
           row.availability = "ready";
+          if (action === "servers/speed-batch") { row.status = "ready"; row.download_mbps = 90; row.download_seconds = 3; row.downloaded_bytes = 33750000; }
         }
         reply.catalog = { status: "ok", servers: structuredClone(rows) };
       }

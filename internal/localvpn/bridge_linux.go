@@ -265,7 +265,7 @@ func (b *Bridge) Serve(ctx context.Context, input io.Reader, output io.Writer) e
 			defer func() { stop(); b.mu.Lock(); delete(b.active, head.ID); b.mu.Unlock() }()
 			// Selection changes only the active proxy. Probes own independent proxies;
 			// lifecycle and catalog mutations must wait for those proxies to finish.
-			shared := head.Action == "servers/select" || head.Action == "servers/list" || head.Action == "servers/current" || head.Action == "servers/ping" || head.Action == "servers/speed" || head.Action == "servers/availability" || head.Action == "servers/check-batch" || head.Action == "status" || head.Action == "subscription/read"
+			shared := head.Action == "servers/select" || head.Action == "servers/list" || head.Action == "servers/current" || head.Action == "servers/ping" || head.Action == "servers/speed" || head.Action == "servers/availability" || head.Action == "servers/check-batch" || head.Action == "servers/speed-batch" || head.Action == "status" || head.Action == "subscription/read"
 			mutation := !shared || head.Action == "servers/select"
 			canceled := func() {
 				reason := "cancelled"
@@ -352,7 +352,7 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 	if b.options.Runtime == "native" {
 		switch request.Action {
 		case "status", "backend/start", "start", "disconnect", "stop", "autostart/read", "autostart/set":
-		case "profiles/list", "profiles/add", "profiles/open", "profiles/remove", "subscription", "subscription/read", "servers/list", "servers/refresh", "servers/current", "servers/select", "servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "toggle-mode", "diagnostics":
+		case "profiles/list", "profiles/add", "profiles/open", "profiles/remove", "subscription", "subscription/read", "servers/list", "servers/refresh", "servers/current", "servers/select", "servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch", "toggle-mode", "diagnostics":
 			if b.options.Repo != InstalledAssetRoot {
 				reply["ok"], reply["reason"], reply["status"] = false, "unsupported-native-action", b.Status()
 				return reply, nil
@@ -668,7 +668,7 @@ func serverArguments(action, value string) ([]string, []string, error) {
 			return nil, nil, invalid
 		}
 		return append(args, request.ID, request.URL), nil, nil
-	case "check-batch":
+	case "check-batch", "speed-batch":
 		var request struct {
 			IDs []string
 			URL string

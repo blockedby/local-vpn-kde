@@ -62,3 +62,19 @@ func TestNativeProfileOperationValidatesWholeRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeSpeedBatchFixedContract(t *testing.T) {
+	id := "srv_" + strings.Repeat("a", 27)
+	if err := validateNativeOperation([]string{"servers", "speed-batch", id, "https://example.com/"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"servers", "speed-batch", id + "," + id, "https://example.com/"},
+		{"servers", "speed-batch", id, "file:///etc/passwd"},
+		{"servers", "speed-batch", id, "https://example.com/", "--config", "/tmp/x"},
+	} {
+		if validateNativeOperation(args) == nil {
+			t.Fatal("unsafe speed batch accepted")
+		}
+	}
+}

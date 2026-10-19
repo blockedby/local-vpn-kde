@@ -91,7 +91,7 @@ func isBrowserJSONInvocation(args []string) bool {
 		return false
 	}
 	switch args[commandAt] {
-	case "check-batch", "list", "refresh", "test-all", "availability", "speed", "ping", "select", "current":
+	case "speed-batch", "check-batch", "list", "refresh", "test-all", "availability", "speed", "ping", "select", "current":
 	default:
 		return false
 	}
@@ -193,6 +193,7 @@ func (d browserDependencies) measure(ctx context.Context, c config.Config, r pic
 
 func addServerBrowserCommands(root *cobra.Command, o *cliOptions) {
 	addServerCheckBatchCommand(root, o)
+	addServerSpeedBatchCommand(root, o)
 	refresh := &cobra.Command{Use: "refresh", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		if !jsonOut {

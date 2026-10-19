@@ -2,6 +2,7 @@ package nettest
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -26,25 +27,39 @@ func Download(socksAddr, testURL string, limit int64, timeout time.Duration) (Re
 }
 
 func DownloadFor(socksAddr, testURL string, duration, timeout time.Duration) (Result, error) {
+	return DownloadForContext(context.Background(), socksAddr, testURL, duration, timeout)
+}
+
+// DownloadForContext measures body bytes over one budget including all connection setup.
+func DownloadForContext(ctx context.Context, socksAddr, testURL string, duration, timeout time.Duration) (Result, error) {
 	if duration <= 0 {
 		return Result{}, fmt.Errorf("download duration must be positive")
 	}
 	start := time.Now()
-	deadline := start.Add(duration)
+	budget := duration
+	if timeout > 0 && timeout < budget {
+		budget = timeout
+	}
+	deadline := start.Add(budget)
 	var total int64
 	for time.Now().Before(deadline) {
-		remaining := time.Until(deadline)
-		r, err := download(socksAddr, testURL, 0, remaining, timeout)
+		r, err := downloadContext(ctx, socksAddr, testURL, 0, deadline)
+		total += r.Bytes
+		if ctx.Err() != nil {
+			return Result{}, ctx.Err()
+		}
 		if err != nil {
 			if total > 0 {
 				break
 			}
 			return Result{}, err
 		}
-		total += r.Bytes
 		if r.Bytes == 0 {
 			break
 		}
+	}
+	if ctx.Err() != nil {
+		return Result{}, ctx.Err()
 	}
 	sec := time.Since(start).Seconds()
 	if total <= 0 {
@@ -54,6 +69,14 @@ func DownloadFor(socksAddr, testURL string, duration, timeout time.Duration) (Re
 }
 
 func download(socksAddr, testURL string, limit int64, duration, timeout time.Duration) (Result, error) {
+	deadline := time.Now().Add(timeout)
+	if duration > 0 && (timeout <= 0 || duration < timeout) {
+		deadline = time.Now().Add(duration)
+	}
+	return downloadContext(context.Background(), socksAddr, testURL, limit, deadline)
+}
+
+func downloadContext(ctx context.Context, socksAddr, testURL string, limit int64, deadline time.Time) (Result, error) {
 	u, err := url.Parse(testURL)
 	if err != nil {
 		return Result{}, err
@@ -80,13 +103,15 @@ func download(socksAddr, testURL string, limit int64, duration, timeout time.Dur
 	if path == "" {
 		path = "/"
 	}
-	d := net.Dialer{Timeout: timeout}
-	raw, err := d.Dial("tcp", socksAddr)
+	d := net.Dialer{Deadline: deadline}
+	raw, err := d.DialContext(ctx, "tcp", socksAddr)
 	if err != nil {
 		return Result{}, err
 	}
 	defer raw.Close()
-	if err := raw.SetDeadline(time.Now().Add(timeout)); err != nil {
+	stop := context.AfterFunc(ctx, func() { raw.Close() })
+	defer stop()
+	if err := raw.SetDeadline(deadline); err != nil {
 		return Result{}, err
 	}
 	if _, err := raw.Write([]byte{5, 1, 0}); err != nil {
@@ -112,7 +137,7 @@ func download(socksAddr, testURL string, limit int64, duration, timeout time.Dur
 	conn := raw
 	if u.Scheme == "https" {
 		tlsconn := tls.Client(raw, &tls.Config{ServerName: host})
-		if err := tlsconn.Handshake(); err != nil {
+		if err := tlsconn.HandshakeContext(ctx); err != nil {
 			return Result{}, err
 		}
 		conn = tlsconn
@@ -120,9 +145,6 @@ func download(socksAddr, testURL string, limit int64, duration, timeout time.Dur
 	t := time.Now()
 	if _, err := fmt.Fprintf(conn, "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: vibe-vpn/1\r\nConnection: close\r\n\r\n", path, u.Host); err != nil {
 		return Result{}, err
-	}
-	if duration > 0 {
-		_ = conn.SetDeadline(t.Add(duration))
 	}
 	buf := make([]byte, 32768)
 	var n int64
@@ -151,6 +173,12 @@ func download(socksAddr, testURL string, limit int64, duration, timeout time.Dur
 		if err != nil {
 			break
 		}
+	}
+	if ctx.Err() != nil {
+		return Result{}, ctx.Err()
+	}
+	if limit > 0 && n > limit {
+		n = limit
 	}
 	if !haveHeader {
 		return Result{}, fmt.Errorf("http response missing complete headers")

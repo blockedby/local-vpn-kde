@@ -95,7 +95,7 @@ func validateNativeOperation(args []string) error {
 		}
 		b, _ := json.Marshal(map[string]string{"ID": args[2], "URL": args[3]})
 		value = string(b)
-	case "check-batch":
+	case "check-batch", "speed-batch":
 		if len(args) != 4 {
 			return bad
 		}

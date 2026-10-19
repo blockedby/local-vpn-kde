@@ -6,7 +6,7 @@ import {
   type CliRenderer,
   type KeyEvent,
 } from "@opentui/core";
-import type { Action, Backend, Reply, Server, Status, AutostartOptions, AutostartServiceState } from "./bridge";
+import type { Action, Backend, CheckProgress, Reply, Server, Status, AutostartOptions, AutostartServiceState } from "./bridge";
 import { connection, failure, palette as p } from "./model";
 
 import { StyledText, t } from "@opentui/core";
@@ -131,7 +131,7 @@ export class App {
     return [...this.tasks.values()].find(task => task.measurement)?.action;
   }
   private compatible(action: Action, other: Action): boolean {
-    const probe = (a: Action) => ["servers/ping", "servers/speed", "servers/availability", "servers/check-batch"].includes(a);
+    const probe = (a: Action) => ["servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch"].includes(a);
     const read = (a: Action) => ["status", "subscription/read"].includes(a);
     return (read(action) && action !== other && (probe(other) || other === "servers/select")) ||
       (read(other) && action !== other && (probe(action) || action === "servers/select")) ||
@@ -148,6 +148,7 @@ export class App {
     failed: number;
     target?: string;
     running: Set<string>;
+    stages: Map<string, CheckProgress["stage"]>;
     pinged: Set<string>;
     completed: Set<string>;
     failures: Set<string>;
@@ -307,27 +308,31 @@ export class App {
       this.paint();
     };
     backend.onCheckProgress = (row, id) => {
-      if (id && this.tasks.get(id)?.action !== "servers/check-batch") return;
+      if (id && !["servers/check-batch", "servers/speed-batch"].includes(this.tasks.get(id)?.action ?? "")) return;
       const batch = this.batch;
-      if (!batch || batch.kind !== "ping" || this.cancelled || this.closing || !batch.ids?.includes(row.server_id) || batch.completed.has(row.server_id)) return;
+      if (!batch || this.cancelled || this.closing || !batch.ids?.includes(row.server_id) || batch.completed.has(row.server_id)) return;
       const server = this.servers.find(s => s.server_id === row.server_id);
       if (!server) return;
       batch.running.add(row.server_id);
+      batch.stages.set(row.server_id, row.stage);
       if (row.stage === "start") {
         server.ping_status = "untested";
         server.latency_ms = undefined;
         server.availability = "untested";
+        if (batch.kind === "speed") { server.status = "untested"; server.download_mbps = undefined; server.download_seconds = undefined; server.downloaded_bytes = undefined; }
         this.paint();
         return;
       }
       server.ping_status = row.ping_status;
       server.latency_ms = row.ping_status === "ready" ? row.latency_ms : undefined;
       batch.pinged.add(row.server_id);
+      if (row.stage === "speed" && batch.target === this.target) server.availability = row.availability;
       if (row.stage === "complete") {
         if (batch.target === this.target) server.availability = row.availability;
+        if (batch.kind === "speed") { server.status = row.status ?? "failed"; server.download_mbps = row.download_mbps; server.download_seconds = row.download_seconds; server.downloaded_bytes = row.downloaded_bytes; }
         batch.running.delete(row.server_id);
         batch.completed.add(row.server_id);
-        if (row.ping_status !== "ready" || row.availability !== "ready") batch.failures.add(row.server_id);
+        if (row.ping_status !== "ready" || row.availability !== "ready" || (batch.kind === "speed" && row.status !== "ready")) batch.failures.add(row.server_id);
         batch.done = batch.completed.size;
         batch.failed = batch.failures.size;
       }
@@ -645,7 +650,7 @@ export class App {
         },
         {
           key: "t",
-          label: "Скорость всех · 3 с/сервер",
+          label: "Скорость + сайт · замер до 3 с",
           run: () => void this.runBatch("speed"),
         },
         { key: "e", label: "Адрес сайта", run: () => this.open("target") },
@@ -845,12 +850,13 @@ export class App {
     return list.slice(start, start + this.rowCount());
   }
   private updateCatalog(reply: Reply, action: Action) {
-    if (action === "servers/check-batch" && reply.catalog?.servers) {
+    if ((action === "servers/check-batch" || action === "servers/speed-batch") && reply.catalog?.servers) {
       for (const row of reply.catalog.servers) {
         const at = this.servers.findIndex((s) => s.server_id === row.server_id);
         if (at >= 0)
           this.servers[at] = {
             ...this.servers[at],
+            ...(action === "servers/speed-batch" ? { status: row.status, download_mbps: row.download_mbps, download_seconds: row.download_seconds, downloaded_bytes: row.downloaded_bytes } : {}),
             ping_status: row.ping_status,
             latency_ms: row.latency_ms,
             availability:
@@ -1141,7 +1147,7 @@ export class App {
       total: this.servers.length,
       failed: 0,
       target: this.target,
-      running: new Set(),
+      running: new Set(), stages: new Map(),
       pinged: new Set(), completed: new Set(), failures: new Set(),
     };
     if (!this.catalogLoaded || this.catalogStale) {
@@ -1166,60 +1172,17 @@ export class App {
     this.batch.total = ids.length;
     const target = this.batch.target!;
     let stoppedReason: string | undefined;
-    const groupSize = kind === "speed" ? 1 : Math.max(1, ids.length);
-    for (let offset = 0; offset < ids.length; offset += groupSize) {
-      const group = ids.slice(offset, offset + groupSize);
-      const id = group[0];
-      if (this.cancelled || this.closing) break;
-      this.batch.id = id;
-      this.batch.ids = group;
-      let result: Reply | undefined;
-      if (kind === "speed") {
-        // A fresh TCP ping gates each download; cached reachability is not enough.
-        this.servers = this.servers.map((server) => server.server_id === id
-          ? { ...server, status: "untested", download_mbps: undefined,
-              download_seconds: undefined, downloaded_bytes: undefined }
-          : server);
-        result = await this.perform("servers/ping", id, true);
-        if (this.cancelled || this.closing) break;
-        if (result?.ok && result.catalog?.server?.ping_status === "ready") {
-          this.batch.pinged.add(id!);
-          result = await this.perform("servers/speed", id, true);
-        } else if (result?.ok) {
-          result = { ...result, ok: false, reason: "failed" };
-        }
-      } else {
-        result = await this.perform(
-          "servers/check-batch", JSON.stringify({ ids: group, url: target }), true,
-        );
-      }
-      if (this.cancelled) break;
-      if (kind === "speed") {
-        this.batch.done++;
-        if (!result?.ok) this.batch.failed++;
-      } else {
-        const measured = result?.catalog?.servers ?? [];
-        for (const row of measured) {
+    if (!this.cancelled && !this.closing && ids.length) {
+      this.batch.ids = ids;
+      const result = await this.perform(kind === "speed" ? "servers/speed-batch" : "servers/check-batch", JSON.stringify({ ids, url: target }), true);
+      if (!this.cancelled && !this.closing) {
+        for (const row of result?.catalog?.servers ?? []) {
           this.batch.completed.add(row.server_id);
-          if (row.ping_status !== "ready" || row.availability !== "ready") this.batch.failures.add(row.server_id);
+          if (row.ping_status !== "ready" || row.availability !== "ready" || (kind === "speed" && row.status !== "ready")) this.batch.failures.add(row.server_id);
         }
         this.batch.done = this.batch.completed.size;
         this.batch.failed = this.batch.failures.size;
-      }
-      this.paint();
-      if (
-        !result ||
-        (kind !== "speed" && !result.ok) ||
-        [
-          "unavailable",
-          "stale",
-          "recovery_required",
-          "backend-outdated",
-        ].includes(result.reason)
-      ) {
-        stoppedReason = result?.reason ?? "unavailable";
-        this.cancelled = true;
-        break;
+        if (!result?.ok) { stoppedReason = result?.reason ?? "unavailable"; this.cancelled = true; }
       }
     }
     const { done, total, failed } = this.batch;
@@ -1227,7 +1190,7 @@ export class App {
     this.notify(
       stoppedReason
         ? `${failure(stoppedReason, null, this.status?.runtime)} Проверено: ${done}/${total}.`
-        : `${this.cancelled || this.closing ? "Остановлено" : "Завершено"}: ${done}/${total} · ошибок ${failed}. ${kind !== "speed" && (this.cancelled || this.closing) ? "Показаны полученные результаты; проход не сохранён." : "Результаты сохранены."}`,
+        : `${this.cancelled || this.closing ? "Остановлено" : "Завершено"}: ${done}/${total} · ошибок ${failed}. ${(this.cancelled || this.closing) ? (kind === "speed" ? "Завершённые результаты сохранены." : "Показаны полученные результаты; проход не сохранён.") : "Результаты сохранены."}`,
       failed > 0 || !!stoppedReason,
     );
     if (this.closing && !this.tasks.size && !this.homeTesting && !this.batch) await this.finishClose();
@@ -1372,27 +1335,25 @@ export class App {
       this.summary.visible = false;
       this.summary.height = 0;
     }
-    const nameWidth = Math.max(10, width - 39);
+    const nameWidth = Math.max(10, width - 45);
     this.tableHeader.content = `   ${cell("Сервер", nameWidth)} ${cell("Ping мс", 8)} ${cell("Мбит/с", 8)} ${cell("Сайт", 7)} Статус`;
     const visible = this.visibleServers();
     this.rows.forEach((row, i) => {
       const s = visible[i];
       row.visible = table && i < this.rowCount() && !!s;
       if (!s) return;
-      const queued = this.batch?.kind === "ping" && this.batch.ids?.includes(s.server_id) && !this.batch.running.has(s.server_id) && !this.batch.completed.has(s.server_id);
-      const active = this.batch?.kind === "ping"
-        ? this.batch.running.has(s.server_id)
-        : this.batch?.id === s.server_id;
+      const queued = !!this.batch && this.batch.ids?.includes(s.server_id) && !this.batch.running.has(s.server_id) && !this.batch.completed.has(s.server_id);
+      const active = this.batch?.running.has(s.server_id) ?? false;
       const checking = (kind: Batch) =>
         active &&
         (this.batch?.kind === kind ||
-          (kind === "availability" && this.batch?.kind === "ping"));
+          (kind === "availability" && !!this.batch));
       const ping = queued ? "ждёт" : (checking("ping") || checking("speed")) && !this.batch?.pinged.has(s.server_id)
         ? frames[this.frame % 10]
         : s.ping_status === "failed"
           ? "ошибка"
           : (s.latency_ms?.toString() ?? "—");
-      const speed = checking("speed") && this.batch?.pinged.has(s.server_id)
+      const speed = checking("speed") && this.batch?.stages.get(s.server_id) === "speed"
         ? frames[this.frame % 10]
         : s.status === "failed"
           ? "ошибка"
@@ -1404,7 +1365,7 @@ export class App {
           : s.availability === "failed"
             ? "нет"
             : "—";
-      row.content = `${s.server_id === this.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)} ${cell(ping, 8)} ${cell(speed, 8)} ${cell(site, 7)} ${queued ? "в очереди" : active ? "проверка" : s.ping_status === "failed" || s.availability === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не пров."}`;
+      row.content = `${s.server_id === this.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)} ${cell(ping, 8)} ${cell(speed, 8)} ${cell(site, 7)} ${queued ? "в очереди" : active ? ({ start: "подготовка", ping: "сайт / ждёт", speed: "замер", complete: "готов" }[this.batch!.stages.get(s.server_id) ?? "start"]) : s.ping_status === "failed" || s.availability === "failed" || s.status === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не пров."}`;
       row.fg =
         s.server_id === this.serverID
           ? p.accent
@@ -1416,9 +1377,7 @@ export class App {
     const activeTask = [...this.tasks.values()].find(task => task.measurement) ??
       [...this.tasks.values()].find(task => task.action !== "status");
     if (this.batch) {
-      const detail = this.batch.kind === "speed"
-        ? `Тест скорости · ${this.batch.done}/${this.batch.total} · ${cell(this.servers.find((s) => s.server_id === this.batch?.id)?.display_name ?? "", 16).trim()}`
-        : `Ping → сайт · ${this.batch.done}/${this.batch.total} · ${Math.floor((Date.now() - this.started) / 1000)} с`;
+      const detail = `${this.batch.kind === "speed" ? "Ping → сайт + скорость" : "Ping → сайт"} · ${this.batch.done}/${this.batch.total} · ${Math.floor((Date.now() - this.started) / 1000)} с`;
       this.progress.content = `${frames[this.frame % 10]} ${detail}${this.cancelled ? " · отмена…" : " · [k] отменить"}`;
     }
     else if (activeTask) {

@@ -87,7 +87,7 @@ func parseOperationRequest(args []string) (operationRequest, error) {
 	}
 	request := operationRequest{token: args[0], operation: args[1]}
 	switch request.operation {
-	case "check-batch":
+	case "check-batch", "speed-batch":
 		if len(args) != 4 {
 			return operationRequest{}, errors.New("invalid batch")
 		}
@@ -501,7 +501,7 @@ func (supervisor *supervisor) run(args []string, progress ...io.Writer) (runResu
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	command.Stdout = captured
 	var stream *picker.CheckStream
-	if request.operation == "check-batch" && len(progress) > 0 {
+	if (request.operation == "check-batch" || request.operation == "speed-batch") && len(progress) > 0 {
 		command.Args = append(command.Args, "--progress")
 		encoder := json.NewEncoder(progress[0])
 		stream = picker.NewCheckStream(strings.Split(request.serverID, ","), captured, func(p picker.CheckProgress) error { return encoder.Encode(p) })
