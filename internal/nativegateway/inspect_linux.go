@@ -461,7 +461,7 @@ func (i *LinuxNetworkInspector) readInspectRules(ctx context.Context, program st
 		if err != nil {
 			return nil, false, err
 		}
-		from, err := optionalStringAlias(raw, "src", "from")
+		from, err := ruleSourcePrefix(raw)
 		if err != nil {
 			return nil, false, err
 		}
@@ -735,7 +735,7 @@ func observeOwnedRoute(routes []inspectRoute, available bool, want inspectRoute,
 
 func ruleEqual(a, b inspectRule) bool {
 	return a.Priority == b.Priority && a.Table == b.Table && a.Protocol == b.Protocol && a.From == b.From && a.IIF == b.IIF && a.Action == b.Action &&
-		onlyJSONFields(a.raw, "priority", "src", "from", "iif", "table", "action", "type", "protocol", "flags")
+		onlyJSONFields(a.raw, "priority", "src", "from", "srclen", "iif", "table", "action", "type", "protocol", "flags")
 }
 
 func onlyJSONFields(raw map[string]json.RawMessage, allowed ...string) bool {

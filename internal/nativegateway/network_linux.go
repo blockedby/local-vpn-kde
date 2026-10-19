@@ -16,8 +16,8 @@ import (
 // cleanup; the creation plan alone is not proof that a resource may be deleted.
 const (
 	RoutingTable            = 21194
-	EgressRulePriority      = 21194
-	UnreachableRulePriority = 21195
+	EgressRulePriority      = 5000
+	UnreachableRulePriority = 5001
 	RouteProtocol           = 89
 	NFTFamily               = "inet"
 	NFTTable                = "vpnkit_native"

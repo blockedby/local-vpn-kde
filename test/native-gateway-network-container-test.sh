@@ -78,5 +78,9 @@ ip link add "$unrelated" type dummy
 ip addr add 203.0.113.10/24 dev "$unrelated"
 ip link set "$unrelated" up
 
+ip rule add pref 5260 from 192.168.240.0/24 lookup main
+ip rule add pref 5261 to 192.168.240.0/24 lookup main
 timeout --signal=TERM --kill-after=2s 105s /lab
+ip rule show | grep -q "5260:.*192.168.240.0/24"
+ip rule show | grep -q "5261:.*192.168.240.0/24"
 '

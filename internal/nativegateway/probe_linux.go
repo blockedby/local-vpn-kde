@@ -294,7 +294,7 @@ func parseRules(data []byte) ([]RuleState, error) {
 		if err != nil || priority < 0 {
 			return nil, errors.New("invalid priority in IPv4 rule snapshot")
 		}
-		from, err := optionalStringAlias(row, "src", "from")
+		from, err := ruleSourcePrefix(row)
 		if err != nil {
 			return nil, fmt.Errorf("invalid source in IPv4 rule snapshot: %w", err)
 		}
@@ -339,6 +339,45 @@ func ruleMayAffectGuest(from, iif string, guest netip.Addr) bool {
 	}
 	prefix, err := netip.ParsePrefix(from)
 	return err != nil || (prefix.Addr().Is4() && prefix.Contains(guest))
+}
+
+// iproute2 may emit the prefix length separately from the source address.
+func ruleSourcePrefix(row map[string]json.RawMessage) (string, error) {
+	from, err := optionalStringAlias(row, "src", "from")
+	if err != nil {
+		return "", err
+	}
+	raw, hasLength := row["srclen"]
+	if from == "" || from == "all" {
+		if hasLength {
+			n, err := requiredInt(raw)
+			if err != nil || n != 0 {
+				return "", errors.New("invalid rule source length")
+			}
+		}
+		return "all", nil
+	}
+	var prefix netip.Prefix
+	if strings.Contains(from, "/") {
+		prefix, err = netip.ParsePrefix(from)
+	} else {
+		var address netip.Addr
+		address, err = netip.ParseAddr(from)
+		if err == nil {
+			prefix = netip.PrefixFrom(address, 32)
+		}
+	}
+	if err != nil || !prefix.IsValid() || !prefix.Addr().Is4() {
+		return "", errors.New("invalid IPv4 rule source")
+	}
+	if hasLength {
+		n, err := requiredInt(raw)
+		if err != nil || n < 0 || n > 32 || (strings.Contains(from, "/") && n != prefix.Bits()) {
+			return "", errors.New("invalid rule source length")
+		}
+		prefix = netip.PrefixFrom(prefix.Addr(), n)
+	}
+	return prefix.Masked().String(), nil
 }
 
 func ruleMayInvertSelection(raw map[string]json.RawMessage) bool {

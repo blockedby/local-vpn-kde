@@ -66,8 +66,8 @@ func exactInspectFixture(t *testing.T) (map[string][]byte, *inspectFS) {
 		]`),
 		commandKey("ip", "-json", "-4", "rule", "show"): []byte(`[
 			{"priority":0,"src":"all","table":"local"},
-			{"priority":21194,"src":"172.30.89.2/32","iif":"vpnkit-host","table":21194,"protocol":89,"action":"lookup"},
-			{"priority":21195,"src":"172.30.89.2/32","protocol":89,"action":"unreachable"}
+			{"priority":5000,"src":"172.30.89.2/32","iif":"vpnkit-host","table":21194,"protocol":89,"action":"lookup"},
+			{"priority":5001,"src":"172.30.89.2/32","protocol":89,"action":"unreachable"}
 		]`),
 		commandKey("ip", "-n", Namespace, "-json", "-details", "link", "show"): []byte(`[
 			{"ifname":"lo","ifindex":1,"flags":["LOOPBACK","UP"]},
@@ -242,7 +242,7 @@ func TestLinuxNetworkInspectorRejectsWrongRoutesRulesAndExtraNFT(t *testing.T) {
 			o[commandKey("ip", "-json", "-4", "route", "show", "table", "21194")] = []byte(`[{"dst":"default","gateway":"192.0.2.1","dev":"enp5s0","table":21194,"protocol":88}]`)
 		}},
 		{name: "rule priority selector", kind: EffectEgressRule, mutate: func(o map[string][]byte) {
-			o[commandKey("ip", "-json", "-4", "rule", "show")] = []byte(`[{"priority":21193,"src":"172.30.89.2/32","iif":"vpnkit-host","table":21194,"protocol":89}]`)
+			o[commandKey("ip", "-json", "-4", "rule", "show")] = []byte(`[{"priority":4999,"src":"172.30.89.2/32","iif":"vpnkit-host","table":21194,"protocol":89}]`)
 		}},
 		{name: "nft extra rule", kind: EffectNFTTable, mutate: func(o map[string][]byte) {
 			var doc map[string]any

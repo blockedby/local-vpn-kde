@@ -37,8 +37,8 @@ func TestPlanNetworkInstallsBarrierBeforeEgressAndActivation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	barrier := commandIndex(commands, "ip", "rule", "add", "from", GuestAddress+"/32", "priority", "21195", "protocol", "89", "unreachable")
-	lookup := commandIndex(commands, "ip", "rule", "add", "from", GuestAddress+"/32", "iif", HostInterface, "priority", "21194", "protocol", "89", "lookup", "21194")
+	barrier := commandIndex(commands, "ip", "rule", "add", "from", GuestAddress+"/32", "priority", "5001", "protocol", "89", "unreachable")
+	lookup := commandIndex(commands, "ip", "rule", "add", "from", GuestAddress+"/32", "iif", HostInterface, "priority", "5000", "protocol", "89", "lookup", "21194")
 	defaultRoute := commandIndex(commands, "ip", "route", "add", "default", "via", "192.0.2.1", "dev", "enp5s0", "table", "21194", "protocol", "89")
 	guestUp := commandIndex(commands, "ip", "-n", Namespace, "link", "set", GuestInterface, "up")
 	if barrier < 0 || lookup < 0 || defaultRoute < 0 || guestUp < 0 {
@@ -62,7 +62,7 @@ func TestPlanNetworkUsesDedicatedUplinkTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	connected := commandIndex(commands, "ip", "route", "add", "192.0.2.0/24", "dev", "enp5s0", "src", "192.0.2.10", "table", "21194", "protocol", "89", "scope", "link")
-	lookup := commandIndex(commands, "ip", "rule", "add", "from", GuestAddress+"/32", "iif", HostInterface, "priority", "21194", "protocol", "89", "lookup", "21194")
+	lookup := commandIndex(commands, "ip", "rule", "add", "from", GuestAddress+"/32", "iif", HostInterface, "priority", "5000", "protocol", "89", "lookup", "21194")
 	if connected < 0 || lookup < 0 {
 		t.Fatal("guest egress is not pinned to the dedicated physical-uplink table")
 	}
