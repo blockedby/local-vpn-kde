@@ -33,8 +33,8 @@ type NetworkInspector interface {
 }
 
 const (
-	NetworkJournalVersion = 2
-	MaxNetworkEffects     = 19
+	NetworkJournalVersion = 3
+	MaxNetworkEffects     = 21
 )
 
 // EffectKind is a closed list. Journal data never contains executable commands.
@@ -59,6 +59,8 @@ const (
 	EffectHostUp
 	EffectLoopbackUp
 	EffectGuestUp
+	EffectForwardEgress
+	EffectForwardReturn
 )
 
 type EffectPhase uint8
@@ -520,7 +522,7 @@ func validateJournal(journal NetworkJournal) ([]Command, []EffectKind, error) {
 }
 
 func effectKinds(commands []Command, forwardingInitiallyEnabled bool) ([]EffectKind, error) {
-	kinds := []EffectKind{EffectNamespace, EffectVeth, EffectGuestMoved, EffectUnreachableRule, EffectHostAddress, EffectGuestAddress, EffectConnectedRoute, EffectDefaultUplinkRoute, EffectEgressRule, EffectNFTTable, EffectRouteLocalnet}
+	kinds := []EffectKind{EffectNamespace, EffectVeth, EffectGuestMoved, EffectUnreachableRule, EffectHostAddress, EffectGuestAddress, EffectConnectedRoute, EffectDefaultUplinkRoute, EffectEgressRule, EffectNFTTable, EffectForwardEgress, EffectForwardReturn, EffectRouteLocalnet}
 	if !forwardingInitiallyEnabled {
 		kinds = append(kinds, EffectIPv4Forwarding)
 	}
@@ -598,6 +600,10 @@ func reverseCommand(kind EffectKind, uplink Uplink) (Command, bool) {
 		return Command{Program: "ip", Args: []string{"link", "set", HostInterface, "down"}}, true
 	case EffectGuestDefaultRoute:
 		return Command{Program: "ip", Args: []string{"-n", Namespace, "route", "del", "default", "via", HostAddress, "dev", GuestInterface}}, true
+	case EffectForwardEgress:
+		return forwardCompatibilityCommand(uplink.Interface, false, "-D"), true
+	case EffectForwardReturn:
+		return forwardCompatibilityCommand(uplink.Interface, true, "-D"), true
 	case EffectNFTTable:
 		return Command{Program: "nft", Args: []string{"delete", "table", NFTFamily, NFTTable}}, true
 	case EffectEgressRule:

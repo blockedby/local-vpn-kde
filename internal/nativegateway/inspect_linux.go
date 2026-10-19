@@ -117,6 +117,8 @@ type inspectRule struct {
 }
 
 type inspectFacts struct {
+	forwardOK      bool
+	forward        string
 	namespaceState ObservationState
 	namespace      NamespaceIdentity
 	rootLinksOK    bool
@@ -201,6 +203,8 @@ func (i *LinuxNetworkInspector) readFacts(ctx context.Context) (inspectFacts, er
 		facts.namespaceState = ObservationUnverifiable
 	}
 
+	forward, forwardOK := i.run(ctx, "iptables", "-w", "5", "-S", "FORWARD")
+	facts.forward, facts.forwardOK = string(forward), forwardOK
 	var parseErr error
 	facts.rootLinks, facts.rootLinksOK, parseErr = i.readLinks(ctx, "ip", "-json", "-details", "link", "show")
 	if parseErr != nil {
@@ -601,6 +605,11 @@ func observeEffect(kind EffectKind, uplink Uplink, f inspectFacts) EffectObserva
 	case EffectEgressRule:
 		want := inspectRule{Priority: EgressRulePriority, From: GuestAddress + "/32", IIF: HostInterface, Table: RoutingTable, Action: "lookup", Protocol: RouteProtocol}
 		return observeOwnedRule(f.rules, f.rulesOK, want)
+	case EffectForwardEgress, EffectForwardReturn:
+		if !f.forwardOK {
+			return observation(ObservationUnverifiable)
+		}
+		return observation(observeForwardCompatibility(f.forward, uplink.Interface, kind == EffectForwardReturn))
 	case EffectNFTTable:
 		if !f.nftOK {
 			return observation(ObservationUnverifiable)

@@ -55,7 +55,7 @@ func nativeCommand(ctx context.Context, command nativegateway.Command) ([]byte, 
 
 func nativeSystemExecutable(program string) (string, error) {
 	switch program {
-	case "ip", "nft", "sysctl", "nmcli":
+	case "ip", "nft", "iptables", "sysctl", "nmcli":
 	default:
 		return "", errors.New("native command is not allowlisted")
 	}

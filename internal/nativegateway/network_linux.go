@@ -122,6 +122,8 @@ func PlanNetwork(uplink Uplink, snapshot Snapshot) ([]Command, error) {
 		{Program: "ip", Args: []string{"route", "add", "default", "via", gateway.String(), "dev", uplink.Interface, "table", table, "protocol", protocol}},
 		{Program: "ip", Args: []string{"rule", "add", "from", guestSource, "iif", HostInterface, "priority", egressPriority, "protocol", protocol, "lookup", table}},
 		{Program: "nft", Args: []string{"-f", "-"}, Stdin: renderNFT(uplink.Interface)},
+		forwardCompatibilityCommand(uplink.Interface, false, "-I"),
+		forwardCompatibilityCommand(uplink.Interface, true, "-I"),
 		{Program: "sysctl", Args: []string{"-w", "net.ipv4.conf." + HostInterface + ".route_localnet=1"}},
 	}
 	if !snapshot.IPv4Forwarding {

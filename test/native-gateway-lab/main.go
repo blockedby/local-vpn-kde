@@ -229,7 +229,7 @@ func (readOnlyRunner) Run(ctx context.Context, program string, args ...string) (
 		return []byte(uplinkName + ":ethernet:connected\n"), nil
 	}
 	switch program {
-	case "ip", "nft", "sysctl":
+	case "ip", "nft", "iptables", "sysctl":
 	default:
 		return nil, fmt.Errorf("read-only runner rejected program %q", program)
 	}
@@ -242,7 +242,7 @@ type mutationRunner struct {
 
 func (r *mutationRunner) Run(ctx context.Context, command nativegateway.Command) error {
 	switch command.Program {
-	case "ip", "nft", "sysctl":
+	case "ip", "nft", "iptables", "sysctl":
 	default:
 		return fmt.Errorf("mutation runner rejected program %q", command.Program)
 	}

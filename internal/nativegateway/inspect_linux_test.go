@@ -50,6 +50,7 @@ func exactInspectFixture(t *testing.T) (map[string][]byte, *inspectFS) {
 		t.Fatal(err)
 	}
 	outputs := map[string][]byte{
+		commandKey("iptables", "-w", "5", "-S", "FORWARD"): []byte("-P FORWARD DROP\n" + strings.Join(append([]string{"-A", "FORWARD"}, forwardCompatibilityRule("enp5s0", false)...), " ") + "\n" + strings.Join(append([]string{"-A", "FORWARD"}, forwardCompatibilityRule("enp5s0", true)...), " ") + "\n"),
 		commandKey("ip", "-json", "-details", "link", "show"): []byte(`[
 			{"ifname":"lo","ifindex":1,"flags":["LOOPBACK","UP"]},
 			{"ifname":"enp5s0","ifindex":2,"flags":["UP"]},
@@ -124,6 +125,9 @@ func TestLinuxNetworkInspectorVerifiesEveryExactEffectReadOnly(t *testing.T) {
 		t.Fatalf("immutable identity not retained: %#v", identity)
 	}
 	for _, call := range runner.calls {
+		if call == commandKey("iptables", "-w", "5", "-S", "FORWARD") {
+			continue
+		}
 		lower := strings.ToLower(call)
 		for _, forbidden := range []string{"\x00add\x00", "\x00del\x00", "\x00delete\x00", "\x00set\x00", "\x00-w\x00", "systemctl", "sh\x00", "bash\x00"} {
 			if strings.Contains(lower, forbidden) {
@@ -136,6 +140,7 @@ func TestLinuxNetworkInspectorVerifiesEveryExactEffectReadOnly(t *testing.T) {
 func TestLinuxNetworkInspectorReportsCascadedDeletionAndPartialInstall(t *testing.T) {
 	outputs, filesystem := exactInspectFixture(t)
 	filesystem.statErr = fs.ErrNotExist
+	outputs[commandKey("iptables", "-w", "5", "-S", "FORWARD")] = []byte("-P FORWARD DROP\n")
 	filesystem.files = map[string][]byte{"/proc/sys/net/ipv4/ip_forward": []byte("0\n")}
 	outputs[commandKey("ip", "-json", "-details", "link", "show")] = []byte(`[{"ifname":"lo","ifindex":1,"flags":["UP"]},{"ifname":"enp5s0","ifindex":2,"flags":["UP"]}]`)
 	outputs[commandKey("ip", "-json", "address", "show")] = []byte(`[{"ifname":"lo","addr_info":[]},{"ifname":"enp5s0","addr_info":[{"family":"inet","local":"192.0.2.10","prefixlen":24}]}]`)

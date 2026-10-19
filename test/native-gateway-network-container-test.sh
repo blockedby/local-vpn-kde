@@ -46,7 +46,7 @@ timeout --signal=TERM --kill-after=5s 120s \
     --mount "type=bind,src=$tmp/native-gateway-lab,dst=/lab,readonly" \
     --entrypoint bash "$image" -lc '
 set -Eeuo pipefail
-for tool in ip nft sysctl timeout; do
+for tool in ip nft iptables sysctl timeout; do
   command -v "$tool" >/dev/null 2>&1 || {
     echo "blocker: required image tool is missing: $tool" >&2
     exit 2
@@ -80,7 +80,12 @@ ip link set "$unrelated" up
 
 ip rule add pref 5260 from 192.168.240.0/24 lookup main
 ip rule add pref 5261 to 192.168.240.0/24 lookup main
+iptables -P FORWARD DROP
+iptables -A FORWARD -i lab-unrelated -m comment --comment lab-preserve -j DROP
+iptables -S FORWARD > /tmp/forward-before
 timeout --signal=TERM --kill-after=2s 105s /lab
+iptables -S FORWARD > /tmp/forward-after
+cmp /tmp/forward-before /tmp/forward-after
 ip rule show | grep -q "5260:.*192.168.240.0/24"
 ip rule show | grep -q "5261:.*192.168.240.0/24"
 '

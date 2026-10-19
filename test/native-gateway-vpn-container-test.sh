@@ -74,6 +74,8 @@ export VPNKIT_NATIVE_GATEWAY_VPN_LAB=1
   echo "blocker: native VPN lab opt-in is absent" >&2
   exit 2
 }
+# Model the host policy left by a stopped Docker VPN.
+iptables -P FORWARD DROP
 exec timeout --signal=TERM --kill-after=3s 105s /fixture/native-vpn-lab
 '
 }
