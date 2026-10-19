@@ -54,7 +54,7 @@ func newNativeServiceTestFixture(t *testing.T, states map[string][]byte) (*Nativ
 				}
 				return append([]byte(nil), data...), nil
 			case "start", "stop":
-				if len(args) != 3 || args[1] != "--no-ask-password" {
+				if len(args) != 2 || (args[1] != nativegateway.GatewayUnit && args[1] != nativegateway.NetworkUnit) {
 					return nil, errors.New("unexpected lifecycle arguments")
 				}
 				return nil, nil
@@ -111,7 +111,7 @@ func TestNativeServiceStartWaitsForNotifyReadiness(t *testing.T) {
 	}
 
 	starts := nativeServiceLifecycleTestCalls(*calls, "start")
-	if len(starts) != 1 || len(starts[0].args) != 3 || starts[0].args[2] != nativegateway.GatewayUnit {
+	if len(starts) != 1 || len(starts[0].args) != 2 || starts[0].args[1] != nativegateway.GatewayUnit {
 		t.Fatalf("start calls = %#v", starts)
 	}
 	for _, call := range *calls {
@@ -263,7 +263,7 @@ func TestNativeServiceStopOrder(t *testing.T) {
 	if len(stops) != 2 {
 		t.Fatalf("stop calls = %#v", stops)
 	}
-	if stops[0].args[2] != nativegateway.GatewayUnit || stops[1].args[2] != nativegateway.NetworkUnit {
+	if stops[0].args[1] != nativegateway.GatewayUnit || stops[1].args[1] != nativegateway.NetworkUnit {
 		t.Fatalf("stop order = %#v", stops)
 	}
 	for _, call := range *calls {

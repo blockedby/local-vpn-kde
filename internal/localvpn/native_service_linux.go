@@ -491,7 +491,8 @@ func (s NativeService) mutationPreflight(ctx context.Context) error {
 
 // Start asks systemd to start only the fixed gateway unit. Its Requires= edge
 // starts the fixed network unit, and Type=notify makes this call wait until the
-// supervisor has sent READY=1. A final read-only status check is still made.
+// supervisor has sent READY=1. Interactive Polkit authorization is allowed
+// so newly enrolled users do not have to restart their desktop session. A final read-only status check is still made.
 func (s NativeService) Start(parent context.Context) error {
 	if parent == nil {
 		parent = context.Background()
@@ -501,7 +502,7 @@ func (s NativeService) Start(parent context.Context) error {
 	if err := s.mutationPreflight(ctx); err != nil {
 		return err
 	}
-	if _, err := s.call(ctx, "systemctl", "start", "--no-ask-password", nativegateway.GatewayUnit); err != nil {
+	if _, err := s.call(ctx, "systemctl", "start", nativegateway.GatewayUnit); err != nil {
 		return nativeServiceCommandError(ctx, err, "native gateway start failed")
 	}
 	status, err := s.statusWithContext(ctx)
@@ -526,10 +527,10 @@ func (s NativeService) Stop(parent context.Context) error {
 	if err := s.mutationPreflight(ctx); err != nil {
 		return err
 	}
-	if _, err := s.call(ctx, "systemctl", "stop", "--no-ask-password", nativegateway.GatewayUnit); err != nil {
+	if _, err := s.call(ctx, "systemctl", "stop", nativegateway.GatewayUnit); err != nil {
 		return nativeServiceCommandError(ctx, err, "native gateway stop failed")
 	}
-	if _, err := s.call(ctx, "systemctl", "stop", "--no-ask-password", nativegateway.NetworkUnit); err != nil {
+	if _, err := s.call(ctx, "systemctl", "stop", nativegateway.NetworkUnit); err != nil {
 		return nativeServiceCommandError(ctx, err, "native network stop failed")
 	}
 	return nil
