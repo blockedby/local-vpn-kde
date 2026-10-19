@@ -37,3 +37,13 @@ func TestProcessInput(t *testing.T) {
 		t.Fatalf("input not delivered: reason=%s output=%q", result.Reason, out.String())
 	}
 }
+
+func TestNativeIPTablesAppletName(t *testing.T) {
+	if _, err := nativeSystemExecutable("iptables"); err != nil {
+		t.Skip("trusted iptables unavailable")
+	}
+	out, err := nativeCommand(context.Background(), nativegateway.Command{Program: "iptables", Args: []string{"--version"}})
+	if err != nil || !strings.Contains(string(out), "iptables v") {
+		t.Fatalf("iptables applet failed: %q %v", out, err)
+	}
+}

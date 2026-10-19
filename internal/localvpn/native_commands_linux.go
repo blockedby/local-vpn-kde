@@ -60,7 +60,8 @@ func nativeSystemExecutable(program string) (string, error) {
 		return "", errors.New("native command is not allowlisted")
 	}
 	for _, dir := range []string{"/usr/sbin", "/usr/bin", "/sbin", "/bin"} {
-		path, err := filepath.EvalSymlinks(filepath.Join(dir, program))
+		entry := filepath.Join(dir, program)
+		path, err := filepath.EvalSymlinks(entry)
 		if err != nil {
 			continue
 		}
@@ -69,23 +70,27 @@ func nativeSystemExecutable(program string) (string, error) {
 			continue
 		}
 		safe := true
-		for current := path; ; current = filepath.Dir(current) {
-			info, err := os.Stat(current)
-			if err != nil {
-				safe = false
-				break
-			}
-			stat, ok := info.Sys().(*syscall.Stat_t)
-			if !ok || stat.Uid != 0 || info.Mode().Perm()&0022 != 0 {
-				safe = false
-				break
-			}
-			if current == "/" {
-				break
+		for _, candidate := range []string{path, entry} {
+			for current := candidate; ; current = filepath.Dir(current) {
+				info, err := os.Stat(current)
+				if err != nil {
+					safe = false
+					break
+				}
+				stat, ok := info.Sys().(*syscall.Stat_t)
+				if !ok || stat.Uid != 0 || info.Mode().Perm()&0022 != 0 {
+					safe = false
+					break
+				}
+				if current == "/" {
+					break
+				}
 			}
 		}
 		if safe {
-			return path, nil
+			// Preserve the trusted applet name: iptables may be a symlink to
+			// xtables-nft-multi, which dispatches by argv[0].
+			return entry, nil
 		}
 	}
 	return "", errors.New("required trusted native network utility unavailable")
