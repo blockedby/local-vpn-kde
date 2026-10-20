@@ -33,7 +33,7 @@ the switch test. Omitting it explicitly skips real alternate-server switching.
 | Installed subscription | `native-subscription-cache-installed-vm-test.py` | Trusted fixture HTTPS, successful replacement, HTTP 503/invalid/empty source retention, recovery; removes its CA/profile |
 | Installed lifecycle | `native-lifecycle-installed-vm-test.py` | Service-only/start/disconnect/stop, repeat actions, current server selection, ping/availability/batch/speed, cancellation, diagnostics, invalid requests |
 | Real server switch | `native-server-switch-installed-vm-test.py` | Add authorized alternate Hysteria2 profile, select and verify tunneled HTTPS, return to original profile/server, remove temporary profile |
-| Real guest reboot | `native-autostart-installed-vm-test.py` | Six reboots: strict/smart × disabled/service-only/connect; changed kernel boot ID, saved configuration, gateway proxy traffic, desktop route and HTTPS |
+| Real guest reboot | `native-autostart-installed-vm-test.py` | Strict/smart: disabled normal boot; active service-only/connect normal reboot and optional abrupt QEMU reset; held-namespace cleanup refusal followed by normal reboot; changed boot ID, saved configuration, gateway proxy traffic, desktop route and HTTPS |
 | Installed upgrade | `native-hot-upgrade-vm-test.py` | Continuous HTTPS during package replacement, unchanged processes/namespace/routes, cleared inhibitor |
 | TUI input/rendering | `scripts/vpnkit/tui/app.test.ts` | Key navigation, confirmations, profile/server flows, cancellation, failed mode transition/retry, diagnostic retry; deterministic backend |
 | Packaging / compiled PTY | `native-arch-package-build-test.sh` | Offline install/reinstall/removal/recovery, permissions, compiled TUI launch without Bun/node_modules |
@@ -50,6 +50,13 @@ The reboot runner activates a dedicated test session target that depends on
 `graphical-session.target` after a real guest boot. This verifies the actual
 installed autostart unit at the session boundary, but does not exercise a KDE
 display manager. It restores saved autostart, mode, connection and linger intent.
+Ordinary service-only/connect cases keep the native runtime active until reboot;
+the namespace-holder cases deliberately attempt and refuse cleanup first. Optional
+`--qmp-host <dedicated-hypervisor>` enables abrupt resets through the narrowly
+guarded `native-vm-hard-reset.py` helper; without it, abrupt-reset cases are not
+run. The full matrix has 12 cases, including two test-owned namespace-holder
+cases. See [reboot recovery validation](native-reboot-recovery-validation.md)
+for the original failure, previous coverage gap, and revision-specific results.
 KDE GUI/Polkit dialogs remain manual checks. The compiled PTY test proves package
 startup, while broad TUI flow tests use a deterministic backend; neither alone
 proves a real network transition.
