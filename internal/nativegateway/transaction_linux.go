@@ -6,6 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"regexp"
+	"strings"
 )
 
 // Runner executes one already-bounded command without invoking a shell. An
@@ -33,8 +36,9 @@ type NetworkInspector interface {
 }
 
 const (
-	NetworkJournalVersion = 4
-	MaxNetworkEffects     = 21
+	NetworkJournalVersion       = 5
+	legacyNetworkJournalVersion = 4
+	MaxNetworkEffects           = 21
 )
 
 // EffectKind is a closed list. Journal data never contains executable commands.
@@ -100,6 +104,7 @@ type JournalEffect struct {
 // determines whether the plan contains the global forwarding mutation.
 type NetworkJournal struct {
 	Version               uint16
+	BootID                string
 	Uplink                Uplink
 	InitialIPv4Forwarding bool
 	EffectCount           uint8
@@ -138,6 +143,7 @@ type Controller struct {
 	Runner    Runner
 	Journal   JournalStore
 	Inspector NetworkInspector
+	bootID    func(context.Context) (string, error)
 }
 
 // Status reports whether a complete journal still matches every owned effect.
@@ -154,6 +160,13 @@ func (c Controller) Status(ctx context.Context) (bool, error) {
 	_, kinds, err := validateJournal(journal)
 	if err != nil {
 		return false, err
+	}
+	boot, err := c.currentBootID(ctx)
+	if err != nil {
+		return false, err
+	}
+	if journal.Version == NetworkJournalVersion && journal.BootID != boot {
+		return false, nil
 	}
 	if int(journal.EffectCount) != len(kinds) {
 		return false, nil
@@ -187,6 +200,10 @@ func (c Controller) Start(ctx context.Context, uplink Uplink) error {
 	if err != nil {
 		return fmt.Errorf("load network journal: %w", err)
 	}
+	boot, err := c.currentBootID(ctx)
+	if err != nil {
+		return err
+	}
 	var commands []Command
 	var kinds []EffectKind
 	if exists {
@@ -194,11 +211,36 @@ func (c Controller) Start(ctx context.Context, uplink Uplink) error {
 		if err != nil {
 			return err
 		}
+		priorBoot := journal.Version == NetworkJournalVersion && journal.BootID != boot
+		if priorBoot || journal.Version == legacyNetworkJournalVersion {
+			absent, proofErr := c.exclusiveEffectsAbsent(ctx, journal, kinds)
+			if proofErr != nil {
+				return proofErr
+			}
+			if absent {
+				// Do not clear the old durable ledger. The fresh plan below
+				// replaces it atomically with current-boot intent before any
+				// command, so interruption at either side remains recoverable.
+				exists = false
+			} else if priorBoot {
+				return errors.New("prior-boot network journal has remaining or conflicting resources; refusing recovery")
+			}
+		}
+	}
+	if exists {
 		if journal.Uplink != uplink {
 			return errors.New("network journal belongs to a different uplink")
 		}
 		if err := c.reconcile(ctx, &journal, kinds); err != nil {
 			return err
+		}
+		if journal.Version == legacyNetworkJournalVersion {
+			// An intact legacy installation remains usable. Only stamp the
+			// current epoch after the existing immutable-identity proof.
+			journal.Version, journal.BootID = NetworkJournalVersion, boot
+			if err := c.Journal.Save(ctx, journal); err != nil {
+				return fmt.Errorf("migrate network journal boot identity: %w", err)
+			}
 		}
 		complete := int(journal.EffectCount) == len(kinds)
 		for i := 0; i < int(journal.EffectCount); i++ {
@@ -222,7 +264,9 @@ func (c Controller) Start(ctx context.Context, uplink Uplink) error {
 		if err != nil {
 			return err
 		}
-		journal = NetworkJournal{Version: NetworkJournalVersion, Uplink: uplink, InitialIPv4Forwarding: snapshot.IPv4Forwarding}
+		// Shared forwarding is read afresh. A previous boot's initial
+		// sysctl value is never restored or reused as current ownership.
+		journal = NetworkJournal{Version: NetworkJournalVersion, BootID: boot, Uplink: uplink, InitialIPv4Forwarding: snapshot.IPv4Forwarding}
 	}
 
 	start := int(journal.EffectCount)
@@ -288,10 +332,64 @@ func (c Controller) Stop(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	boot, err := c.currentBootID(ctx)
+	if err != nil {
+		return err
+	}
+	if journal.Version == NetworkJournalVersion && journal.BootID != boot {
+		absent, err := c.exclusiveEffectsAbsent(ctx, journal, kinds)
+		if err != nil {
+			return err
+		}
+		if !absent {
+			return errors.New("prior-boot network journal has remaining or conflicting resources; refusing cleanup")
+		}
+		return c.Journal.Clear(ctx)
+	}
 	if err := c.preflightStop(ctx, journal, kinds); err != nil {
 		return err
 	}
 	return c.stopJournal(ctx, &journal, kinds)
+}
+
+var bootIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+func (c Controller) currentBootID(ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	var boot string
+	var err error
+	if c.bootID != nil {
+		boot, err = c.bootID(ctx)
+	} else {
+		var data []byte
+		data, err = os.ReadFile("/proc/sys/kernel/random/boot_id")
+		boot = strings.TrimSpace(string(data))
+	}
+	if err != nil || !bootIDPattern.MatchString(boot) {
+		return "", errors.New("current kernel boot identity unavailable or invalid")
+	}
+	return boot, nil
+}
+
+// Retiring a ledger is permitted only when every exclusive effect in its
+// complete plan is absent, including effects beyond a crash-truncated prefix.
+// Global IPv4 forwarding is shared and cannot attest ownership across boots.
+func (c Controller) exclusiveEffectsAbsent(ctx context.Context, journal NetworkJournal, kinds []EffectKind) (bool, error) {
+	inspection, err := c.Inspector.Inspect(ctx, expectation(journal.Uplink, journal.InitialIPv4Forwarding, kinds))
+	if err != nil {
+		return false, fmt.Errorf("inspect obsolete network journal: %w", err)
+	}
+	for i, kind := range kinds {
+		if kind == EffectIPv4Forwarding {
+			continue
+		}
+		if inspection.Effects[i].State != ObservationAbsent {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (c Controller) valid() error {
@@ -477,8 +575,12 @@ func (c Controller) stopJournal(ctx context.Context, journal *NetworkJournal, ki
 }
 
 func validateJournal(journal NetworkJournal) ([]Command, []EffectKind, error) {
-	if journal.Version != NetworkJournalVersion {
+	if journal.Version != NetworkJournalVersion && journal.Version != legacyNetworkJournalVersion {
 		return nil, nil, errors.New("unsupported or tampered network journal version")
+	}
+	if (journal.Version == NetworkJournalVersion && !bootIDPattern.MatchString(journal.BootID)) ||
+		(journal.Version == legacyNetworkJournalVersion && journal.BootID != "") {
+		return nil, nil, errors.New("invalid network journal boot identity")
 	}
 	commands, err := PlanNetwork(journal.Uplink, Snapshot{IPv4Forwarding: journal.InitialIPv4Forwarding})
 	if err != nil {

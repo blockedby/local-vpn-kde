@@ -38,6 +38,7 @@ func secureTempDir(t *testing.T) string {
 func testNetworkJournal() NetworkJournal {
 	return NetworkJournal{
 		Version:               NetworkJournalVersion,
+		BootID:                "00000000-0000-4000-8000-000000000001",
 		Uplink:                Uplink{Interface: "eth0", AddressCIDR: "192.0.2.10/24", Gateway: "192.0.2.1"},
 		InitialIPv4Forwarding: true,
 		EffectCount:           1,
