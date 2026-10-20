@@ -218,6 +218,16 @@ func (i *LinuxNetworkInspector) readFacts(ctx context.Context) (inspectFacts, er
 	if parseErr != nil {
 		return facts, parseErr
 	}
+	if !facts.routesOK {
+		// A never-created routing table is not an empty successful scoped
+		// query: iproute2 reports "FIB table does not exist" with nonzero
+		// status after reboot. Prove presence/absence from a successful
+		// complete dump instead of trusting the error text or assuming empty.
+		facts.routes, facts.routesOK, parseErr = i.readInspectRoutes(ctx, "ip", "-json", "-4", "route", "show", "table", "all")
+		if parseErr != nil {
+			return facts, parseErr
+		}
+	}
 	facts.rules, facts.rulesOK, parseErr = i.readInspectRules(ctx, "ip", "-json", "-4", "rule", "show")
 	if parseErr != nil {
 		return facts, parseErr

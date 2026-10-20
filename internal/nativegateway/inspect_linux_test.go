@@ -296,3 +296,59 @@ func TestLinuxNetworkInspectorSnapshotDelegatesToCompleteProbe(t *testing.T) {
 		t.Fatalf("Snapshot made %d calls, want %d", len(runner.calls), len(probeCommands))
 	}
 }
+
+func TestInspectorProvesMissingFIBTableUsingCompleteRouteDump(t *testing.T) {
+	for _, scenario := range []string{"absent-with-other-vpn-routes", "uninspectable", "malformed", "conflicting-owned-route", "exact-owned-route"} {
+		t.Run(scenario, func(t *testing.T) {
+			outputs, filesystem := exactInspectFixture(t)
+			filesystem.statErr = fs.ErrNotExist
+			filesystem.files = map[string][]byte{"/proc/sys/net/ipv4/ip_forward": []byte("1\n")}
+			outputs[commandKey("iptables", "-w", "5", "-S", "FORWARD")] = []byte("-P FORWARD DROP\n")
+			outputs[commandKey("ip", "-json", "-details", "link", "show")] = []byte(`[{"ifname":"lo","ifindex":1,"flags":["UP"]},{"ifname":"enp5s0","ifindex":2,"flags":["UP"]}]`)
+			outputs[commandKey("ip", "-json", "address", "show")] = []byte(`[{"ifname":"lo","addr_info":[]},{"ifname":"enp5s0","addr_info":[{"family":"inet","local":"192.0.2.10","prefixlen":24}]}]`)
+			outputs[commandKey("ip", "-json", "-4", "rule", "show")] = []byte(`[]`)
+			outputs[commandKey("nft", "-j", "list", "tables")] = []byte(`{"nftables":[]}`)
+			// Missing fixture means the table-scoped command fails, matching the
+			// real fresh-kernel "FIB table does not exist" nonzero response.
+			delete(outputs, commandKey("ip", "-json", "-4", "route", "show", "table", "21194"))
+			allKey := commandKey("ip", "-json", "-4", "route", "show", "table", "all")
+			outputs[allKey] = []byte(`[{"dst":"default","dev":"tun0","table":"main","protocol":"boot"},{"dst":"192.0.2.10","dev":"enp5s0","table":"local","type":"local","protocol":"kernel"}]`)
+			switch scenario {
+			case "uninspectable":
+				delete(outputs, allKey)
+			case "malformed":
+				outputs[allKey] = []byte(`null`)
+			case "conflicting-owned-route":
+				outputs[allKey] = []byte(`[{"dst":"203.0.113.0/24","dev":"unowned0","table":21194,"protocol":89}]`)
+			case "exact-owned-route":
+				outputs[allKey] = []byte(`[{"dst":"192.0.2.0/24","dev":"enp5s0","table":21194,"protocol":89,"prefsrc":"192.0.2.10","scope":"link","flags":[]}]`)
+			}
+			expected := fullExpectation(t, false)
+			got, err := NewLinuxNetworkInspector(&fixtureRunner{outputs: outputs}, filesystem).Inspect(context.Background(), expected)
+			if scenario == "malformed" {
+				if err == nil {
+					t.Fatal("malformed complete route dump accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantConnected, wantDefault := ObservationAbsent, ObservationAbsent
+			switch scenario {
+			case "uninspectable":
+				wantConnected, wantDefault = ObservationUnverifiable, ObservationUnverifiable
+			case "conflicting-owned-route":
+				wantConnected, wantDefault = ObservationConflict, ObservationConflict
+			case "exact-owned-route":
+				wantConnected = ObservationExact
+			}
+			if got := observationFor(t, got, expected, EffectConnectedRoute).State; got != wantConnected {
+				t.Fatalf("connected route=%v want=%v", got, wantConnected)
+			}
+			if got := observationFor(t, got, expected, EffectDefaultUplinkRoute).State; got != wantDefault {
+				t.Fatalf("default route=%v want=%v", got, wantDefault)
+			}
+		})
+	}
+}
