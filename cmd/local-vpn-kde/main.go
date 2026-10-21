@@ -26,6 +26,79 @@ func env(name, fallback string) string {
 	return fallback
 }
 func run(args []string) error {
+	if len(args) > 0 && (args[0] == "native-operation" || args[0] == "native-operation-client") {
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer cancel()
+		if args[0] == "native-operation" {
+			if len(args) != 1 {
+				return fmt.Errorf("native operation takes protocol input")
+			}
+			return localvpn.RunNativeOperation(ctx, os.Stdin, os.Stdout)
+		}
+		return localvpn.NativeOperationsClient(ctx, args[1:], os.Stdout)
+	}
+
+	if len(args) > 0 && (args[0] == "native-configure" || args[0] == "native-configure-client" || args[0] == "native-profile-transaction") {
+		if len(args) != 1 {
+			return fmt.Errorf("native configuration helper accepts no arguments")
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer cancel()
+		if args[0] == "native-profile-transaction" {
+			return localvpn.RunNativeProfileTransaction(ctx, os.Stdin, os.Stdout)
+		}
+		if args[0] == "native-configure" {
+			return localvpn.ConfigureNativeInstallation(ctx, os.Stdin)
+		}
+		return localvpn.RunNativeConfigurationClient(ctx, os.Stdin)
+	}
+	if len(args) > 0 && args[0] == "native-package" {
+		if len(args) != 3 || args[1] != "--action" || (args[2] != "stage-runtime" && args[2] != "pre-upgrade" && args[2] != "pre-remove" && args[2] != "post-change" && args[2] != "recover") {
+			return fmt.Errorf("native-package accepts --action pre-remove, pre-upgrade, stage-runtime, post-change or recover")
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer cancel()
+		if args[2] == "stage-runtime" {
+			return localvpn.StageNativeRuntime(ctx)
+		}
+		if args[2] == "pre-upgrade" {
+			return localvpn.PrepareNativePackageUpgrade(ctx)
+		}
+		if args[2] == "recover" {
+			return localvpn.RecoverNativePackageChange(ctx)
+		}
+		if args[2] == "post-change" {
+			return localvpn.CompleteNativePackageChange(ctx)
+		}
+		return localvpn.PrepareNativePackageRemoval(ctx)
+	}
+	if len(args) > 0 && args[0] == "native-network" {
+		flags := flag.NewFlagSet("native-network", flag.ContinueOnError)
+		action := flags.String("action", "status", "check, start, stop, or status")
+		if err := flags.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
+			return err
+		}
+		if flags.NArg() != 0 {
+			return fmt.Errorf("native-network accepts only --action")
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer cancel()
+		return localvpn.RunNativeNetwork(ctx, *action, os.Stdout)
+	}
+	if len(args) > 0 && (args[0] == "native-serve" || args[0] == "native-namespace-init") {
+		if len(args) != 1 {
+			return fmt.Errorf("%s takes no arguments; configuration is fixed by the installed service", args[0])
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer cancel()
+		if args[0] == "native-namespace-init" {
+			return localvpn.InitializeNativeNamespace(ctx)
+		}
+		return localvpn.ServeNativeGateway(ctx, os.Stdout)
+	}
 	if len(args) > 0 && args[0] == "host-smoke" {
 		if len(args) != 1 {
 			return fmt.Errorf("host-smoke takes no arguments")
@@ -45,6 +118,9 @@ func run(args []string) error {
 			return err
 		}
 		root := filepath.Dir(filepath.Dir(binary))
+		if binary == localvpn.InstalledCLI {
+			root = localvpn.InstalledAssetRoot
+		}
 		for _, arg := range args[1:] {
 			if arg == "--status-json" || arg == "--test" || arg == "--help" || arg == "-h" {
 				if err := localvpn.ValidateUI(root); err != nil {
@@ -77,6 +153,7 @@ func run(args []string) error {
 	mode := flags.String("mode", "strict", "initial interface mode")
 	statusOnly := flags.Bool("status-json", false, "read-only interface status")
 	base := flags.String("secrets-dir", env("VPNKIT_LOCAL_SECRETS_DIR", "secrets/vpnkit-local"), "private local state directory")
+	runtimeMode := flags.String("runtime", "", "runtime: docker for checkout, native for installed package")
 	policy := flags.String("policy", env("VPNKIT_LOCAL_POLICY", "strict"), "strict or smart")
 	rules := flags.String("rulesets", env("VPNKIT_RULESET_SOURCE_MODE", "remote"), "remote or local-fixture")
 	outbound := flags.String("outbound", env("VPNKIT_SELECTED_OUTBOUND_MODE", "subscription"), "subscription or direct-fixture")
@@ -103,25 +180,79 @@ func run(args []string) error {
 	if flags.NArg() != 0 {
 		return fmt.Errorf("unexpected arguments")
 	}
+	executablePath, executableErr := os.Executable()
+	if executableErr != nil {
+		return executableErr
+	}
+	installed := executablePath == localvpn.InstalledCLI
+	if *runtimeMode == "" {
+		*runtimeMode = "docker"
+		if installed {
+			*runtimeMode = "native"
+		}
+	}
+	if *runtimeMode != "docker" && *runtimeMode != "native" {
+		return fmt.Errorf("runtime must be docker or native")
+	}
+	if *runtimeMode == "native" {
+		switch args[0] {
+		case "render", "assets", "prepare", "bridge", "autostart", "native-desktop", "networkmanager":
+		default:
+			return fmt.Errorf("native runtime is unsupported for this command")
+		}
+		if *adapter != "" {
+			return fmt.Errorf("native runtime does not accept lifecycle adapter overrides")
+		}
+	}
+	if *runtimeMode == "native" && os.Getenv("VPNKIT_LOCAL_PORT") == "" && os.Getenv("VPNKIT_LOCAL_OPENVPN_PORT") == "" {
+		explicitPort := false
+		flags.Visit(func(f *flag.Flag) {
+			if f.Name == "port" {
+				explicitPort = true
+			}
+		})
+		if !explicitPort {
+			*port = 31194
+		}
+	}
 	root, err := filepath.Abs(*repo)
 	if err != nil {
 		return err
 	}
-	selected, err := localvpn.SecretRoot(root, *base, os.Getenv("VPNKIT_LOCAL_TEST_FIXTURE") == "1")
-	if err != nil {
-		return err
+	var selected string
+	if installed {
+		layout, layoutErr := localvpn.ResolveApplicationLayout(executablePath, *repo, *base, *runtimeMode)
+		if layoutErr != nil {
+			return layoutErr
+		}
+		if err := localvpn.ValidateInstalledAssets(); err != nil {
+			return err
+		}
+		root, selected = layout.Assets, layout.State
+	} else {
+		selected, err = localvpn.SecretRoot(root, *base, os.Getenv("VPNKIT_LOCAL_TEST_FIXTURE") == "1")
+		if err != nil {
+			return err
+		}
 	}
 	switch args[0] {
+	case "native-desktop":
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer cancel()
+		return localvpn.RunNativeDesktop(ctx, selected, *action, *yes, os.Stdout)
 	case "autostart":
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 		defer cancel()
-		a := localvpn.Autostart{Repo: root, Base: selected}
+		a := localvpn.Autostart{Repo: root, Base: selected, Runtime: *runtimeMode, Installed: installed}
 		var opts localvpn.AutostartOptions
 		switch *action {
 		case "status":
 			opts, err = a.Status(ctx)
 		case "gateway", "connect", "off":
 			opts = localvpn.AutostartOptions{Gateway: *action != "off", Connect: *action == "connect"}
+			if *runtimeMode == "native" {
+				opts.Runtime = "native"
+			}
 			err = a.Configure(ctx, opts)
 		case "run":
 			return a.Run(ctx)
@@ -155,8 +286,8 @@ func run(args []string) error {
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 		defer cancel()
-		manager := localvpn.NetworkManager{Base: selected, Timeout: time.Duration(seconds) * time.Second}
-		if filepath.Base(root) == "local-vpn-kde" {
+		manager := localvpn.NetworkManager{Base: selected, Native: *runtimeMode == "native", Timeout: time.Duration(seconds) * time.Second}
+		if !installed && filepath.Base(root) == "local-vpn-kde" {
 			previous := filepath.Join(filepath.Dir(root), "vibe-practicum-vpn")
 			if path, err := localvpn.SecretRoot(previous, "secrets/vpnkit-local", false); err == nil {
 				manager.MigrationBase = path
@@ -164,15 +295,23 @@ func run(args []string) error {
 		}
 		return manager.Run(ctx, *action, *yes, os.Stdout)
 	case "bridge":
+		if installed && !*statusOnly && !*mock {
+			if err := localvpn.EnsureInstalledUserState(selected); err != nil {
+				return err
+			}
+		}
 		executable := *adapter
 		if executable == "" {
 			executable = filepath.Join(root, "scripts/vpnkit/vpnkit-local.sh")
+			if *runtimeMode == "native" {
+				executable = filepath.Join(root, "scripts/vpnkit/vpnkit-native.sh")
+			}
 		}
 		grace := 31 * time.Second
 		if seconds, e := strconv.ParseFloat(os.Getenv("VPNKIT_LOCAL_COMPENSATION_TIMEOUT_SECONDS"), 64); e == nil && seconds >= 1 && seconds <= 3600 {
 			grace = time.Duration((seconds + 1) * float64(time.Second))
 		}
-		bridge, e := localvpn.NewBridge(localvpn.BridgeOptions{Repo: root, Base: selected, Executable: executable, Mode: *mode, Mock: *mock, Grace: grace})
+		bridge, e := localvpn.NewBridge(localvpn.BridgeOptions{Repo: root, Base: selected, Executable: executable, Mode: *mode, Mock: *mock, Grace: grace, Runtime: *runtimeMode})
 		if e != nil {
 			return e
 		}
@@ -203,14 +342,18 @@ func run(args []string) error {
 		}
 		return bridge.Serve(ctx, input, os.Stdout)
 	case "render":
-		err = localvpn.Render(localvpn.RenderOptions{Template: filepath.Join(root, "config/sing-box/config.tun.json.template"), Base: selected, Policy: *policy, RuleSets: *rules, Outbound: *outbound, AllowMissingSubscription: *allow, Fixture: os.Getenv("VPNKIT_LOCAL_TEST_FIXTURE") == "1"})
+		err = localvpn.Render(localvpn.RenderOptions{Template: filepath.Join(root, "config/sing-box/config.tun.json.template"), Base: selected, Runtime: *runtimeMode, Policy: *policy, RuleSets: *rules, Outbound: *outbound, AllowMissingSubscription: *allow, Fixture: os.Getenv("VPNKIT_LOCAL_TEST_FIXTURE") == "1"})
 		if err == nil {
-			fmt.Printf("vpnkit_local_render=ok\npolicy=%s\nruleset_mode=%s\ndns_failover=compose_local_watchdog\nsecret_material=not_printed\n", *policy, *rules)
+			watchdog := "compose_local_watchdog"
+			if *runtimeMode == "native" {
+				watchdog = "disabled"
+			}
+			fmt.Printf("vpnkit_local_render=ok\npolicy=%s\nruleset_mode=%s\ndns_failover=%s\nsecret_material=not_printed\n", *policy, *rules, watchdog)
 		}
 	case "assets", "prepare":
-		err = localvpn.Assets(localvpn.AssetOptions{Base: selected, TemplateDir: filepath.Join(root, "config/openvpn"), Endpoint: *endpoint, Port: *port, DNS: *dns, CertificateDays: *days})
+		err = localvpn.Assets(localvpn.AssetOptions{Base: selected, Runtime: *runtimeMode, TemplateDir: filepath.Join(root, "config/openvpn"), Endpoint: *endpoint, Port: *port, DNS: *dns, CertificateDays: *days})
 		if err == nil && args[0] == "prepare" {
-			err = localvpn.Render(localvpn.RenderOptions{Template: filepath.Join(root, "config/sing-box/config.tun.json.template"), Base: selected, Policy: *policy, RuleSets: *rules, Outbound: *outbound, AllowMissingSubscription: true, Fixture: os.Getenv("VPNKIT_LOCAL_TEST_FIXTURE") == "1"})
+			err = localvpn.Render(localvpn.RenderOptions{Template: filepath.Join(root, "config/sing-box/config.tun.json.template"), Base: selected, Runtime: *runtimeMode, Policy: *policy, RuleSets: *rules, Outbound: *outbound, AllowMissingSubscription: true, Fixture: os.Getenv("VPNKIT_LOCAL_TEST_FIXTURE") == "1"})
 		}
 		if err == nil {
 			fmt.Println("vpnkit_local_assets=ok\npermissions=directories_700_files_600\nsecret_material=not_printed\nsubscription_input=not_read\nnetworkmanager_import=not_run")
@@ -222,6 +365,10 @@ func run(args []string) error {
 }
 func main() {
 	if err := run(os.Args[1:]); err != nil {
+		if errors.Is(err, localvpn.ErrOtherVPNActive) {
+			fmt.Fprintln(os.Stderr, "native-other-vpn-active")
+			os.Exit(20)
+		}
 		if len(os.Args) > 1 && os.Args[1] == "networkmanager" {
 			if errors.Is(err, localvpn.ErrForeignNMProfile) {
 				fmt.Fprintln(os.Stderr, "networkmanager_failure=foreign-profile")
@@ -230,9 +377,9 @@ func main() {
 				fmt.Fprintln(os.Stderr, "networkmanager_failure=previous-profile-active")
 			}
 			fmt.Fprintln(os.Stderr, "NetworkManager:", err)
-		} else if len(os.Args) > 1 && os.Args[1] == "host-smoke" {
-			// HostSmoke returns a fixed diagnostic vocabulary, never raw tool
-			// output. Preserve these reasons for the private TUI classifier.
+		} else if len(os.Args) > 1 && (os.Args[1] == "host-smoke" || os.Args[1] == "native-network" || os.Args[1] == "native-desktop") {
+			// Preserve network preflight and lifecycle reasons in the service
+			// journal; these commands never include subscription configuration.
 			fmt.Fprintln(os.Stderr, err)
 		} else {
 			fmt.Fprintln(os.Stderr, "local VPN operation failed closed")

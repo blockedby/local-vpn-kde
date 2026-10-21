@@ -25,6 +25,10 @@ func RunProcess(ctx context.Context, executable string, args, environment []stri
 }
 
 func runProcess(ctx context.Context, executable string, args, environment []string, stdout, stderr io.Writer, grace time.Duration, newSession bool) ProcessResult {
+	return runProcessInput(ctx, executable, args, environment, nil, stdout, stderr, grace, newSession)
+}
+
+func runProcessInput(ctx context.Context, executable string, args, environment []string, stdin io.Reader, stdout, stderr io.Writer, grace time.Duration, newSession bool) ProcessResult {
 	if ctx.Err() != nil {
 		return ProcessResult{Reason: contextReason(ctx)}
 	}
@@ -35,6 +39,7 @@ func runProcess(ctx context.Context, executable string, args, environment []stri
 	}
 	cmd := exec.Command(executable, args...)
 	cmd.Env = environment
+	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: newSession, Setpgid: !newSession}

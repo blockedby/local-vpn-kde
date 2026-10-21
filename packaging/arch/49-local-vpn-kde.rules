@@ -1,0 +1,22 @@
+// Enrollment is authorized once by the installer or initial configuration.
+// Query current account membership: existing desktop processes retain old groups.
+// Do not cache the result; removing membership must revoke access immediately.
+polkit.addRule(function(action, subject) {
+    var operation = action.id === "org.local-vpn-kde.operation" ||
+                    action.id === "org.local-vpn-kde.configure";
+    var lifecycle = action.id === "org.freedesktop.systemd1.manage-units";
+    if (!operation && !lifecycle) return;
+    if (lifecycle) {
+        var unit = action.lookup("unit");
+        var verb = action.lookup("verb");
+        if ((unit !== "local-vpn-kde-network.service" &&
+             unit !== "local-vpn-kde-gateway.service") ||
+            (verb !== "start" && verb !== "stop")) return;
+    }
+    try {
+        var groups = polkit.spawn(["/usr/bin/id", "-nG", "--", subject.user]).trim().split(/\s+/);
+        if (groups.indexOf("local-vpn-kde-users") !== -1) return polkit.Result.YES;
+    } catch (error) {
+        // Account lookup failure never grants permission.
+    }
+});

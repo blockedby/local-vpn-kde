@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/blockedby/local-vpn-kde/internal/sharelink"
 	"io"
 	"net/http"
 	"net/url"
@@ -86,7 +87,7 @@ func Fetch(rawURL string, timeout time.Duration) ([]string, error) {
 }
 func Parse(s string) ([]string, error) {
 	txt := strings.TrimSpace(s)
-	if !strings.Contains(txt, "vless://") {
+	if !strings.Contains(txt, "://") {
 		if decoded, ok := decodeBase64(txt); ok {
 			txt = decoded
 		}
@@ -95,7 +96,7 @@ func Parse(s string) ([]string, error) {
 	out := []string{}
 	for _, l := range strings.Split(txt, "\n") {
 		l = strings.TrimSpace(l)
-		if strings.HasPrefix(l, "vless://") {
+		if sharelink.Supported(l) {
 			out = append(out, l)
 		}
 	}

@@ -24,6 +24,7 @@ var diagnosticReasons = []struct{ message, reason string }{
 	{"DNS hostname smoke returned an invalid address", "dns-failed"},
 	{"A vpnkit-local profile already exists", "foreign-profile"},
 	{"Disconnect the previous local VPN before migrating", "previous-profile-active"},
+	{"native-other-vpn-active", "other-vpn-active"},
 	{"underlay installation failed", "underlay-install-failed"},
 	{"underlay verification failed", "underlay-verify-failed"},
 	{"NetworkManager profile import failed", "profile-import-failed"},
@@ -149,7 +150,7 @@ func (b *Bridge) lifecycle(ctx context.Context, action string, args []string, pr
 	if err = metadata("running", ProcessResult{}); err != nil {
 		return failure, ""
 	}
-	result := runProcess(ctx, b.options.Executable, args, append(os.Environ(), "VPNKIT_TUI_SUPERVISED=1", "VPNKIT_TUI_DIAGNOSTICS=1"), output, output, b.options.Grace, !b.options.keepTerminal)
+	result := runProcess(ctx, b.options.Executable, args, append(b.environment(), "VPNKIT_TUI_DIAGNOSTICS=1"), output, output, b.options.Grace, !b.options.keepTerminal)
 	if output.truncated {
 		if _, err = file.Write(output.tail); err != nil {
 			output.captureError = true

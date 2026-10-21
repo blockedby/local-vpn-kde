@@ -1,0 +1,2 @@
+Build staging directory. Run packaging/portable/build.py with a locally built
+Arch package. The installer deliberately refuses this source-only placeholder.

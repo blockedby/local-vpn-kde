@@ -23,6 +23,7 @@ import (
 	"github.com/blockedby/local-vpn-kde/internal/nettest"
 	"github.com/blockedby/local-vpn-kde/internal/picker"
 
+	"github.com/blockedby/local-vpn-kde/internal/sharelink"
 	"github.com/blockedby/local-vpn-kde/internal/singbox"
 	"github.com/blockedby/local-vpn-kde/internal/state"
 	"github.com/blockedby/local-vpn-kde/internal/subscription"
@@ -95,6 +96,23 @@ func newRootCommand() *cobra.Command {
 	addFilters(pick)
 	root.AddCommand(pick)
 
+	benchmark := &cobra.Command{Use: "test", Short: "Benchmark in isolation without applying a result", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		max, _ := cmd.Flags().GetInt("max")
+		lim, _ := cmd.Flags().GetInt("limit-kib")
+		dur, _ := cmd.Flags().GetInt("duration-sec")
+		verbose, _ := cmd.Flags().GetBool("verbose")
+		debug, _ := cmd.Flags().GetBool("debug")
+		return runTestContext(cmd.Context(), o, false, max, lim, dur, verbose, debug)
+	}}
+	benchmark.Flags().Int("max", 0, "max nodes")
+	benchmark.Flags().Int("limit-kib", 0, "test KiB")
+	benchmark.Flags().Int("duration-sec", -1, "download duration per node in seconds; 0 disables duration mode")
+	benchmark.Flags().Bool("verbose", false, "print every node while testing")
+	benchmark.Flags().Bool("debug", false, "show temporary benchmark backend logs")
+	addFilters(benchmark)
+	root.AddCommand(benchmark)
+	root.AddCommand(newNativeInitialSelectionCommand(o))
+
 	for name, handler := range map[string]func(*cobra.Command, *cliOptions) error{"list": runBrowserList, "current": runBrowserCurrent} {
 		handler := handler
 		cmd := &cobra.Command{Use: name, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
@@ -108,6 +126,7 @@ func newRootCommand() *cobra.Command {
 		root.AddCommand(cmd)
 	}
 	addServerBrowserCommands(root, o)
+	addProfileCommands(root, o)
 	syncSingBox := &cobra.Command{Use: "sync-sing-box-config", Short: "Refresh runtime sing-box config from source while preserving selected outbound", Hidden: true, RunE: func(cmd *cobra.Command, args []string) error {
 		source, _ := cmd.Flags().GetString("source")
 		runtime, _ := cmd.Flags().GetString("runtime")
@@ -207,7 +226,7 @@ func runTestContextVersioned(ctx context.Context, o *cliOptions, apply bool, max
 	candidates := []candidate{}
 	parseFailures := []picker.NodeResult{}
 	for i, l := range links {
-		n, err := vless.Parse(l)
+		n, err := sharelink.Parse(l)
 		if err != nil {
 			parseFailures = append(parseFailures, picker.NodeResult{Index: i + 1, OK: false, Error: err.Error(), Link: l})
 			continue
@@ -433,14 +452,14 @@ func singBoxOutboundForNode(n vless.Node) (map[string]any, error) {
 	if t, _ := n.Outbound["type"].(string); t != "" {
 		return cloneMap(n.Outbound), nil
 	}
-	return vless.SingBoxOutbound(n.Link)
+	return sharelink.Outbound(n.Link)
 }
 
 func singBoxOutboundForResult(r picker.NodeResult) (map[string]any, error) {
 	if t, _ := r.Outbound["type"].(string); t != "" {
 		return cloneMap(r.Outbound), nil
 	}
-	return vless.SingBoxOutbound(r.Link)
+	return sharelink.Outbound(r.Link)
 }
 
 func cloneMap(in map[string]any) map[string]any {
@@ -553,6 +572,14 @@ func loadSubscriptionLinksContext(ctx context.Context, c config.Config) ([]strin
 	links := []string{}
 	warnings := []error{}
 	for i, rawURL := range urls {
+		if sharelink.Supported(rawURL) {
+			if _, err := sharelink.Parse(rawURL); err == nil {
+				links = append(links, rawURL)
+			} else {
+				warnings = append(warnings, fmt.Errorf("server link %d invalid", i+1))
+			}
+			continue
+		}
 		var fetched []string
 		var fetchErr error
 		for attempt := 0; attempt < 3; attempt++ {

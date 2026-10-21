@@ -34,3 +34,16 @@ test("retry is explicit and excludes ownership or recovery-required failures", (
   for (const reason of ["recovery_required", "foreign-profile", "profile-invalid"])
     expect(recoveryFor("start", reason).actions).not.toContain("retry");
 });
+
+test("native failures retain typed recovery and batch speed retry scope", () => {
+  const outdated = recoveryFor("servers/speed-batch", "backend-outdated", "native");
+  expect(outdated.stage).toBe("management");
+  expect(outdated.message).toContain("native");
+  expect(outdated.message).not.toContain("Docker");
+  const profile = recoveryFor("profiles/open", "profiles-failed", "native");
+  expect(profile.message).toContain("Не удалось сохранить профиль");
+  expect(profile.actions).not.toContain("retry");
+  const speed = recoveryFor("servers/speed-batch", "failed", "native");
+  expect(speed.stage).toBe("server");
+  expect(speed.actions).toContain("retry");
+});

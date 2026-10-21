@@ -422,7 +422,7 @@ server_browser_batch_valid() {
 
 lifecycle_mutating_invocation() {
   case "${1:-}:${2:-}:$#" in
-    servers:check-batch:4) server_browser_batch_valid "${3:-}" ;;
+    servers:check-batch:4|servers:speed-batch:4) server_browser_batch_valid "${3:-}" ;;
     start::1|stop::1|disconnect::1|backend:start:2|toggle:mode:2|retest:select:2|servers:test-all:2|servers:refresh:2) return 0 ;;
     servers:availability:4|servers:speed:3|servers:ping:3|servers:select:3) server_browser_id_valid "${3:-}" ;;
     *) return 1 ;;
@@ -1434,7 +1434,7 @@ server_browser_helper_exec() {
   local cid=$1 command=$2 token=$3 operation=${4:-} server_id=${5:-} target_url=${6:-}
   local -a argv=("$SERVER_BROWSER_SUPERVISOR" "$command" "$token")
   case "$command:$operation:$server_id" in
-    prepare:check-batch:*|run:check-batch:*)
+    prepare:check-batch:*|run:check-batch:*|prepare:speed-batch:*|run:speed-batch:*)
       server_browser_batch_valid "$server_id" || return 2
       [[ "$target_url" == https://* && ${#target_url} -le 2048 ]] || return 2
       argv+=("$operation" "$server_id" "$target_url") ;;
@@ -1570,7 +1570,7 @@ server_browser_command() {
   local operation=${1:-} server_id=${2:-} target_url=${3:-} cid state rc token exec_pid=
 
   case "$operation:$#" in
-    check-batch:3) server_browser_batch_valid "$server_id" || return 2 ;;
+    check-batch:3|speed-batch:3) server_browser_batch_valid "$server_id" || return 2 ;;
     availability:3) server_browser_id_valid "$server_id" || return 2
       [[ "$target_url" == https://* && ${#target_url} -le 2048 ]] || return 2 ;;
 
@@ -1614,7 +1614,7 @@ server_browser_command() {
   else
     rc=$?
     # Older supervisors reject the new fixed verb before creating a token.
-    if [[ "$operation" == check-batch && "$rc" == 2 ]]; then
+    if [[ ( "$operation" == check-batch || "$operation" == speed-batch ) && "$rc" == 2 ]]; then
       printf '{"schema":"%s","status":"backend-outdated","generation":0}\n' "$SERVER_BROWSER_SCHEMA"
     else
       server_browser_unavailable
@@ -3713,7 +3713,7 @@ case "${1:-}" in
   diagnostics) [[ $# -eq 1 ]] || { usage >&2; exit 2; }; diagnostics ;;
   servers)
     case "${2:-}:$#" in
-      check-batch:4) server_browser_command "$2" "$3" "$4" ;;
+      check-batch:4|speed-batch:4) server_browser_command "$2" "$3" "$4" ;;
       availability:4) server_browser_command "$2" "$3" "$4" ;;
       refresh:2|list:2|test-all:2|current:2) server_browser_command "$2" ;;
       speed:3|ping:3|select:3)

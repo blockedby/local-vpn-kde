@@ -29,6 +29,7 @@ type nmCapability struct {
 type nmConnection struct{ Name, UUID, Type, Service, Data, Device string }
 type NetworkManager struct {
 	Base          string
+	Native        bool
 	MigrationBase string
 	Timeout       time.Duration
 	command       func(context.Context, ...string) (string, error)
@@ -36,6 +37,8 @@ type NetworkManager struct {
 }
 
 var ErrForeignNMProfile = errors.New("existing vpnkit-local profile belongs to another installation; ownership migration could not be verified")
+var ErrOtherVPNActive = errors.New("another VPN profile is active; disconnect it before connecting native VPN")
+
 var ErrActiveNMMigration = errors.New("disconnect the previous local VPN before migrating its profile")
 
 // migrateOwnership reads the previous installation without changing it. A name
@@ -48,7 +51,7 @@ func (n NetworkManager) migrateOwnership(ctx context.Context) error {
 	if err := validateSecretTree(n.MigrationBase, nil); err != nil {
 		return ErrForeignNMProfile
 	}
-	previous := NetworkManager{Base: n.MigrationBase, command: n.command}
+	previous := NetworkManager{Base: n.MigrationBase, Native: n.Native, command: n.command}
 	cap, err := previous.readCapability()
 	if err != nil || cap.UUID == "" {
 		return ErrForeignNMProfile
@@ -58,7 +61,7 @@ func (n NetworkManager) migrateOwnership(ctx context.Context) error {
 		return ErrForeignNMProfile
 	}
 	profile, err := n.connection(ctx, cap.UUID)
-	if err != nil || profile.Name != "vpnkit-local" {
+	if err != nil || profile.Name != n.connectionName() {
 		return ErrForeignNMProfile
 	}
 	if err := n.namedAllowlist(ctx, cap.UUID, ""); err != nil {
@@ -81,6 +84,13 @@ func (n NetworkManager) migrateOwnership(ctx context.Context) error {
 	}
 	cap.Legacy = false
 	return n.writeCapability(cap)
+}
+
+func (n NetworkManager) connectionName() string {
+	if n.Native {
+		return "vpnkit-native"
+	}
+	return "vpnkit-local"
 }
 
 func (n NetworkManager) profilePath() string {
@@ -110,7 +120,11 @@ func (n NetworkManager) stateDir(create bool) (int, error) {
 		return -1, err
 	}
 	defer unix.Close(root)
-	return childDirectory(root, "state", create, true)
+	name := "state"
+	if n.Native {
+		name = "state-native"
+	}
+	return childDirectory(root, name, create, true)
 }
 func (n NetworkManager) readCapability() (nmCapability, error) {
 	var result nmCapability
@@ -352,7 +366,7 @@ func (n NetworkManager) assess(ctx context.Context, checkSource bool) (nmCapabil
 	named := []nmConnection{}
 	present := false
 	for _, row := range rows {
-		if row.Name == "vpnkit-local" {
+		if row.Name == n.connectionName() {
 			named = append(named, row)
 		}
 		if row.UUID == cap.UUID {
@@ -379,7 +393,7 @@ func (n NetworkManager) assess(ctx context.Context, checkSource bool) (nmCapabil
 		return cap, "foreign-collision", nil
 	}
 	profile, err := n.connection(ctx, cap.UUID)
-	if err != nil || profile.Name != "vpnkit-local" {
+	if err != nil || profile.Name != n.connectionName() {
 		if cap.Legacy {
 			return cap, "invalid", errors.New("legacy ownership no longer local")
 		}
@@ -445,7 +459,7 @@ func (n NetworkManager) namedAllowlist(ctx context.Context, old, new string) err
 		return err
 	}
 	for _, row := range rows {
-		if row.Name == "vpnkit-local" && row.UUID != old && row.UUID != new {
+		if row.Name == n.connectionName() && row.UUID != old && row.UUID != new {
 			return errors.New("foreign same-name profile")
 		}
 	}
@@ -531,7 +545,7 @@ func (n NetworkManager) importProfile(ctx context.Context, cap nmCapability, own
 			defer cancel()
 			failed := false
 			if _, e := n.connection(cleanup, imported); e == nil {
-				_ = n.harden(cleanup, imported, "vpnkit-local-import-"+imported)
+				_ = n.harden(cleanup, imported, n.connectionName()+"-import-"+imported)
 				if e = n.delete(cleanup, imported); e != nil {
 					failed = true
 				}
@@ -554,7 +568,7 @@ func (n NetworkManager) importProfile(ctx context.Context, cap nmCapability, own
 	if importErr != nil {
 		return errors.New("NetworkManager import failed after creating a profile")
 	}
-	for _, name := range []string{"vpnkit-local-import-" + imported, "vpnkit-local"} {
+	for _, name := range []string{n.connectionName() + "-import-" + imported, n.connectionName()} {
 		if err = n.harden(ctx, imported, name); err != nil {
 			return err
 		}
@@ -677,7 +691,7 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 		if action == "plan" {
 			key = "existing_connection"
 		}
-		fmt.Fprintf(output, "command=%s\nmutation=none\nconnection=vpnkit-local\n%s=%s\nactive=%s\nownership=%s\ndevice=%s\nprofile=%s\nprivate_values=not_printed\n", action, key, configured, active, ownership, device, profile)
+		fmt.Fprintf(output, "command=%s\nmutation=none\nconnection=%s\n%s=%s\nactive=%s\nownership=%s\ndevice=%s\nprofile=%s\nprivate_values=not_printed\n", action, n.connectionName(), key, configured, active, ownership, device, profile)
 		return nil
 	}
 	if action == "import" {
@@ -688,11 +702,11 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 		if fingerprint, e := n.profileFingerprint(); e == nil && ownership == "owned" && cap.Fingerprint == fingerprint {
 			result = "already-configured"
 		}
-		fmt.Fprintf(output, "networkmanager_import=%s\nconnection=vpnkit-local\n", result)
+		fmt.Fprintf(output, "networkmanager_import=%s\nconnection=%s\n", result, n.connectionName())
 		return nil
 	}
 	if ownership == "missing" && (action == "disconnect" || action == "remove") {
-		fmt.Fprintf(output, "networkmanager_%s=not-configured\nconnection=vpnkit-local\n", action)
+		fmt.Fprintf(output, "networkmanager_%s=not-configured\nconnection=%s\n", action, n.connectionName())
 		return nil
 	}
 	if ownership != "owned" {
@@ -707,6 +721,29 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 		fmt.Fprintf(output, "networkmanager_mapping=pass\nowned_uuid_ip4_tun=pass\nopenvpn_handshake=pass\ndevice=%s\n", device)
 		return nil
 	case "connect":
+		if n.Native {
+			if err = n.checkOtherVPN(ctx, cap.UUID); err != nil {
+				return err
+			}
+			// Repeated native start must not ask NM to activate an already
+			// active UUID. Prove its owned TUN mapping and full routes first;
+			// a stale or partial connection must never become silent success.
+			active, e := n.active(ctx, cap.UUID)
+			if e != nil {
+				return e
+			}
+			if active {
+				device, e := n.activeDevice(ctx, cap.UUID)
+				if e != nil {
+					return e
+				}
+				if e = hostRoutes(ctx, device); e != nil {
+					return fmt.Errorf("already active native VPN routes are not ready: %w", e)
+				}
+				fmt.Fprintf(output, "networkmanager_connect=already-connected\nconnection=%s\ndevice=%s\n", n.connectionName(), device)
+				return nil
+			}
+		}
 		if _, err = n.call(ctx, "--wait", "0", "connection", "up", "uuid", cap.UUID); err != nil {
 			return err
 		}
@@ -717,7 +754,7 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 			if e == nil {
 				e = hostRoutes(timeout, device)
 				if e == nil {
-					fmt.Fprintf(output, "networkmanager_connect=ok\nconnection=vpnkit-local\ndevice=%s\n", device)
+					fmt.Fprintf(output, "networkmanager_connect=ok\nconnection=%s\ndevice=%s\n", n.connectionName(), device)
 					return nil
 				}
 			}
@@ -748,8 +785,22 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 				return err
 			}
 		}
-		fmt.Fprintf(output, "networkmanager_%s=ok\nconnection=vpnkit-local\n", action)
+		fmt.Fprintf(output, "networkmanager_%s=ok\nconnection=%s\n", action, n.connectionName())
 		return nil
 	}
 	return errors.New("unsupported NetworkManager action")
+}
+
+// Service startup never calls this: only explicit desktop VPN activation does.
+func (n NetworkManager) checkOtherVPN(ctx context.Context, owned string) error {
+	rows, err := n.inventory(ctx, true)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if row.UUID != owned && row.Type == "vpn" {
+			return ErrOtherVPNActive
+		}
+	}
+	return nil
 }

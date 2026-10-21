@@ -1,0 +1,21 @@
+_daemon_reload() {
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+  fi
+}
+
+post_install() {
+  _daemon_reload
+  /usr/libexec/local-vpn-kde/local-vpn-kde.bin native-package --action post-change
+}
+
+post_upgrade() {
+  _daemon_reload
+  /usr/libexec/local-vpn-kde/local-vpn-kde.bin native-package --action post-change
+}
+
+post_remove() {
+  _daemon_reload
+  # The AbortOnFail pre-transaction hook stops owned services before removal.
+  # Retain private /etc and /var/lib data, accounts, profiles and user settings.
+}

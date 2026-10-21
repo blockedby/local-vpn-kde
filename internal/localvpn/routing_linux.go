@@ -326,6 +326,12 @@ func (c ContainerConfig) Health(ctx context.Context) error {
 			return err
 		}
 	}
+	return c.healthNetwork(ctx)
+}
+
+// healthNetwork checks the namespace data plane. Native supervision supplies
+// its own exact child-liveness evidence instead of global process-name lookup.
+func (c ContainerConfig) healthNetwork(ctx context.Context) error {
 	for _, iface := range []string{"tun0", c.Interface} {
 		if _, err := runtimeCommand(ctx, "ip", "link", "show", iface); err != nil {
 			return err

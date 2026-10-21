@@ -26,7 +26,7 @@ func dispatch(args []string, supervisor *supervisor, stdout io.Writer) int {
 	}
 	switch args[0] {
 	case "prepare":
-		if len(args) < 3 || len(args) > 5 || (len(args) == 5 && args[2] != "availability" && args[2] != "check-batch") {
+		if len(args) < 3 || len(args) > 5 || (len(args) == 5 && args[2] != "availability" && args[2] != "check-batch" && args[2] != "speed-batch") {
 			return exitUsage
 		}
 		if err := supervisor.prepare(args[1:]); err != nil {
@@ -38,11 +38,11 @@ func dispatch(args []string, supervisor *supervisor, stdout io.Writer) int {
 		if speedProgress {
 			args = args[:4]
 		}
-		if len(args) < 3 || len(args) > 5 || (len(args) == 5 && args[2] != "availability" && args[2] != "check-batch") {
+		if len(args) < 3 || len(args) > 5 || (len(args) == 5 && args[2] != "availability" && args[2] != "check-batch" && args[2] != "speed-batch") {
 			return exitUsage
 		}
 		var progress []io.Writer
-		if args[2] == "check-batch" || speedProgress || (args[2] == "speed" && os.Getenv("VPNKIT_SPEED_PROGRESS") == "1") {
+		if args[2] == "check-batch" || args[2] == "speed-batch" || speedProgress || (args[2] == "speed" && os.Getenv("VPNKIT_SPEED_PROGRESS") == "1") {
 			progress = []io.Writer{stdout}
 		}
 		result, err := supervisor.run(args[1:], progress...)

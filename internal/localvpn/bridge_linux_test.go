@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/blockedby/local-vpn-kde/internal/picker"
 	"io"
 	"os"
 	"os/exec"
@@ -144,62 +145,67 @@ func TestServerCheckQueueRequestBounds(t *testing.T) {
 }
 
 func TestBridgeForwardsCheckProgressBeforeFinalAndDrainsCancellation(t *testing.T) {
-	for _, stop := range []bool{false, true} {
-		t.Run(fmt.Sprint(stop), func(t *testing.T) {
-			b := bridgeFixture(t, `{"container":"healthy"}`)
-			release := filepath.Join(t.TempDir(), "release")
-			t.Setenv("VPNKIT_CHECK_RELEASE", release)
-			id := "srv_" + strings.Repeat("a", 27)
-			script := fmt.Sprintf(`#!/bin/sh
+	for _, operation := range []string{"check-batch", "speed-batch"} {
+		t.Run(operation, func(t *testing.T) {
+			for _, stop := range []bool{false, true} {
+				t.Run(fmt.Sprint(stop), func(t *testing.T) {
+					b := bridgeFixture(t, `{"container":"healthy"}`)
+					release := filepath.Join(t.TempDir(), "release")
+					t.Setenv("VPNKIT_CHECK_RELEASE", release)
+					id := "srv_" + strings.Repeat("a", 27)
+					script := fmt.Sprintf(`#!/bin/sh
 printf '%%s\n' '{"event":"server-check","server_id":"%s","stage":"ping","ping_status":"ready","latency_ms":23,"availability":"untested","secret":"private-marker"}'
 while [ ! -e "$VPNKIT_CHECK_RELEASE" ]; do sleep 0.01; done
 printf '%%s\n' '{"schema":"vibe-vpn.server-browser.v2","status":"ok","servers":[{"server_id":"%s","display_name":"Fixture","ping_status":"ready","latency_ms":23,"availability":"ready"}]}'
 `, id, id)
-			if err := os.WriteFile(b.options.Executable, []byte(script), 0700); err != nil {
-				t.Fatal(err)
+					if err := os.WriteFile(b.options.Executable, []byte(script), 0700); err != nil {
+						t.Fatal(err)
+					}
+					value, _ := json.Marshal(map[string]any{"ids": []string{id}, "url": "https://example.com"})
+					request, _ := json.Marshal(map[string]any{"id": "batch-1", "action": "servers/" + operation, "value": string(value), "progress": true})
+					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+					defer cancel()
+					reader, writer := io.Pipe()
+					defer reader.Close()
+					done := make(chan error, 1)
+					go func() { defer writer.Close(); done <- b.Serve(ctx, bytes.NewReader(append(request, '\n')), writer) }()
+					decoder := json.NewDecoder(reader)
+					var event map[string]any
+					if err := decoder.Decode(&event); err != nil {
+						t.Fatal(err)
+					}
+					if event["id"] != "batch-1" || event["event"] != "server-check" || event["latency_ms"] != float64(23) || event["secret"] != nil {
+						t.Fatal("bad progress", event)
+					}
+					select {
+					case <-done:
+						t.Fatal("progress buffered until exit")
+					default:
+					}
+					if stop {
+						b.Cancel()
+					} else if err := os.WriteFile(release, []byte("go"), 0600); err != nil {
+						t.Fatal(err)
+					}
+					var final map[string]any
+					if err := decoder.Decode(&final); err != nil {
+						t.Fatal(err)
+					}
+					if final["id"] != "batch-1" {
+						t.Fatal("lost request ID", final)
+					}
+					if stop && final["reason"] != "cancelled" {
+						t.Fatal("lost cancellation", final)
+					}
+					if !stop && final["ok"] != true {
+						t.Fatal("lost final result", final)
+					}
+					if err := <-done; err != nil {
+						t.Fatal(err)
+					}
+				})
 			}
-			value, _ := json.Marshal(map[string]any{"ids": []string{id}, "url": "https://example.com"})
-			request, _ := json.Marshal(map[string]any{"id": "batch-1", "action": "servers/check-batch", "value": string(value), "progress": true})
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			reader, writer := io.Pipe()
-			defer reader.Close()
-			done := make(chan error, 1)
-			go func() { defer writer.Close(); done <- b.Serve(ctx, bytes.NewReader(append(request, '\n')), writer) }()
-			decoder := json.NewDecoder(reader)
-			var event map[string]any
-			if err := decoder.Decode(&event); err != nil {
-				t.Fatal(err)
-			}
-			if event["id"] != "batch-1" || event["event"] != "server-check" || event["latency_ms"] != float64(23) || event["secret"] != nil {
-				t.Fatal("bad progress", event)
-			}
-			select {
-			case <-done:
-				t.Fatal("progress buffered until exit")
-			default:
-			}
-			if stop {
-				b.Cancel()
-			} else if err := os.WriteFile(release, []byte("go"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			var final map[string]any
-			if err := decoder.Decode(&final); err != nil {
-				t.Fatal(err)
-			}
-			if final["id"] != "batch-1" {
-				t.Fatal("lost request ID", final)
-			}
-			if stop && final["reason"] != "cancelled" {
-				t.Fatal("lost cancellation", final)
-			}
-			if !stop && final["ok"] != true {
-				t.Fatal("lost final result", final)
-			}
-			if err := <-done; err != nil {
-				t.Fatal(err)
-			}
+
 		})
 	}
 }
@@ -559,5 +565,84 @@ func TestBridgeSpeedAcceptsLegacyFinalOnlyWithProgressRequested(t *testing.T) {
 	}
 	if final["id"] != "legacy-speed" || final["ok"] != true {
 		t.Fatal("old supervisor final rejected", final)
+	}
+}
+
+func TestBridgeSpeedBatchForwardsSafeMetricEvidence(t *testing.T) {
+	b := bridgeFixture(t, `{}`)
+	id := "srv_" + strings.Repeat("a", 27)
+	script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' '{"event":"server-check","server_id":"%s","stage":"speed","ping_status":"ready","latency_ms":23,"availability":"failed"}'
+printf '%%s\n' '{"event":"server-check","server_id":"%s","stage":"complete","ping_status":"ready","latency_ms":23,"availability":"failed","status":"ready","download_mbps":8,"download_seconds":3,"downloaded_bytes":3000000,"secret":"private-marker"}'
+printf '%%s\n' '{"schema":"vibe-vpn.server-browser.v2","status":"ok","servers":[{"server_id":"%s","display_name":"Fixture","ping_status":"ready","latency_ms":23,"availability":"failed","status":"ready","download_mbps":8,"download_seconds":3,"downloaded_bytes":3000000,"secret":"private-marker"}]}'
+`, id, id, id)
+	if err := os.WriteFile(b.options.Executable, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	value, _ := json.Marshal(map[string]any{"ids": []string{id}, "url": "https://example.com/"})
+	request, _ := json.Marshal(map[string]any{"action": "servers/speed-batch", "value": string(value), "progress": true})
+	var progress []picker.CheckProgress
+	reply, err := b.request(context.Background(), request, nil, func(p picker.CheckProgress) error { progress = append(progress, p); return nil })
+	if err != nil || reply["ok"] != true || len(progress) != 2 {
+		t.Fatal("missing speed reply", reply, progress, err)
+	}
+	p := progress[1]
+	if p.Stage != "complete" || p.Availability != "failed" || p.DownloadMbps != 8 || p.DownloadSeconds != 3 || p.DownloadedBytes != 3000000 {
+		t.Fatal("lost metrics", p)
+	}
+	raw, _ := json.Marshal(reply)
+	if bytes.Contains(raw, []byte("private-marker")) {
+		t.Fatal("private field escaped")
+	}
+	catalog := reply["catalog"].(map[string]any)
+	row := catalog["servers"].([]any)[0].(map[string]any)
+	if row["downloaded_bytes"] != float64(3000000) || row["download_seconds"] != float64(3) || row["download_mbps"] != float64(8) {
+		t.Fatal("final metrics lost", row)
+	}
+}
+
+func TestNativeSingleSpeedCaptureUsesFixedProgressFlag(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
+			b := bridgeFixture(t, `{}`)
+			b.options.Runtime = "native"
+			b.options.Repo = InstalledAssetRoot
+			id := "srv_" + strings.Repeat("a", 27)
+			script := fmt.Sprintf(`#!/bin/sh
+[ "$1" = servers ] && [ "$2" = speed ] && [ "$3" = '%s' ] || exit 90
+if [ "$#" = 4 ]; then
+ [ "$4" = --progress ] || exit 91
+ printf '%%s\n' '{"event":"speed-progress","server_id":"%s","downloaded_bytes":1000,"elapsed_seconds":0.1,"download_mbps":0.08}'
+else
+ [ "$#" = 3 ] || exit 92
+fi
+printf '%%s\n' '{"schema":"vibe-vpn.server-browser.v2","status":"ok","server":{"server_id":"%s","status":"ready","download_mbps":8}}'
+`, id, id, id)
+			if err := os.WriteFile(b.options.Executable, []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := json.Marshal(map[string]any{"action": "servers/speed", "value": id, "progress": enabled})
+			count := 0
+			reply, err := b.request(context.Background(), raw, nil, nil, func(p picker.SpeedProgress) error {
+				count++
+				if p.ServerID != id || p.DownloadedBytes != 1000 {
+					t.Fatal("wrong sample", p)
+				}
+				return nil
+			})
+			if err != nil || reply["ok"] != true {
+				t.Fatal("native speed request failed", reply, err)
+			}
+			if (count == 1) != enabled {
+				t.Fatalf("progress enabled=%v count=%d", enabled, count)
+			}
+			// The same native capture safely drains samples when no consumer is attached.
+			if enabled {
+				_, result, overflow := b.captureSpeed(context.Background(), []string{"servers", "speed", id}, id, nil)
+				if overflow || result.Reason != "ok" {
+					t.Fatal("nil consumer rejected progress", result, overflow)
+				}
+			}
+		})
 	}
 }

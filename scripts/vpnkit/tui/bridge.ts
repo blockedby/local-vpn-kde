@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 export type Action =
+ | "profiles/list" | "profiles/add" | "profiles/open" | "profiles/remove"
   | "autostart/read"
   | "autostart/set"
   | "status"
@@ -17,11 +18,14 @@ export type Action =
   | "servers/list"
   | "servers/refresh"
   | "servers/check-batch"
+  | "servers/speed-batch"
   | "servers/ping"
   | "servers/speed"
   | "servers/availability"
   | "servers/select";
 export interface Status {
+  runtime?: "docker" | "native";
+  installed?: boolean;
   vpn_state: string;
   gateway_state?: string;
   subscription: string;
@@ -32,6 +36,7 @@ export interface Status {
   last_attempt?: string;
 }
 export interface Server {
+ profile_id?: string;
   server_id: string;
   display_name: string;
   selected: boolean;
@@ -43,9 +48,13 @@ export interface Server {
   download_seconds?: number;
   downloaded_bytes?: number;
 }
-export interface AutostartOptions { gateway: boolean; connect: boolean; last_result?: string }
+export interface AutostartOptions { gateway: boolean; connect: boolean; last_result?: string; runtime?: "docker" | "native" }
+export interface AutostartServiceState { enabled: string; active: string }
+export interface Profile { id: string; name: string; kind: "subscription" | "server"; count: number; stale: boolean }
 export interface Reply {
+ profiles?: { active: string; items: Profile[] };
   autostart?: AutostartOptions;
+  autostart_service?: AutostartServiceState;
   ok: boolean;
   reason: string;
   code: number | null;
@@ -54,9 +63,13 @@ export interface Reply {
   catalog?: { status: string; servers?: Server[]; server?: Server };
 }
 export interface CheckProgress {
+  status?: string;
+  download_mbps?: number;
+  download_seconds?: number;
+  downloaded_bytes?: number;
   event: "server-check";
   server_id: string;
-  stage: "start" | "ping" | "complete";
+  stage: "start" | "ping" | "speed" | "complete";
   ping_status: "untested" | "ready" | "failed";
   latency_ms: number;
   availability: "ready" | "failed" | "untested";
@@ -96,14 +109,20 @@ export class Bridge implements Backend {
   private sequence = 0;
   private buffer = "";
   private closed = false;
+  private childClosed = false;
   onProgress?: (phase: string, requestId?: string) => void;
   onCheckProgress?: (result: CheckProgress, requestId?: string) => void;
   onSpeedProgress?: (result: SpeedProgress, requestId?: string) => void;
   onDisconnect?: () => void;
   constructor(args: string[] = [], child?: ChildProcessWithoutNullStreams | (() => ChildProcessWithoutNullStreams)) {
-    const root = fileURLToPath(new URL("../../../", import.meta.url));
+    const root = process.env.VPNKIT_COMPILED_NATIVE === "1"
+      ? "/usr/share/local-vpn-kde/"
+      : fileURLToPath(new URL("../../../", import.meta.url));
+    const executable = root === "/usr/share/local-vpn-kde/"
+      ? "/usr/libexec/local-vpn-kde/local-vpn-kde.bin"
+      : fileURLToPath(new URL("../../../.build/local-vpn-kde.bin", import.meta.url));
     this.factory = typeof child === "function" ? child : () => child ?? spawn(
-      fileURLToPath(new URL("../../../.build/local-vpn-kde.bin", import.meta.url)),
+      executable,
       ["bridge", "--repo", root, ...args],
       { stdio: "pipe" },
     );
@@ -114,6 +133,7 @@ export class Bridge implements Backend {
     const generation = ++this.generation;
     this.buffer = "";
     this.closed = false;
+    this.childClosed = false;
     this.draining = undefined;
     child.stderr.resume();
     this.child.stdout.setEncoding("utf8");
@@ -144,9 +164,10 @@ export class Bridge implements Backend {
           }
           if (reply.event === "server-check") {
             if (!/^srv_[A-Za-z0-9_-]{27}$/.test(reply.server_id) ||
-                !["start", "ping", "complete"].includes(reply.stage) ||
+                !["start", "ping", "speed", "complete"].includes(reply.stage) ||
                 !(reply.stage === "start" ? reply.ping_status === "untested" && reply.latency_ms === 0 && reply.availability === "untested" : ["ready", "failed"].includes(reply.ping_status)) ||
                 !["ready", "failed", "untested"].includes(reply.availability) ||
+                (reply.stage === "speed" && (reply.ping_status !== "ready" || reply.availability === "untested")) ||
                 !Number.isInteger(reply.latency_ms) || reply.latency_ms < 0 || reply.latency_ms > 3600000) throw new Error();
             if (pending) this.onCheckProgress?.(reply, reply.id);
             continue;
@@ -172,6 +193,11 @@ export class Bridge implements Backend {
     child.on("error", fail);
     child.on("exit", fail);
     child.stdin.on("error", fail);
+    child.once("close", () => {
+      if (generation !== this.generation) return;
+      this.childClosed = true;
+      this.fail();
+    });
   }
   private fail() {
     if (this.closed) return;
@@ -187,14 +213,15 @@ export class Bridge implements Backend {
   }
   private async drain(child: ChildProcessWithoutNullStreams) {
     child.stdin.end();
-    if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return;
+    if (this.childClosed || child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return;
     await new Promise<void>((resolve, reject) => {
-      const finish = () => { clearTimeout(timer); child.off("exit", finish); resolve(); };
+      const finish = () => { clearTimeout(timer); child.off("exit", finish); child.off("close", finish); resolve(); };
       const timer = setTimeout(() => {
-        child.off("exit", finish);
+        child.off("exit", finish); child.off("close", finish);
         reject(new Error("backend-shutdown-timeout"));
       }, 5000);
       child.once("exit", finish);
+      child.once("close", finish);
     });
   }
   reconnect(): Promise<void> {
@@ -317,13 +344,14 @@ export class DemoBackend implements Backend {
     if (action === "subscription/read") reply.value = this.subscription;
       if (action === "servers/list" || action === "servers/refresh")
         reply.catalog = { status: "ok", servers: structuredClone(this.servers) };
-      if (action === "servers/check-batch") {
+      if (action === "servers/check-batch" || action === "servers/speed-batch") {
         const ids: string[] = JSON.parse(value ?? "{}").ids;
         const rows = this.servers.filter((s) => ids.includes(s.server_id));
         for (const row of rows) {
           row.ping_status = "ready";
           row.latency_ms = 20;
           row.availability = "ready";
+          if (action === "servers/speed-batch") { row.status = "ready"; row.download_mbps = 90; row.download_seconds = 3; row.downloaded_bytes = 33750000; }
         }
         reply.catalog = { status: "ok", servers: structuredClone(rows) };
       }

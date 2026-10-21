@@ -21,9 +21,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/blockedby/local-vpn-kde/internal/config"
+	"github.com/blockedby/local-vpn-kde/internal/profiles"
 
 	"github.com/blockedby/local-vpn-kde/internal/nettest"
 	"github.com/blockedby/local-vpn-kde/internal/picker"
+	"github.com/blockedby/local-vpn-kde/internal/sharelink"
 	"github.com/blockedby/local-vpn-kde/internal/state"
 	"github.com/blockedby/local-vpn-kde/internal/vless"
 	"github.com/spf13/cobra"
@@ -37,7 +39,7 @@ const (
 	browserPublicationBackupFile  = ".server-browser-catalog.backup"
 	browserSaltFile               = ".server-browser-id-salt"
 	browserSaltSize               = 32
-	browserMaxServers             = 1000
+	browserMaxServers             = profiles.MaxCachedServers
 	browserMaxCatalogBytes        = 64 << 20
 	browserMaxGenerationLen       = 4096
 	browserMaxCommitLen           = 8192
@@ -89,7 +91,7 @@ func isBrowserJSONInvocation(args []string) bool {
 		return false
 	}
 	switch args[commandAt] {
-	case "check-batch", "list", "refresh", "test-all", "availability", "speed", "ping", "select", "current":
+	case "speed-batch", "check-batch", "list", "refresh", "test-all", "availability", "speed", "ping", "select", "current":
 	default:
 		return false
 	}
@@ -166,6 +168,14 @@ func (d browserDependencies) measure(ctx context.Context, c config.Config, r pic
 			return nettest.Result{}, nettest.CheckAvailability(ctx, c.TestSocks, d.targetURL, 10*time.Second)
 		})
 	}
+	if d.tcpPing && r.Network == "quic" {
+		n := vless.Node{Link: r.Link, Name: r.Name, Host: r.Host, Port: r.Port, Network: r.Network, Security: r.Security, Outbound: r.Outbound}
+		started := time.Now()
+		_, err := testOneContextUsing(ctx, c, n, false, func() (nettest.Result, error) {
+			return nettest.Result{}, nettest.CheckAvailability(ctx, c.TestSocks, c.TestURL, 10*time.Second)
+		})
+		return nettest.Result{Seconds: time.Since(started).Seconds()}, err
+	}
 	if d.tcpPing {
 		started := time.Now()
 		conn, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(r.Host, strconv.Itoa(r.Port)))
@@ -183,6 +193,7 @@ func (d browserDependencies) measure(ctx context.Context, c config.Config, r pic
 
 func addServerBrowserCommands(root *cobra.Command, o *cliOptions) {
 	addServerCheckBatchCommand(root, o)
+	addServerSpeedBatchCommand(root, o)
 	refresh := &cobra.Command{Use: "refresh", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		if !jsonOut {
@@ -285,6 +296,11 @@ func addServerBrowserCommands(root *cobra.Command, o *cliOptions) {
 }
 
 func loadBrowserCandidates(ctx context.Context, c config.Config) ([]picker.NodeResult, error) {
+	if _, err := os.Stat(c.StateDir + "/" + profiles.File); err == nil {
+		return loadProfileCandidates(ctx, c)
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -300,7 +316,7 @@ func loadBrowserCandidates(ctx context.Context, c config.Config) ([]picker.NodeR
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		node, err := vless.Parse(link)
+		node, err := sharelink.Parse(link)
 		if err != nil {
 			continue
 		}
@@ -675,6 +691,21 @@ func runBrowserSelect(cmd *cobra.Command, o *cliOptions, id string, deps browser
 	}
 	if err := ctx.Err(); err != nil {
 		return writeBrowserContextFailure(cmd, ctx, catalog.Generation)
+	}
+	if record.Result.ProfileID != "" {
+		d, err := profiles.LoadLocked(c.StateDir, c.SubscriptionFile)
+		if err != nil {
+			return writeBrowserFailure(cmd, "unavailable", catalog.Generation)
+		}
+		exists := false
+		for _, p := range d.Items {
+			if p.ID == record.Result.ProfileID {
+				exists = true
+			}
+		}
+		if !exists {
+			return writeBrowserFailure(cmd, "stale", catalog.Generation)
+		}
 	}
 	record.Result.ServerID = record.ID
 	record.Result.Generation = catalog.Generation

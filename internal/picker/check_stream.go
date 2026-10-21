@@ -5,18 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"regexp"
 )
 
 // CheckProgress contains only measurement evidence, never endpoints or configs.
 // It is provisional until the final catalog publication succeeds.
 type CheckProgress struct {
-	Event        string `json:"event"`
-	ServerID     string `json:"server_id"`
-	Stage        string `json:"stage"`
-	PingStatus   string `json:"ping_status"`
-	LatencyMS    int    `json:"latency_ms"`
-	Availability string `json:"availability"`
+	Event           string  `json:"event"`
+	ServerID        string  `json:"server_id"`
+	Stage           string  `json:"stage"`
+	PingStatus      string  `json:"ping_status"`
+	LatencyMS       int     `json:"latency_ms"`
+	Availability    string  `json:"availability"`
+	Status          string  `json:"status,omitempty"`
+	DownloadMbps    float64 `json:"download_mbps,omitempty"`
+	DownloadSeconds float64 `json:"download_seconds,omitempty"`
+	DownloadedBytes int64   `json:"downloaded_bytes,omitempty"`
 }
 
 var checkID = regexp.MustCompile(`^srv_[A-Za-z0-9_-]{27}$`)
@@ -93,13 +98,21 @@ func (s *CheckStream) line(line []byte) error {
 		stage = 1
 	case "ping":
 		stage = 2
-	case "complete":
+	case "speed":
 		stage = 3
+	case "complete":
+		stage = 4
 	}
 	if !allowed || !checkID.MatchString(p.ServerID) || stage <= previous || p.LatencyMS < 0 || p.LatencyMS > 3600000 ||
 		(p.PingStatus != "ready" && p.PingStatus != "failed" && !(stage == 1 && p.PingStatus == "untested")) ||
 		(p.Availability != "ready" && p.Availability != "failed" && p.Availability != "untested") ||
 		(stage <= 2 && p.Availability != "untested") ||
+		(stage == 3 && (p.PingStatus != "ready" || p.Availability == "untested")) ||
+		(p.Status != "" && p.Status != "ready" && p.Status != "failed" && p.Status != "untested") ||
+		(stage < 4 && (p.Status != "" || p.DownloadMbps != 0 || p.DownloadSeconds != 0 || p.DownloadedBytes != 0)) ||
+		math.IsNaN(p.DownloadMbps) || math.IsInf(p.DownloadMbps, 0) || p.DownloadMbps < 0 || p.DownloadMbps > 1e9 ||
+		math.IsNaN(p.DownloadSeconds) || math.IsInf(p.DownloadSeconds, 0) || p.DownloadSeconds < 0 || p.DownloadSeconds > 3600000 ||
+		p.DownloadedBytes < 0 || p.DownloadedBytes > 1<<53 ||
 		(stage == 1 && (p.PingStatus != "untested" || p.LatencyMS != 0)) ||
 		(p.PingStatus == "failed" && (p.LatencyMS != 0 || p.Availability != "untested")) {
 		return errors.New("invalid check evidence")

@@ -152,7 +152,7 @@ case "$command" in
     server_id=${7:-}
     case "$operation:$#" in
       list:6|test-all:6|current:6) server_id= ;;
-      check-batch:8) exit 2 ;;
+      check-batch:8|speed-batch:8) exit 2 ;;
       ping:7|select:7|speed:7) [[ "$server_id" =~ ^srv_[A-Za-z0-9_-]{27}$ ]] || exit 92 ;;
       *) exit 93 ;;
     esac
@@ -315,12 +315,14 @@ grep -Eq 'docker <exec> <-e> <VPNKIT_SPEED_PROGRESS=1> <owned-container> </usr/l
 ! grep -Fq '<--progress>' "$tmp/docker.log"
 
 # A pre-batch supervisor must produce an actionable version error.
-$lifecycle servers check-batch "$server_id" https://example.com/ >"$tmp/out" 2>"$tmp/err"
+for operation in check-batch speed-batch; do
+$lifecycle servers "$operation" "$server_id" https://example.com/ >"$tmp/out" 2>"$tmp/err"
 python3 - "$tmp/out" <<'PYCODE'
 import json,sys
 assert json.load(open(sys.argv[1]))['status'] == 'backend-outdated'
 PYCODE
 [[ ! -s "$tmp/err" ]]
+done
 
 # Absent, unhealthy, and foreign containers return one fixed safe object and
 # never cross the helper exec boundary.
