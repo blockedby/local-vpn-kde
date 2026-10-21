@@ -125,9 +125,10 @@ export class Bridge implements Backend {
           const pending = this.pending.get(reply.id);
           if (reply.event === "server-check") {
             if (!/^srv_[A-Za-z0-9_-]{27}$/.test(reply.server_id) ||
-                !["start", "ping", "complete"].includes(reply.stage) ||
+                !["start", "ping", "speed", "complete"].includes(reply.stage) ||
                 !(reply.stage === "start" ? reply.ping_status === "untested" && reply.latency_ms === 0 && reply.availability === "untested" : ["ready", "failed"].includes(reply.ping_status)) ||
                 !["ready", "failed", "untested"].includes(reply.availability) ||
+                (reply.stage === "speed" && (reply.ping_status !== "ready" || reply.availability === "untested")) ||
                 !Number.isInteger(reply.latency_ms) || reply.latency_ms < 0 || reply.latency_ms > 3600000) throw new Error();
             if (pending) this.onCheckProgress?.(reply, reply.id);
             continue;

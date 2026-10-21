@@ -1726,3 +1726,81 @@ test("installed native diagnostics failure can be retried without changing conne
     expect(b.calls.some(call => ["start", "backend/start", "disconnect", "stop"].includes(call.action))).toBe(false);
   } finally { await app.close(); }
 });
+
+test("failed native status polls retain native server screen without stale readiness", async () => {
+  const t = await createTestRenderer({ width: 120, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...initial, runtime: "native", installed: true, vpn_state: "healthy", networkmanager_active: "yes" };
+  const request = b.request.bind(b);
+  b.request = async (action, value) => {
+    const r = await request(action, value);
+    if (action.startsWith("profiles/")) r.profiles = { active: "profile_legacy1", items: [{ id: "profile_legacy1", name: "Fixture", kind: "subscription", count: 2, stale: false }] };
+    return r;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("VPN подключён");
+    t.mockInput.pressKey("v");
+    await settle();
+    t.mockInput.pressKey("1");
+    await settle();
+    b.request = async () => { throw new Error("backend-unavailable"); };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await app.perform("status");
+      await t.renderOnce();
+      const frame = t.captureCharFrame();
+      expect(frame).toContain("Статус недоступен");
+      expect(frame).toContain("NATIVE");
+      expect(frame).toContain("Служба управления недоступна");
+      expect(frame).toContain("native-службу");
+      expect(frame).not.toContain("Docker");
+      expect(frame).not.toContain("VPN подключён");
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test("an initial status failure does not invent native identity", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  b.request = async () => { throw new Error("backend-unavailable"); };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Служба управления недоступна");
+    expect(t.captureCharFrame()).not.toContain("NATIVE");
+  } finally {
+    await app.close();
+  }
+});
+
+test("held native and Docker lifecycle actions use their own runtime labels", async () => {
+  for (const runtime of ["native", "docker"] as const) {
+    const t = await createTestRenderer({ width: 120, height: 30 });
+    const b = new FakeBackend();
+    b.status = { ...initial, runtime, installed: runtime === "native" };
+    const app = new App(t.renderer, b);
+    try {
+      await app.perform("status");
+      for (const action of ["backend/start", "stop"] as const) {
+        let finish!: (r: Reply) => void;
+        b.hold = { action, promise: new Promise(resolve => { finish = resolve; }) };
+        const work = app.perform(action);
+        await t.renderOnce();
+        const frame = t.captureCharFrame();
+        const verb = action === "stop" ? "Останавливаем" : "Запускаем";
+        expect(frame).toContain(`${verb} ${runtime === "native" ? "native-службу" : "Docker"}`);
+        if (runtime === "native") expect(frame).not.toContain("Docker");
+        finish(reply(b.status));
+        await work;
+        b.hold = undefined;
+      }
+    } finally {
+      await app.close();
+    }
+  }
+});

@@ -3,6 +3,9 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { Bridge, DemoBackend } from "./bridge";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 function fixture() {
   const child = Object.assign(new EventEmitter(), {
@@ -127,4 +130,51 @@ test("close drains a failed spawn which emits close without exit", async () => {
   await closing;
   // Repeated cleanup must also work after the close event was consumed.
   await bridge.close();
+});
+
+test("actual Go bridge forwards speed stage and stays available after combined batch", async () => {
+  const repo = mkdtempSync(join(tmpdir(), "vpnkit-local-tui-stream-"));
+  mkdirSync(join(repo, "scripts/vpnkit"), { recursive: true, mode: 0o700 });
+  mkdirSync(join(repo, "secrets/vpnkit-local/vibe-vpn"), { recursive: true, mode: 0o700 });
+  const id = "srv_" + "a".repeat(27);
+  const event = { event: "server-check", server_id: id, ping_status: "ready", latency_ms: 259, availability: "ready" };
+  const frames = [
+    { ...event, stage: "start", ping_status: "untested", latency_ms: 0, availability: "untested" },
+    { ...event, stage: "ping", availability: "untested" },
+    { ...event, stage: "speed" },
+    { ...event, stage: "complete", status: "ready", download_mbps: 12, download_seconds: 3, downloaded_bytes: 4500000 },
+    { schema: "vibe-vpn.server-browser.v2", status: "ok", servers: [{ ...event, display_name: "Fixture", selected: true, status: "ready", download_mbps: 12, download_seconds: 3, downloaded_bytes: 4500000 }] },
+  ];
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+  // Exercise the real Go CheckStream and transport with an inert adapter.
+  // Checkout-native measurement actions require installed assets, so this
+  // shared-protocol fixture uses an explicit adapter override without invoking
+  // Docker, privileged helpers, network namespaces or actual measurements.
+  writeFileSync(join(repo, "scripts/vpnkit/vpnkit-native.sh"),
+    '#!/bin/sh\ncase "$1" in\nstatus) printf \'%s\\n\' ' + quote(JSON.stringify({ container: "healthy", runtime: "native", networkmanager_configured: "yes", networkmanager_active: "yes" })) + ";;\nservers) printf '%s\\n' " + frames.map(frame => quote(JSON.stringify(frame))).join(" ") + ";;\n*) exit 2;;\nesac\n", { mode: 0o700 });
+  const bridge = new Bridge(["--repo", repo, "--runtime", "docker", "--lifecycle-executable", join(repo, "scripts/vpnkit/vpnkit-native.sh"), "--secrets-dir", "secrets/vpnkit-local"]);
+  const stages: string[] = [];
+  bridge.onCheckProgress = row => stages.push(row.stage);
+  try {
+    const reply = await bridge.request("servers/speed-batch", JSON.stringify({ ids: [id], url: "https://example.com/" }));
+    expect(reply.ok).toBe(true);
+    expect(stages).toEqual(["start", "ping", "speed", "complete"]);
+    expect(reply.catalog?.servers?.[0]?.download_mbps).toBe(12);
+    const second = await bridge.request("status");
+    expect(second.ok).toBe(true);
+    expect(second.status.gateway_state).toBe("healthy");
+  } finally {
+    await bridge.close();
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("bridge rejects unknown stages and speed without completed site evidence", async () => {
+  for (const override of [{ stage: "unknown" }, { stage: "speed", availability: "untested" }]) {
+    const f = fixture();
+    const request = f.bridge.request("servers/speed-batch", "{}", "batch");
+    f.send({ id: "batch", event: "server-check", server_id: "srv_" + "a".repeat(27), ping_status: "ready", latency_ms: 259, availability: "ready", ...override });
+    await expect(request).rejects.toThrow("backend-unavailable");
+    await f.bridge.close();
+  }
 });

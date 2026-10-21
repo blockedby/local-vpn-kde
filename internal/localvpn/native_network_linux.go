@@ -71,7 +71,7 @@ func RunNativeNetwork(ctx context.Context, action string, output io.Writer) erro
 		}
 		return json.NewEncoder(output).Encode(map[string]bool{"network_ready": ready})
 	}
-	previous, exists, err := journal.Load(ctx)
+	_, exists, err := journal.Load(ctx)
 	if err != nil {
 		return err
 	}
@@ -79,8 +79,44 @@ func RunNativeNetwork(ctx context.Context, action string, output io.Writer) erro
 		if !exists {
 			return nil
 		}
-		// Never detach the named namespace while a gateway or foreign process
-		// still holds it. systemd orders gateway shutdown before network shutdown.
+		return stopNativeNetwork(ctx, controller, reads, nativeNamespacePresent)
+	}
+	return startNativeNetwork(ctx, controller, exists,
+		func(ctx context.Context) (nativegateway.Uplink, error) {
+			// Discover the current physical underlay even when an obsolete
+			// journal exists (DHCP/interface changes are common across boots).
+			// Controller still proves old resources absent before allowing an
+			// epoch change, and validates a fresh snapshot before replacement.
+			uplink, _, err := nativegateway.ProbeNetwork(ctx, reads)
+			return uplink, err
+		},
+		func(ctx context.Context) error {
+			return (nativeMutationCommands{}).Run(ctx, nativegateway.Command{Program: "ip", Args: []string{"netns", "exec", nativegateway.Namespace, nativegateway.LibexecDir + "/local-vpn-kde.bin", "native-namespace-init"}})
+		})
+}
+
+type nativeNetworkLifecycleController interface {
+	Start(context.Context, nativegateway.Uplink) error
+	Stop(context.Context) error
+}
+
+func nativeNamespacePresent() (bool, error) {
+	_, err := os.Lstat("/run/netns/" + nativegateway.Namespace)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func stopNativeNetwork(ctx context.Context, controller nativeNetworkLifecycleController, reads nativegateway.ReadOnlyRunner, namespacePresent func() (bool, error)) error {
+	present, err := namespacePresent()
+	if err != nil {
+		return err
+	}
+	if present {
+		// Never detach a named namespace held by a gateway or foreign
+		// process. An absent marker goes to the controller's complete proof,
+		// rather than treating ip netns pids ENOENT as a permanent failure.
 		pids, err := reads.Run(ctx, "ip", "netns", "pids", nativegateway.Namespace)
 		if err != nil {
 			return err
@@ -88,26 +124,22 @@ func RunNativeNetwork(ctx context.Context, action string, output io.Writer) erro
 		if strings.TrimSpace(string(pids)) != "" {
 			return errors.New("native namespace still has running processes; stop the gateway first")
 		}
-		return controller.Stop(ctx)
 	}
-	uplink := previous.Uplink
-	if !exists {
-		var snapshot nativegateway.Snapshot
-		uplink, snapshot, err = nativegateway.ProbeNetwork(ctx, reads)
-		if err != nil {
-			return err
-		}
-		if _, err = nativegateway.PlanNetwork(uplink, snapshot); err != nil {
-			return err
-		}
+	return controller.Stop(ctx)
+}
+
+func startNativeNetwork(ctx context.Context, controller nativeNetworkLifecycleController, existed bool, discoverUplink func(context.Context) (nativegateway.Uplink, error), initializeNamespace func(context.Context) error) error {
+	uplink, err := discoverUplink(ctx)
+	if err != nil {
+		return err
 	}
 	if err = controller.Start(ctx, uplink); err != nil {
 		return err
 	}
-	// Root sets namespace-only sysctls before the capability-restricted gateway
-	// starts. The nested command independently verifies its namespace identity.
-	err = nativeMutationCommands{}.Run(ctx, nativegateway.Command{Program: "ip", Args: []string{"netns", "exec", nativegateway.Namespace, nativegateway.LibexecDir + "/local-vpn-kde.bin", "native-namespace-init"}})
-	if err != nil && !exists {
+	// Root sets namespace-only sysctls before the capability-restricted
+	// gateway starts; initialization independently proves namespace identity.
+	err = initializeNamespace(ctx)
+	if err != nil && !existed {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		return errors.Join(err, controller.Stop(cleanup))
