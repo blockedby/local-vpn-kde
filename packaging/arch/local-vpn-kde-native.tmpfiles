@@ -1,0 +1,13 @@
+# Configuration and state survive package removal. /run directories are owned
+# by RuntimeDirectory= in the generated units, not by this file.
+d /etc/local-vpn-kde                 0750 root          local-vpn-kde -
+d /etc/local-vpn-kde/openvpn         0750 root          local-vpn-kde -
+d /etc/local-vpn-kde/sing-box        0750 root          local-vpn-kde -
+d /etc/local-vpn-kde/vibe-vpn        0750 root          local-vpn-kde -
+d /var/lib/local-vpn-kde             0700 local-vpn-kde local-vpn-kde -
+d /var/lib/local-vpn-kde/sing-box    0700 local-vpn-kde local-vpn-kde -
+d /var/lib/local-vpn-kde/vibe-vpn    0700 local-vpn-kde local-vpn-kde -
+d /var/lib/local-vpn-kde-network     0700 root          root          -
+
+# Root-owned binary snapshot survives package upgrades, refreshed only on service start.
+d /var/lib/local-vpn-kde-runtime 0755 root root -

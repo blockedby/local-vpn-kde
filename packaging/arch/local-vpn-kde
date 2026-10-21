@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+# No arguments opens the OpenTUI. Explicit arguments are native CLI commands.
+if [ "$#" -eq 0 ]; then
+  set -- ui
+fi
+exec /usr/libexec/local-vpn-kde/local-vpn-kde.bin "$@"

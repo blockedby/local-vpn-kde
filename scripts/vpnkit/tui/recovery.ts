@@ -1,4 +1,4 @@
-import type { Action } from "./bridge";
+import type { Action, Status } from "./bridge";
 import { failure } from "./model";
 
 export type RecoveryAction = "status" | "diagnostics" | "servers" | "retry";
@@ -13,7 +13,7 @@ export interface Recovery {
 const groups: Record<string, readonly string[]> = {
   docker: ["docker-unavailable", "docker-registry-failed", "gateway-build-failed", "gateway-start-failed", "gateway-unhealthy", "gateway-not-ready", "backend-outdated"],
   routes: ["route-conflict", "route-invalid", "ipv6-leak", "underlay-install-failed", "underlay-verify-failed", "underlay-not-ready"],
-  profile: ["foreign-profile", "previous-profile-active", "profile-import-failed", "profile-invalid", "nm-activation-failed"],
+  profile: ["profiles-failed", "other-vpn-active", "foreign-profile", "previous-profile-active", "profile-import-failed", "profile-invalid", "nm-activation-failed"],
   dns: ["dns-failed"],
   server: ["stale", "ip-https-failed", "hostname-https-failed", "ping-failed"],
   management: ["unavailable", "backend-unavailable", "diagnostics-unavailable", "recovery_required", "host-smoke-failed", "assets-failed"],
@@ -31,14 +31,15 @@ const messages: Record<string, string> = {
   "invalid-request": "Проверьте введённые данные и повторите действие.",
 };
 
-export function recoveryFor(action: Action, reason: string): Recovery {
+export function recoveryFor(action: Action, reason: string, runtime?: Status["runtime"]): Recovery {
   let stage = Object.entries(groups).find(([, reasons]) => reasons.includes(reason))?.[0] ?? "unknown";
-  const measurement = ["servers/ping", "servers/speed", "servers/availability", "servers/check-batch"].includes(action);
+  if (runtime === "native" && stage === "docker") stage = "management";
+  const measurement = ["servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch"].includes(action);
   if (stage === "unknown" && measurement && reason === "failed") stage = "server";
   const known = stage !== "unknown" || ["timeout", "cancelled"].includes(reason);
   const message = (Object.hasOwn(messages, reason) ? messages[reason] : undefined) ?? (measurement && reason === "failed"
     ? "Проверка сервера не прошла. Можно выбрать другой сервер или повторить проверку."
-    : failure(known ? reason : "failed", null));
+    : failure(known ? reason : "failed", null, runtime));
   const actions: RecoveryAction[] = ["status", "diagnostics"];
   if (stage === "server" || stage === "dns") actions.push("servers");
   // A generic retry must not bypass repair/ownership checks or invite a

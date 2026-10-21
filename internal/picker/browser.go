@@ -51,6 +51,7 @@ type BrowserGenerationState struct {
 
 // BrowserServer is the only server representation permitted on the JSON CLI.
 type BrowserServer struct {
+	ProfileID       string   `json:"profile_id,omitempty"`
 	Availability    string   `json:"availability,omitempty"`
 	PingStatus      string   `json:"ping_status,omitempty"`
 	ServerID        string   `json:"server_id"`
@@ -236,7 +237,7 @@ func (r BrowserRecord) Safe(selected bool) BrowserServer {
 		speed, seconds, size = &r.Result.Mbps, &r.Result.Seconds, &r.Result.Bytes
 	}
 	return BrowserServer{
-		ServerID: r.ID, DisplayName: SafeDisplayName(r.DisplayName),
+		ProfileID: r.Result.ProfileID, ServerID: r.ID, DisplayName: SafeDisplayName(r.DisplayName),
 		Transport: safeTransport(r.Result.Network), Security: safeSecurity(r.Result.Security),
 		Availability: safeAvailability(r.Result.Availability), PingStatus: pingStatus, Status: status, LatencyMS: latency, Selected: selected, DownloadMbps: speed, DownloadSeconds: seconds, DownloadedBytes: size,
 	}
@@ -249,14 +250,15 @@ func BrowserServerID(salt []byte, result NodeResult) string {
 		return ""
 	}
 	identity := struct {
-		Link     string         `json:"link"`
-		Host     string         `json:"host"`
-		Port     int            `json:"port"`
-		Network  string         `json:"network"`
-		Security string         `json:"security"`
-		Outbound map[string]any `json:"outbound"`
+		ProfileID string         `json:"profile_id,omitempty"`
+		Link      string         `json:"link"`
+		Host      string         `json:"host"`
+		Port      int            `json:"port"`
+		Network   string         `json:"network"`
+		Security  string         `json:"security"`
+		Outbound  map[string]any `json:"outbound"`
 	}{
-		Link: identityLink(result.Link), Host: strings.TrimSpace(strings.ToLower(result.Host)),
+		ProfileID: result.ProfileID, Link: identityLink(result.Link), Host: strings.TrimSpace(strings.ToLower(result.Host)),
 		Port: result.Port, Network: strings.TrimSpace(strings.ToLower(result.Network)),
 		Security: strings.TrimSpace(strings.ToLower(result.Security)), Outbound: result.Outbound,
 	}

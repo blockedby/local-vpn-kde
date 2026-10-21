@@ -19,11 +19,11 @@ type runtimeChild struct {
 	result ProcessResult
 }
 
-func startRuntimeChild(ctx context.Context, name string, args []string, output io.Writer) *runtimeChild {
+func startRuntimeChild(ctx context.Context, name string, args, env []string, output io.Writer) *runtimeChild {
 	childCtx, cancel := context.WithCancel(ctx)
 	child := &runtimeChild{cancel: cancel, done: make(chan struct{})}
 	go func() {
-		child.result = RunProcess(childCtx, name, args, os.Environ(), output, output, time.Second)
+		child.result = RunProcess(childCtx, name, args, env, output, output, time.Second)
 		close(child.done)
 	}()
 	return child
@@ -67,27 +67,60 @@ func waitRuntime(ctx context.Context, child *runtimeChild, ready func() bool) er
 	}
 }
 
+type gatewayRuntimeOptions struct {
+	helper                string
+	helperConfig          string
+	openVPN               string
+	environment           func() []string
+	setRestartEnvironment bool
+	ownedChildrenHealth   bool
+	bootstrapSetting      func() string
+	bootstrapMaxNodes     func() string
+	bootstrapLogDir       string
+	watchDNS              func(context.Context, io.Writer)
+	onReady               func(context.Context) error
+}
+
 // ServeContainer replaces shell process supervision. It serves restart tokens
 // while bootstrap/recovery wait for acknowledgements under their state lock.
 func (c ContainerConfig) ServeContainer(parent context.Context, output io.Writer) error {
-	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
-	processCtx, cancelProcesses := context.WithCancel(context.WithoutCancel(parent))
-	defer cancelProcesses()
 	// A runtime invocation is explicitly container-only; never route the host.
 	if _, err := os.Stat("/.dockerenv"); err != nil {
 		if _, podmanErr := os.Stat("/run/.containerenv"); podmanErr != nil {
 			return errors.New("container runtime marker missing")
 		}
 	}
-	for key, value := range map[string]string{"SINGBOX_RESTART_FILE": c.Request, "SINGBOX_GENERATION_FILE": c.Generation, "SINGBOX_ACK_FILE": c.Ack} {
-		if err := os.Setenv(key, value); err != nil {
-			return err
+	return c.serveGateway(parent, output, gatewayRuntimeOptions{
+		helper:                "vibe-vpn",
+		openVPN:               "openvpn",
+		environment:           os.Environ,
+		setRestartEnvironment: true,
+		bootstrapSetting:      func() string { return os.Getenv("VPNKIT_BOOTSTRAP_PICK_ON_START") },
+		bootstrapMaxNodes:     func() string { return os.Getenv("VPNKIT_BOOTSTRAP_MAX_NODES") },
+		bootstrapLogDir:       "/var/log/vibe-vpn",
+		watchDNS:              func(ctx context.Context, output io.Writer) { c.watchDNS(ctx, output) },
+	})
+}
+
+func (c ContainerConfig) serveGateway(parent context.Context, output io.Writer, options gatewayRuntimeOptions) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	processCtx, cancelProcesses := context.WithCancel(context.WithoutCancel(parent))
+	defer cancelProcesses()
+	if options.setRestartEnvironment {
+		for key, value := range map[string]string{"SINGBOX_RESTART_FILE": c.Request, "SINGBOX_GENERATION_FILE": c.Generation, "SINGBOX_ACK_FILE": c.Ack} {
+			if err := os.Setenv(key, value); err != nil {
+				return err
+			}
 		}
 	}
-	env := append(os.Environ(), "VIBE_VPN_DEFER_TRANSACTION_RECOVERY=1")
+	env := append(options.environment(), "VIBE_VPN_DEFER_TRANSACTION_RECOVERY=1")
 	syncCtx, syncCancel := context.WithTimeout(ctx, 30*time.Second)
-	result := RunProcess(syncCtx, "vibe-vpn", []string{"sync-sing-box-config", "--source", c.Source, "--runtime", c.Runtime}, env, output, output, time.Second)
+	syncArgs := []string{"sync-sing-box-config", "--source", c.Source, "--runtime", c.Runtime}
+	if options.helperConfig != "" {
+		syncArgs = append([]string{"--config", options.helperConfig}, syncArgs...)
+	}
+	result := RunProcess(syncCtx, options.helper, syncArgs, env, output, output, time.Second)
 	syncCancel()
 	if result.Reason != "ok" {
 		return errors.New("runtime configuration synchronization failed")
@@ -96,6 +129,15 @@ func (c ContainerConfig) ServeContainer(parent context.Context, output io.Writer
 		return err
 	}
 	var singbox, openvpn, recovery, bootstrap *runtimeChild
+	health := func(ctx context.Context) error {
+		if options.ownedChildrenHealth {
+			if singbox == nil || openvpn == nil || singbox.stopped() || openvpn.stopped() {
+				return errors.New("owned native gateway child is not running")
+			}
+			return c.healthNetwork(ctx)
+		}
+		return c.Health(ctx)
+	}
 	var dnsDone chan struct{}
 	var bootstrapLog *os.File
 	var bootstrapCapture *attemptOutput
@@ -127,7 +169,7 @@ func (c ContainerConfig) ServeContainer(parent context.Context, output io.Writer
 		_ = c.RemoveBarrier(cleanup)
 	}()
 	startSingbox := func() error {
-		singbox = startRuntimeChild(processCtx, c.Binary, []string{"run", "-c", c.Runtime}, output)
+		singbox = startRuntimeChild(processCtx, c.Binary, []string{"run", "-c", c.Runtime}, options.environment(), output)
 		return waitRuntime(ctx, singbox, func() bool { _, err := runtimeCommand(ctx, "ip", "link", "show", c.Interface); return err == nil })
 	}
 	if err := startSingbox(); err != nil {
@@ -136,26 +178,31 @@ func (c ContainerConfig) ServeContainer(parent context.Context, output io.Writer
 	if err := c.InstallBarrier(ctx); err != nil {
 		return err
 	}
-	openvpn = startRuntimeChild(processCtx, "openvpn", []string{"--config", c.OpenVPN}, output)
+	openvpn = startRuntimeChild(processCtx, options.openVPN, []string{"--config", c.OpenVPN}, options.environment(), output)
 	if err := waitRuntime(ctx, openvpn, func() bool { _, e := runtimeCommand(ctx, "ip", "link", "show", "tun0"); return e == nil }); err != nil {
 		return err
 	}
 	if err := c.ApplyRouting(ctx); err != nil {
 		return err
 	}
-	if err := c.Health(ctx); err != nil {
+	if err := health(ctx); err != nil {
 		return err
+	}
+	if options.onReady != nil {
+		if err := options.onReady(ctx); err != nil {
+			return err
+		}
 	}
 	fmt.Fprintln(output, "vpnkit_phase=runtime-ready")
 	if _, err := runtimeRead(c.Vibe); err == nil {
-		recovery = startRuntimeChild(processCtx, "vibe-vpn", []string{"--config", c.Vibe, "recover-transactions"}, io.Discard)
+		recovery = startRuntimeChild(processCtx, options.helper, []string{"--config", c.Vibe, "recover-transactions"}, options.environment(), io.Discard)
 	} else if !errors.Is(err, unix.ENOENT) {
 		return err
 	}
-	bootstrapSetting := strings.ToLower(os.Getenv("VPNKIT_BOOTSTRAP_PICK_ON_START"))
+	bootstrapSetting := strings.ToLower(options.bootstrapSetting())
 	switch bootstrapSetting {
 	case "1", "true", "yes", "on":
-		max := os.Getenv("VPNKIT_BOOTSTRAP_MAX_NODES")
+		max := options.bootstrapMaxNodes()
 		if max == "" {
 			max = "50"
 		}
@@ -165,7 +212,7 @@ func (c ContainerConfig) ServeContainer(parent context.Context, output io.Writer
 		}
 		// Detailed selection output is bounded by the same private capture used by
 		// host operations; stdout carries phase information only.
-		logDir, err := directory("/var/log/vibe-vpn", true, true)
+		logDir, err := directory(options.bootstrapLogDir, true, true)
 		if err != nil {
 			return err
 		}
@@ -184,13 +231,15 @@ func (c ContainerConfig) ServeContainer(parent context.Context, output io.Writer
 		}
 		capture := &attemptOutput{file: log}
 		bootstrapCapture = capture
-		bootstrap = startRuntimeChild(processCtx, "vibe-vpn", []string{"--config", c.Vibe, "pick", "--max", max}, capture)
+		bootstrap = startRuntimeChild(processCtx, options.helper, []string{"--config", c.Vibe, "pick", "--max", max}, options.environment(), capture)
 	case "", "0", "false", "no", "off":
 	default:
 		return errors.New("invalid bootstrap setting")
 	}
-	dnsDone = make(chan struct{})
-	go func() { defer close(dnsDone); c.watchDNS(ctx, output) }()
+	if options.watchDNS != nil {
+		dnsDone = make(chan struct{})
+		go func() { defer close(dnsDone); options.watchDNS(ctx, output) }()
+	}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	last := ""
@@ -246,7 +295,7 @@ func (c ContainerConfig) ServeContainer(parent context.Context, output io.Writer
 			if err = c.ApplyRouting(ctx); err != nil {
 				return err
 			}
-			if err = c.Health(ctx); err != nil {
+			if err = health(ctx); err != nil {
 				return err
 			}
 			after, err := runtimeRead(c.Generation)

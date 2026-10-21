@@ -19,12 +19,19 @@ import (
 
 type AssetOptions struct {
 	Base, TemplateDir, Endpoint, DNS string
+	Runtime                          string
 	Port, CertificateDays            int
 }
 
 // Assets creates a local CA only when all identity files are absent. Partial
 // identities fail closed, and existing identities are reused byte for byte.
 func Assets(o AssetOptions) error {
+	if o.Runtime != "" && o.Runtime != "docker" && o.Runtime != "native" {
+		return errors.New("invalid runtime")
+	}
+	if o.Runtime == "native" && o.Port != 31194 {
+		return errors.New("native KDE endpoint requires port 31194")
+	}
 	if o.Endpoint != "127.0.0.1" && o.Endpoint != "localhost" {
 		return errors.New("local endpoint required")
 	}
@@ -113,6 +120,15 @@ func Assets(o AssetOptions) error {
 		return err
 	}
 	server := strings.ReplaceAll(string(serverTemplate), "{{OPENVPN_PUSH_DNS}}", o.DNS)
+	if o.Runtime == "native" {
+		server = strings.ReplaceAll(server, "server 10.89.0.0 255.255.255.0", "server 10.90.0.0 255.255.255.0")
+		for _, directive := range []string{"ca /etc/openvpn/pki/ca.crt", "cert /etc/openvpn/pki/server.crt", "key /etc/openvpn/pki/server.key", "tls-auth /etc/openvpn/pki/ta.key 0"} {
+			if strings.Count(server, directive) != 1 {
+				return errors.New("unexpected native OpenVPN PKI template")
+			}
+			server = strings.Replace(server, directive, strings.Replace(directive, "/etc/openvpn/", "/etc/local-vpn-kde/openvpn/", 1), 1)
+		}
+	}
 	profile := string(clientTemplate)
 	for marker, value := range map[string]string{"LOCAL_REMOTE": o.Endpoint, "LOCAL_PORT": strconv.Itoa(o.Port), "CA_CRT": strings.TrimSpace(string(material["ca.crt"])), "CLIENT_CRT": strings.TrimSpace(string(material["client.crt"])), "CLIENT_KEY": strings.TrimSpace(string(material["client.key"])), "TA_KEY": strings.TrimSpace(string(material["ta.key"]))} {
 		profile = strings.ReplaceAll(profile, "{{"+marker+"}}", value)

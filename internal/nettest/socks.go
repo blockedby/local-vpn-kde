@@ -32,12 +32,20 @@ func DownloadFor(socksAddr, testURL string, duration, timeout time.Duration) (Re
 
 // DownloadForContext reports cumulative body bytes and their actual elapsed time.
 // Samples are provisional measurements, emitted at most every 100ms while reading.
-func DownloadForContext(ctx context.Context, socksAddr, testURL string, duration, timeout time.Duration, progress func(Result) error) (Result, error) {
+func DownloadForContext(ctx context.Context, socksAddr, testURL string, duration, timeout time.Duration, callbacks ...func(Result) error) (Result, error) {
+	var progress func(Result) error
+	if len(callbacks) > 0 {
+		progress = callbacks[0]
+	}
 	if duration <= 0 {
 		return Result{}, fmt.Errorf("download duration must be positive")
 	}
 	start := time.Now()
-	deadline := start.Add(duration)
+	budget := duration
+	if timeout > 0 && timeout < budget {
+		budget = timeout
+	}
+	deadline := start.Add(budget)
 	var total int64
 	last := start
 	emit := func(current int64, final bool) error {
@@ -56,8 +64,8 @@ func DownloadForContext(ctx context.Context, socksAddr, testURL string, duration
 		return progress(Result{current, sec, float64(current) * 8 / sec / 1e6})
 	}
 	for time.Now().Before(deadline) {
-		remaining := time.Until(deadline)
-		r, err := download(ctx, socksAddr, testURL, 0, remaining, timeout, func(n int64) error { return emit(total+n, false) })
+		r, err := downloadContext(ctx, socksAddr, testURL, 0, deadline, func(n int64) error { return emit(total+n, false) })
+		total += r.Bytes
 		if err != nil {
 			if ctx.Err() != nil {
 				return Result{}, ctx.Err()
@@ -71,10 +79,12 @@ func DownloadForContext(ctx context.Context, socksAddr, testURL string, duration
 			}
 			return Result{}, err
 		}
-		total += r.Bytes
 		if r.Bytes == 0 {
 			break
 		}
+	}
+	if ctx.Err() != nil {
+		return Result{}, ctx.Err()
 	}
 	sec := time.Since(start).Seconds()
 	if total <= 0 {
@@ -91,6 +101,14 @@ type progressError struct{ error }
 func (e progressError) Unwrap() error { return e.error }
 
 func download(ctx context.Context, socksAddr, testURL string, limit int64, duration, timeout time.Duration, progress func(int64) error) (Result, error) {
+	deadline := time.Now().Add(timeout)
+	if duration > 0 && (timeout <= 0 || duration < timeout) {
+		deadline = time.Now().Add(duration)
+	}
+	return downloadContext(ctx, socksAddr, testURL, limit, deadline, progress)
+}
+
+func downloadContext(ctx context.Context, socksAddr, testURL string, limit int64, deadline time.Time, progress func(int64) error) (Result, error) {
 	u, err := url.Parse(testURL)
 	if err != nil {
 		return Result{}, err
@@ -117,15 +135,15 @@ func download(ctx context.Context, socksAddr, testURL string, limit int64, durat
 	if path == "" {
 		path = "/"
 	}
-	d := net.Dialer{Timeout: timeout}
+	d := net.Dialer{Deadline: deadline}
 	raw, err := d.DialContext(ctx, "tcp", socksAddr)
 	if err != nil {
 		return Result{}, err
 	}
 	defer raw.Close()
-	stop := context.AfterFunc(ctx, func() { _ = raw.Close() })
+	stop := context.AfterFunc(ctx, func() { raw.Close() })
 	defer stop()
-	if err := raw.SetDeadline(time.Now().Add(timeout)); err != nil {
+	if err := raw.SetDeadline(deadline); err != nil {
 		return Result{}, err
 	}
 	if _, err := raw.Write([]byte{5, 1, 0}); err != nil {
@@ -159,9 +177,6 @@ func download(ctx context.Context, socksAddr, testURL string, limit int64, durat
 	t := time.Now()
 	if _, err := fmt.Fprintf(conn, "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: vibe-vpn/1\r\nConnection: close\r\n\r\n", path, u.Host); err != nil {
 		return Result{}, err
-	}
-	if duration > 0 {
-		_ = conn.SetDeadline(t.Add(duration))
 	}
 	buf := make([]byte, 32768)
 	var n int64
@@ -198,6 +213,9 @@ func download(ctx context.Context, socksAddr, testURL string, limit int64, durat
 	}
 	if ctx.Err() != nil {
 		return Result{}, ctx.Err()
+	}
+	if limit > 0 && n > limit {
+		n = limit
 	}
 	if !haveHeader {
 		return Result{}, fmt.Errorf("http response missing complete headers")

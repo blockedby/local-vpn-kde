@@ -15,6 +15,9 @@ func ValidateUI(repo string) error {
 	if os.Geteuid() == 0 {
 		return errors.New("run the interface as the desktop user")
 	}
+	if repo == InstalledAssetRoot {
+		return ValidateInstalledAssets()
+	}
 	for _, relative := range []string{"run.sh", "scripts/vpnkit/vpnkit-local-tui.sh", "scripts/vpnkit/vpnkit-local.sh", ".build/local-vpn-kde.bin", "scripts/vpnkit/tui/index.ts", "scripts/vpnkit/tui/app.ts", "scripts/vpnkit/tui/model.ts", "scripts/vpnkit/tui/bridge.ts"} {
 		path := filepath.Join(repo, relative)
 		dir, err := directory(filepath.Dir(path), false, false)
@@ -38,11 +41,14 @@ func ValidateUI(repo string) error {
 	return nil
 }
 
-// ExecUI replaces this launcher with Bun. The frontend starts the native JSON
-// bridge from the same checkout.
+// ExecUI replaces this launcher with the trusted compiled installed frontend
+// or Bun in a development checkout. The frontend starts the native JSON bridge.
 func ExecUI(repo string, args []string) error {
 	if err := ValidateUI(repo); err != nil {
 		return err
+	}
+	if repo == InstalledAssetRoot {
+		return unix.Exec(InstalledTUI, append([]string{InstalledTUI}, args...), os.Environ())
 	}
 	if _, err := os.Stat(filepath.Join(repo, "scripts/vpnkit/tui/node_modules/@opentui/core")); err != nil {
 		return errors.New("interface dependencies missing; run ./install.sh")

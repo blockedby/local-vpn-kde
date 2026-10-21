@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Remove
+Type = Package
+Target = local-vpn-kde-native
+
+[Action]
+Description = Safely stopping native VPN services before package changes...
+When = PreTransaction
+Exec = /usr/libexec/local-vpn-kde/local-vpn-kde.bin native-package --action pre-remove
+AbortOnFail

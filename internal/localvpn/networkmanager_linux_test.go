@@ -258,3 +258,74 @@ func TestNMRefreshRefusesActiveProfileBeforeImport(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNativeNMConnectAlreadyActiveRequiresOwnedTunnelRoutesAndNoOtherVPN(t *testing.T) {
+	for _, scenario := range []string{"healthy", "stale-route", "foreign-vpn", "ambiguous-address"} {
+		t.Run(scenario, func(t *testing.T) {
+			base := t.TempDir()
+			profileDir := filepath.Join(base, "openvpn/client")
+			if err := os.MkdirAll(profileDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(profileDir, "vpnkit-local.ovpn"), []byte("client\ndev tun\nproto udp\nremote 127.0.0.1 21194\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			n := NetworkManager{Base: base, Native: true}
+			fingerprint, err := n.profileFingerprint()
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := "12345678-1234-4234-8234-123456789abc"
+			if err := n.writeCapability(nmCapability{UUID: id, Fingerprint: fingerprint}); err != nil {
+				t.Fatal(err)
+			}
+			mutations := 0
+			n.command = func(_ context.Context, args ...string) (string, error) {
+				switch strings.Join(args, " ") {
+				case "-t -f NAME,UUID,TYPE connection show":
+					return "vpnkit-native:" + id + ":vpn\n", nil
+				case "-t -f connection.id,connection.uuid,connection.type,vpn.service-type,vpn.data connection show uuid " + id:
+					return "vpnkit-native:" + id + ":vpn:org.freedesktop.NetworkManager.openvpn:remote = 127.0.0.1:21194\n", nil
+				case "-t -f NAME,UUID,TYPE,DEVICE connection show --active":
+					rows := "vpnkit-native:" + id + ":vpn:tun0\n"
+					if scenario == "foreign-vpn" {
+						rows += "work:22345678-1234-4234-8234-123456789abc:vpn:tun1\n"
+					}
+					return rows, nil
+				case "-t -f IP4.ADDRESS connection show uuid " + id:
+					if scenario == "ambiguous-address" {
+						return "10.80.0.2/24\n10.80.0.3/24\n", nil
+					}
+					return "10.80.0.2/24\n", nil
+				default:
+					mutations++
+					return "", errors.New("unexpected NetworkManager mutation")
+				}
+			}
+			bin := t.TempDir()
+			device := "tun0"
+			if scenario == "stale-route" {
+				device = "eth0"
+			}
+			ip := "#!/bin/sh\nif [ \"$1\" = -o ]; then printf '7: tun0 inet 10.80.0.2/24 scope global tun0\\n'; else printf '%s dev " + device + " src 10.80.0.2\\n' \"$4\"; fi\n"
+			if err := os.WriteFile(filepath.Join(bin, "ip"), []byte(ip), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+			var output bytes.Buffer
+			err = n.Run(context.Background(), "connect", true, &output)
+			if (err == nil) != (scenario == "healthy") {
+				t.Fatalf("scenario %s: error=%v", scenario, err)
+			}
+			if scenario == "foreign-vpn" && !errors.Is(err, ErrOtherVPNActive) {
+				t.Fatalf("foreign VPN error=%v", err)
+			}
+			if mutations != 0 {
+				t.Fatalf("issued %d mutations for already active UUID", mutations)
+			}
+			if scenario == "healthy" && !strings.Contains(output.String(), "already-connected") {
+				t.Fatal("missing idempotent result")
+			}
+		})
+	}
+}

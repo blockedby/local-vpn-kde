@@ -54,7 +54,7 @@ type supervisorConfig struct {
 }
 
 func newProductionSupervisor() *supervisor {
-	return newSupervisor(supervisorConfig{
+	config := supervisorConfig{
 		stateRoot:    productionStateRoot,
 		runner:       productionRunner,
 		worker:       productionWorker,
@@ -64,7 +64,14 @@ func newProductionSupervisor() *supervisor {
 		killGrace:    10 * time.Second,
 		pollInterval: 10 * time.Millisecond,
 		outputLimit:  defaultOutputLimit,
-	})
+	}
+	if executable, _ := os.Executable(); executable == "/usr/libexec/local-vpn-kde/vibe-vpn-server-op-supervisor" {
+		config.stateRoot = "/run/local-vpn-kde/server-operations"
+		config.runner = executable
+		config.worker = "/usr/libexec/local-vpn-kde/vibe-vpn"
+		config.workerConfig = "/etc/local-vpn-kde/vibe-vpn/config.yaml"
+	}
+	return newSupervisor(config)
 }
 
 type operationRequest struct {
@@ -80,7 +87,7 @@ func parseOperationRequest(args []string) (operationRequest, error) {
 	}
 	request := operationRequest{token: args[0], operation: args[1]}
 	switch request.operation {
-	case "check-batch":
+	case "check-batch", "speed-batch":
 		if len(args) != 4 {
 			return operationRequest{}, errors.New("invalid batch")
 		}
@@ -494,7 +501,7 @@ func (supervisor *supervisor) run(args []string, progress ...io.Writer) (runResu
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	command.Stdout = captured
 	var stream interface{ Finish() error }
-	if request.operation == "check-batch" && len(progress) > 0 {
+	if (request.operation == "check-batch" || request.operation == "speed-batch") && len(progress) > 0 {
 		command.Args = append(command.Args, "--progress")
 		encoder := json.NewEncoder(progress[0])
 		stream = picker.NewCheckStream(strings.Split(request.serverID, ","), captured, func(p picker.CheckProgress) error { return encoder.Encode(p) })

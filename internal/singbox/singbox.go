@@ -24,6 +24,9 @@ var runCommand commandRunner = func(ctx context.Context, name string, args ...st
 	return runExternal(ctx, name, args...)
 }
 var lookupIP = net.LookupIP
+var namespaceLookupIP = func(ctx context.Context, host string) ([]net.IP, error) {
+	return net.DefaultResolver.LookupIP(ctx, "ip", host)
+}
 
 var restartSequence uint64
 
@@ -33,6 +36,8 @@ const (
 	// token, generation, and health acknowledgement path.
 	DefaultAckTimeout = 30 * time.Second
 	MaxAckTimeout     = 5 * time.Minute
+
+	namespaceLookupTimeout = 8 * time.Second
 )
 
 type RestartMode string
@@ -711,27 +716,75 @@ func outboundWithPreservedTag(out map[string]any, old any) map[string]any {
 
 func preResolveOutboundServer(out map[string]any) (map[string]any, error) {
 	server, _ := out["server"].(string)
-	if server == "" {
-		return out, nil
-	}
-	if net.ParseIP(server) != nil {
+	if server == "" || net.ParseIP(server) != nil {
 		return out, nil
 	}
 	ips, err := lookupIP(server)
 	if err != nil {
 		return nil, fmt.Errorf("resolve selected outbound server for container apply: %w", err)
 	}
+	ip, ok := preferredOutboundIP(ips)
+	if !ok {
+		return nil, fmt.Errorf("resolve selected outbound server for container apply: no addresses")
+	}
+	out["server"] = ip.String()
+	return out, nil
+}
+
+// PrepareOutboundForNamespace returns an outbound whose hostname endpoint is
+// resolved before entering a network namespace. Only the top-level map is
+// cloned: nested transport and TLS metadata is retained verbatim and is never
+// modified.
+func PrepareOutboundForNamespace(ctx context.Context, out map[string]any) (map[string]any, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	next := make(map[string]any, len(out))
+	for key, value := range out {
+		next[key] = value
+	}
+
+	server, _ := next["server"].(string)
+	if server == "" {
+		return nil, fmt.Errorf("prepare outbound for namespace: endpoint is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("prepare outbound for namespace: %w", err)
+	}
+	if net.ParseIP(server) != nil {
+		return next, nil
+	}
+
+	lookupCtx, cancel := context.WithTimeout(ctx, namespaceLookupTimeout)
+	defer cancel()
+	ips, err := namespaceLookupIP(lookupCtx, server)
+	if err != nil {
+		if contextErr := lookupCtx.Err(); contextErr != nil {
+			return nil, fmt.Errorf("prepare outbound for namespace: %w", contextErr)
+		}
+		return nil, fmt.Errorf("prepare outbound for namespace: endpoint resolution failed")
+	}
+	if contextErr := lookupCtx.Err(); contextErr != nil {
+		return nil, fmt.Errorf("prepare outbound for namespace: %w", contextErr)
+	}
+	ip, ok := preferredOutboundIP(ips)
+	if !ok {
+		return nil, fmt.Errorf("prepare outbound for namespace: endpoint resolution failed")
+	}
+	next["server"] = ip.String()
+	return next, nil
+}
+
+func preferredOutboundIP(ips []net.IP) (net.IP, bool) {
 	for _, ip := range ips {
 		if v4 := ip.To4(); v4 != nil {
-			out["server"] = v4.String()
-			return out, nil
+			return v4, true
 		}
 	}
 	if len(ips) > 0 {
-		out["server"] = ips[0].String()
-		return out, nil
+		return ips[0], true
 	}
-	return nil, fmt.Errorf("resolve selected outbound server for container apply: no addresses")
+	return nil, false
 }
 
 func writeFileAtomic(path string, b []byte, perm os.FileMode) error {

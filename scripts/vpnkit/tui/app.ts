@@ -6,7 +6,7 @@ import {
   type CliRenderer,
   type KeyEvent,
 } from "@opentui/core";
-import type { Action, Backend, Reply, Server, Status, AutostartOptions } from "./bridge";
+import type { Action, Backend, CheckProgress, Reply, Server, Status, AutostartOptions, AutostartServiceState } from "./bridge";
 import { connection, failure, palette as p } from "./model";
 
 import { StyledText, t } from "@opentui/core";
@@ -15,6 +15,7 @@ import { recoveryFor, type Recovery } from "./recovery";
 
 type Screen =
   | "tasks" | "cancel-confirm" | "recovery" | "retry-confirm"
+ | "profiles" | "profile-name" | "profile-source" | "profile-remove"
   | "autostart"
   | "home"
   | "servers"
@@ -58,6 +59,15 @@ const phases: Record<string, string> = {
   compensating: "Восстановление состояния",
 };
 const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const nativeSupportedActions: readonly Action[] = [
+  "status",
+  "backend/start",
+  "start",
+  "disconnect",
+  "stop",
+  "autostart/read",
+  "autostart/set",
+];
 const safeText = (s: string) =>
   s.replace(/[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, "");
 export function cell(text: string, width: number) {
@@ -77,7 +87,52 @@ export function cell(text: string, width: number) {
 export class App {
   private status?: Status;
   private autostart?: AutostartOptions;
+  private serviceState?: AutostartServiceState;
   private screen: Screen = "home";
+  private profiles?: Reply["profiles"];
+  private profileName = "";
+  private profilePage = 0;
+
+  private forgetStatusHealth() {
+    const known = this.status;
+    this.status = known?.runtime === "native" || known?.runtime === "docker" ? {
+      runtime: known.runtime, installed: known.installed,
+      vpn_state: "unknown", gateway_state: "unknown", subscription: "unknown",
+      routing_mode: "unknown", networkmanager_configured: "unknown",
+      networkmanager_active: "unknown", diagnostics: "unknown",
+    } : undefined;
+  }
+
+  private resetProfileCatalog() {
+    this.servers = [];
+    this.catalogLoaded = false;
+    this.serverID = undefined;
+  }
+
+  private async browseProfile(id: string) {
+    const reply = await this.perform("profiles/open", id);
+    if (!reply?.ok) return;
+    this.resetProfileCatalog();
+    this.open("servers");
+  }
+
+  private async addProfile(source: string) {
+    const reply = await this.perform(
+      "profiles/add",
+      JSON.stringify({ name: this.profileName, source }),
+    );
+    if (!reply?.ok) return;
+    this.input.value = "";
+    this.resetProfileCatalog();
+    this.open("profiles");
+  }
+
+  private async removeProfile() {
+    const reply = await this.perform("profiles/remove", this.profiles?.active);
+    if (!reply?.ok) return;
+    this.resetProfileCatalog();
+    this.open("profiles");
+  }
   private tasks = new Map<string, { action: Action; measurement: boolean; started: number; phase: string; value?: string }>();
   private nextTask = 0;
   private cancelTaskID?: string;
@@ -94,7 +149,7 @@ export class App {
     return [...this.tasks.values()].find(task => task.measurement)?.action;
   }
   private compatible(action: Action, other: Action): boolean {
-    const probe = (a: Action) => ["servers/ping", "servers/speed", "servers/availability", "servers/check-batch"].includes(a);
+    const probe = (a: Action) => ["servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch"].includes(a);
     const read = (a: Action) => ["status", "subscription/read"].includes(a);
     return (read(action) && action !== other && (probe(other) || other === "servers/select")) ||
       (read(other) && action !== other && (probe(action) || action === "servers/select")) ||
@@ -111,6 +166,7 @@ export class App {
     failed: number;
     target?: string;
     running: Set<string>;
+    stages: Map<string, CheckProgress["stage"]>;
     pinged: Set<string>;
     completed: Set<string>;
     failures: Set<string>;
@@ -126,7 +182,8 @@ export class App {
   private error = false;
   private selected = 0;
   private serverMenu = false;
-  private confirmation: "disconnect" | "stop" = "disconnect";
+  private confirmation: "disconnect" | "stop" | "subscription" = "disconnect";
+  private pendingSubscription?: string;
   private serverID?: string;
   private servers: Server[] = [];
   private viewStart = 0;
@@ -270,31 +327,35 @@ export class App {
     backend.onProgress = (phase, id) => {
       const task = id ? this.tasks.get(id) : [...this.tasks.values()].at(-1);
       if (!task) return;
-      task.phase = phases[phase] ?? "";
+      task.phase = this.phaseLabel(phase);
       this.paint();
     };
     backend.onCheckProgress = (row, id) => {
-      if (id && this.tasks.get(id)?.action !== "servers/check-batch") return;
+      if (id && !["servers/check-batch", "servers/speed-batch"].includes(this.tasks.get(id)?.action ?? "")) return;
       const batch = this.batch;
-      if (!batch || batch.kind !== "ping" || this.cancelled || this.closing || !batch.ids?.includes(row.server_id) || batch.completed.has(row.server_id)) return;
+      if (!batch || this.cancelled || this.closing || !batch.ids?.includes(row.server_id) || batch.completed.has(row.server_id)) return;
       const server = this.servers.find(s => s.server_id === row.server_id);
       if (!server) return;
       batch.running.add(row.server_id);
+      batch.stages.set(row.server_id, row.stage);
       if (row.stage === "start") {
         server.ping_status = "untested";
         server.latency_ms = undefined;
         server.availability = "untested";
+        if (batch.kind === "speed") { server.status = "untested"; server.download_mbps = undefined; server.download_seconds = undefined; server.downloaded_bytes = undefined; }
         this.paint();
         return;
       }
       server.ping_status = row.ping_status;
       server.latency_ms = row.ping_status === "ready" ? row.latency_ms : undefined;
       batch.pinged.add(row.server_id);
+      if (row.stage === "speed" && batch.target === this.target) server.availability = row.availability;
       if (row.stage === "complete") {
         if (batch.target === this.target) server.availability = row.availability;
+        if (batch.kind === "speed") { server.status = row.status ?? "failed"; server.download_mbps = row.download_mbps; server.download_seconds = row.download_seconds; server.downloaded_bytes = row.downloaded_bytes; }
         batch.running.delete(row.server_id);
         batch.completed.add(row.server_id);
-        if (row.ping_status !== "ready" || row.availability !== "ready") batch.failures.add(row.server_id);
+        if (row.ping_status !== "ready" || row.availability !== "ready" || (batch.kind === "speed" && row.status !== "ready")) batch.failures.add(row.server_id);
         batch.done = batch.completed.size;
         batch.failed = batch.failures.size;
       }
@@ -303,10 +364,10 @@ export class App {
     backend.onDisconnect = () => {
       if (this.closing || this.disposed) return;
       this.backendOffline = true;
-      this.status = undefined;
+      this.forgetStatusHealth();
       this.queued = undefined;
       this.cancelled = true;
-      this.recovery = { ...recoveryFor("status", "backend-unavailable"), action: "status" };
+      this.recovery = { ...recoveryFor("status", "backend-unavailable", this.status?.runtime), action: "status" };
       this.notify("Связь потеряна. Действие могло продолжиться. [f] Восстановить связь", true);
     };
     backend.onSpeedProgress = (row, id) => {
@@ -334,8 +395,111 @@ export class App {
   private ready() {
     return (this.status?.gateway_state ?? this.status?.vpn_state) === "healthy";
   }
+  private runtime(): "docker" | "native" {
+    return this.status?.runtime === "native" ? "native" : "docker";
+  }
+  private nativeMode() {
+    return this.runtime() === "native";
+  }
+  private nativeInstalled() {
+    return this.nativeMode() && this.status?.installed === true;
+  }
+  private nativePreviewOnly() { return this.nativeMode() && !this.nativeInstalled(); }
+  private subscriptionAvailable() {
+    return !this.nativeMode() || this.nativeInstalled();
+  }
+  private serviceLabel(runtime: Status["runtime"] = this.status?.runtime) {
+    return runtime === "native" ? "native-служба" : "Docker";
+  }
+  private serviceObject(runtime: Status["runtime"] = this.status?.runtime) {
+    return runtime === "native" ? "native-службу" : "Docker";
+  }
+  private nativePreview() {
+    return this.nativeInstalled()
+      ? "Native-пакет: доступна первичная настройка подписки. Системное окно Polkit попросит подтверждение администратора.\nВыбор первого сервера может занять несколько минут; VPN запускается отдельно, автозапуск включается отдельно и только по желанию."
+      : "Native preview: доступны статус, запуск/остановка native-службы, VPN и автозапуск.\nСерверы, подписка, режим и диагностика пока не подключены.";
+  }
+  private nativeUnavailable(action: Action) {
+    if (action.startsWith("servers/"))
+      return "В native preview каталог серверов, выбор и проверки пока не подключены.";
+    if (action === "subscription/read")
+      return "В native-пакете сохранённый адрес не показывается; задайте его через редактор настройки.";
+    if (action === "subscription")
+      return "В native preview настройка подписки доступна только в установленном native-пакете.";
+    if (action === "toggle-mode")
+      return "В native preview смена режима маршрутизации пока не подключена.";
+    if (action === "diagnostics")
+      return "В native preview адаптер диагностики пока не подключён.";
+    return "В native preview эта операция пока не подключена.";
+  }
+  private canPerform(action: Action) {
+    if (!this.nativeMode() || this.nativeInstalled() || nativeSupportedActions.includes(action) ||
+        (this.nativeInstalled() && action === "subscription")) return true;
+    this.notify(this.nativeUnavailable(action), true);
+    return false;
+  }
+  private phaseLabel(phase: string) {
+    if (this.nativeMode()) {
+      const nativePhases: Record<string, string> = {
+        "compose-up": "Запуск native-службы",
+        "compose-up-done": "Native-служба запущена",
+        "compose-down": "Остановка native-службы",
+      };
+      return nativePhases[phase] ?? phases[phase] ?? "";
+    }
+    return phases[phase] ?? "";
+  }
+  private actionLabel(action: Action) {
+    if (this.nativeMode()) {
+      if (action === "backend/start") return "Запускаем native-службу";
+      if (action === "stop") return "Останавливаем native-службу";
+      if (this.nativeInstalled() && action === "subscription") return "Настраиваем native-пакет";
+    }
+    return names[action] ?? "Операция";
+  }
+  private autostartValue(gateway: boolean, connect: boolean) {
+    const value: {
+      gateway: boolean;
+      connect: boolean;
+      runtime?: "docker" | "native";
+    } = { gateway, connect };
+    if (this.autostart?.runtime !== undefined)
+      value.runtime = this.autostart.runtime;
+    return JSON.stringify(value);
+  }
+  private enabledServiceLabel(value: string) {
+    switch (value.trim().toLowerCase()) {
+      case "enabled": return "автозапуск включён";
+      case "disabled": return "автозапуск отключён";
+      case "masked": return "автозапуск замаскирован";
+      case "not-installed":
+      case "not-found": return "служба не установлена";
+      case "unknown": return "автозапуск: неизвестно";
+      default: return "автозапуск: неизвестно";
+    }
+  }
+  private activeServiceLabel(value: string) {
+    switch (value.trim().toLowerCase()) {
+      case "active": return "активна";
+      case "inactive":
+      case "dead": return "неактивна";
+      case "failed": return "ошибка";
+      case "activating": return "запускается";
+      case "deactivating": return "останавливается";
+      case "reloading": return "перечитывает конфигурацию";
+      case "unknown": return "неизвестно";
+      case "not-installed":
+      case "not-found": return "недоступно";
+      default: return "неизвестно";
+    }
+  }
+  private serviceStateLabel() {
+    if (!this.serviceState)
+      return "Фактическое состояние службы: не проверено · текущее состояние: недоступно";
+    return `Фактическое состояние службы: ${this.enabledServiceLabel(this.serviceState.enabled)}; текущее состояние: ${this.activeServiceLabel(this.serviceState.active)}`;
+  }
   private async loadPendingSubscription() {
-    if (this.closing || this.disposed || [...this.tasks.values()].some(task => !this.compatible("subscription/read", task.action))) return;
+    if (this.closing || this.disposed || this.nativePreviewOnly() || [...this.tasks.values()].some(task => !this.compatible("subscription/read", task.action))) return;
     const revision = this.pendingSubscriptionRevision;
     this.pendingSubscriptionRevision = undefined;
     if (revision !== undefined && revision === this.editorRevision &&
@@ -349,7 +513,12 @@ export class App {
     this.paint();
   }
   private open(screen: Screen) {
+    if(screen==="servers" && this.nativeInstalled() && !this.profiles && this.status?.subscription==="configured") screen="profiles";
     if (this.closing) return;
+    if (screen === "subscription" && !this.subscriptionAvailable()) {
+      this.notify(this.nativeUnavailable("subscription"), true);
+      return;
+    }
     if (this.screen === "subscription") this.draft = this.input.value;
     this.screen = screen;
     this.selected = 0;
@@ -357,11 +526,13 @@ export class App {
     this.navigationRevision++;
     if (screen === "subscription") {
       this.input.value = this.draft;
-      if (!this.loadedSubscription) {
+      if (!this.loadedSubscription && !this.nativePreviewOnly()) {
         this.pendingSubscriptionRevision = this.editorRevision;
         void this.loadPendingSubscription();
       }
     }
+    if(screen==="profiles") void this.perform("profiles/list");
+    if(screen==="profile-name" || screen==="profile-source") this.input.value="";
     if (screen === "autostart") void this.perform("autostart/read");
     if (screen === "target") this.input.value = this.target;
     this.paint();
@@ -371,13 +542,19 @@ export class App {
       this.status?.subscription === "configured" &&
       !this.catalogLoaded &&
       !this.busy &&
-      !this.batch
+      !this.batch &&
+      !this.nativePreviewOnly()
     )
       void this.perform(this.catalogStale ? "servers/refresh" : "servers/list");
     // Diagnostics immediately displays the cached evidence. Refresh is explicit.
   }
   private confirm(action: "disconnect" | "stop") {
     this.confirmation = action;
+    this.open("confirm");
+  }
+  private confirmSubscription(value: string) {
+    this.pendingSubscription = value;
+    this.confirmation = "subscription";
     this.open("confirm");
   }
   private items(): Item[] {
@@ -406,20 +583,50 @@ export class App {
           else if (choice === "diagnostics") this.open("diagnostics");
           else if (choice === "status") void this.perform("status");
           else if (this.recovery) {
-            if (["servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/list", "status", "diagnostics"].includes(this.recovery.action))
+            if (["servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch", "servers/list", "status", "diagnostics"].includes(this.recovery.action))
               void this.retryCheck(this.recovery);
             else { this.retryOperation = { ...this.recovery }; this.open("retry-confirm"); }
           }
         },
       }));
     }
+    if(this.screen==="profile-remove") return [
+      {key:"y",label:"Удалить профиль из приложения",run:()=>void this.removeProfile()},
+      {key:"n",label:"Отмена",run:()=>this.open("profiles")},
+    ];
+    if(this.screen==="profiles") {
+      const profiles=this.profiles?.items ?? [];
+      const pages=Math.max(1,Math.ceil(profiles.length/4));this.profilePage=Math.min(this.profilePage,pages-1);
+      return [
+        ...profiles.slice(this.profilePage*4,this.profilePage*4+4).map((profile,i)=>({key:String(i+1),label:`${profile.id===this.profiles?.active?"● ":""}${profile.name} · ${profile.kind==="server"?"сервер":"подписка"} · ${profile.count}${profile.stale?" · сохранённый список":""}`,run:()=>void this.browseProfile(profile.id)})),
+        {key:"n",label:"Добавить профиль",run:()=>this.open("profile-name")},
+        ...(this.profiles?.active?[{key:"x",label:"Удалить выбранный профиль",run:()=>this.open("profile-remove")}]:[]),
+        ...(pages>1?[{key:"[",label:"Предыдущие профили",run:()=>{this.profilePage=(this.profilePage+pages-1)%pages;this.selected=0;this.paint()}},{key:"]",label:"Следующие профили",run:()=>{this.profilePage=(this.profilePage+1)%pages;this.selected=0;this.paint()}}]:[]),
+      ];
+    }
     if (this.screen === "confirm")
       return [
-        { key: "n", label: "Нет", run: () => this.open("home") },
+        {
+          key: "n",
+          label: "Нет",
+          run: () => {
+            if (this.confirmation === "subscription") {
+              this.pendingSubscription = undefined;
+              this.open("subscription");
+            } else this.open("home");
+          },
+        },
         {
           key: "y",
           label: "Да",
           run: () => {
+            if (this.confirmation === "subscription") {
+              const value = this.pendingSubscription;
+              this.pendingSubscription = undefined;
+              this.open("home");
+              if (value) void this.perform("subscription", value);
+              return;
+            }
             const action = this.confirmation;
             this.open("home");
             void this.perform(action);
@@ -430,7 +637,7 @@ export class App {
     if (this.screen === "home")
       return [
         ...(!this.ready()
-          ? [{ key: "s", label: "Запустить Docker", run: run("backend/start") }]
+          ? [{ key: "s", label: `Запустить ${this.serviceObject()}`, run: run("backend/start") }]
           : []),
         ...(this.ready()
           ? [
@@ -452,26 +659,27 @@ export class App {
                   },
             ]
           : []),
-        { key: "t", label: this.inlineSpeed() ? `Тест скорости · ${this.homeTesting ? `${frames[this.frame % 10]} ${this.measurementAction === "servers/ping" ? "ping" : this.measurementAction === "servers/speed" ? "замер" : "подготовка"} · ` : ""}${this.homePing === undefined ? "—" : Math.round(this.homePing)}ms, ${this.homeSpeed === undefined ? "—" : (this.homeSpeed / 8.388608).toFixed(1)} MiB/s` : "Тест скорости", run: () => void this.testHomeSpeed() },
-        { key: "v", label: "Серверы", run: () => this.open("servers") },
-        { key: "c", label: "Подписка", run: () => this.open("subscription") },
-        { key: "d", label: "Диагностика", run: () => this.open("diagnostics") },
+        { key: "t", label: this.nativePreviewOnly() ? "Тест скорости · недоступно в native preview" : this.inlineSpeed() ? `Тест скорости · ${this.homeTesting ? `${frames[this.frame % 10]} ${this.measurementAction === "servers/ping" ? "ping" : this.measurementAction === "servers/speed" ? "замер" : "подготовка"} · ` : ""}${this.homePing === undefined ? "—" : Math.round(this.homePing)}ms, ${this.homeSpeed === undefined ? "—" : (this.homeSpeed / 8.388608).toFixed(1)} MiB/s` : "Тест скорости", run: () => void this.testHomeSpeed() },
+        { key: "v", label: this.nativePreviewOnly() ? "Серверы · native preview" : "Серверы", run: () => this.open("servers") },
+        { key: "c", label: this.nativeInstalled() && this.status?.subscription==="configured" ? "Профили · подписки и серверы" : this.nativeMode() ? (this.nativeInstalled() ? "Подписка · настройка native-пакета" : "Подписка · недоступна в native preview") : "Подписка", run: () => this.open(this.nativeInstalled() && this.status?.subscription==="configured"?"profiles":"subscription") },
+        { key: "d", label: this.nativePreviewOnly() ? "Диагностика · недоступна в native" : "Диагностика", run: () => this.open("diagnostics") },
         { key: "a", label: "Автозапуск", run: () => this.open("autostart") },
         {
           key: "m",
-          label: `Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}`,
+          label: `Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}${this.nativePreviewOnly() ? " · недоступен в native" : ""}`,
           run: () => {
-            if (this.ready()) void this.perform("toggle-mode");
-            else this.notify("Смена режима доступна после запуска Docker.");
+            if (this.nativeMode()) void this.perform("toggle-mode");
+            else if (this.ready()) void this.perform("toggle-mode");
+            else this.notify(`Смена режима доступна после запуска ${this.serviceObject()}.`);
           },
         },
         ...(["healthy", "unhealthy", "running", "stopped", "starting"].includes(
-          this.status?.gateway_state ?? "",
+          this.status?.gateway_state ?? this.status?.vpn_state ?? "",
         )
           ? [
               {
                 key: "z",
-                label: "Остановить Docker и VPN",
+                label: `Остановить ${this.serviceObject()} и VPN`,
                 run: () => this.confirm("stop"),
               },
             ]
@@ -480,18 +688,22 @@ export class App {
     if (this.screen === "autostart") {
       if (!this.autostart) return [{ key: "u", label: "Загрузить настройки", run: run("autostart/read") }];
       return [
-        { key: "g", label: `Запускать шлюз: ${this.autostart.gateway ? "да" : "нет"}`, run: () => void this.perform("autostart/set", JSON.stringify({ gateway: !this.autostart!.gateway, connect: false })) },
-        { key: "a", label: `Подключать VPN: ${this.autostart.connect ? "да" : "нет"}`, run: () => void this.perform("autostart/set", JSON.stringify({ gateway: this.autostart!.gateway || !this.autostart!.connect, connect: !this.autostart!.connect })) },
+        { key: "g", label: `${this.nativeMode() || this.autostart.runtime === "native" ? "Запускать native-службу" : "Запускать шлюз"}: ${this.autostart.gateway ? "да" : "нет"}`, run: () => void this.perform("autostart/set", this.autostartValue(!this.autostart!.gateway, false)) },
+        { key: "a", label: `Подключать VPN: ${this.autostart.connect ? "да" : "нет"}`, run: () => void this.perform("autostart/set", this.autostartValue(this.autostart!.gateway || !this.autostart!.connect, !this.autostart!.connect)) },
       ];
     }
     if (this.screen === "diagnostics")
       return [
-        { key: "u", label: "Обновить диагностику", run: run("diagnostics") },
+        { key: "u", label: this.nativePreviewOnly() ? "Обновить диагностику · недоступно в native" : "Обновить диагностику", run: run("diagnostics") },
       ];
     if (this.screen === "servers") {
       if (!this.ready())
         return [
-          { key: "s", label: "Запустить Docker", run: run("backend/start") },
+          { key: "s", label: `Запустить ${this.serviceObject()}`, run: run("backend/start") },
+        ];
+      if (this.nativePreviewOnly())
+        return [
+          { key: "i", label: "Серверы и проверки · недоступны в native preview", run: () => this.notify(this.nativeUnavailable("servers/list"), true) },
         ];
       if (this.status?.subscription !== "configured")
         return [
@@ -509,7 +721,7 @@ export class App {
         },
         {
           key: "t",
-          label: "Скорость всех · 3 с/сервер",
+          label: "Скорость + сайт · замер до 3 с",
           run: () => void this.runBatch("speed"),
         },
         { key: "e", label: "Адрес сайта", run: () => this.open("target") },
@@ -524,10 +736,18 @@ export class App {
   }
   private onKey = (key: KeyEvent) => {
     if (key.eventType === "release") return;
-    const editor = this.screen === "subscription" || this.screen === "target";
+    const editor = this.screen === "subscription" || this.screen === "target" || this.screen === "profile-name" || this.screen === "profile-source";
     if (key.name === "escape") {
       key.preventDefault();
-      this.open(editor && this.screen === "target" ? "servers" : "home");
+      this.open(
+        this.screen.startsWith("profile-") || this.screen==="servers" && !!this.profiles
+          ? "profiles"
+          : editor && this.screen === "target"
+          ? "servers"
+          : this.screen === "confirm" && this.confirmation === "subscription"
+            ? "subscription"
+            : "home",
+      );
       return;
     }
     if (key.ctrl && key.name === "c") {
@@ -538,9 +758,21 @@ export class App {
     if (editor) {
       if (key.name === "return") {
         key.preventDefault();
-        if (this.screen === "subscription")
-          void this.perform("subscription", this.input.value.trim());
-        else {
+        if(this.screen==="profile-name") {
+          const value=this.input.value.trim();if(!value || [...value].length>60){this.notify("Введите имя профиля: до 60 символов.",true);return}
+          this.profileName=value;this.open("profile-source");return;
+        }
+        if(this.screen==="profile-source") {void this.addProfile(this.input.value.trim());return}
+        if (this.screen === "subscription") {
+          const value = this.input.value.trim();
+          if (this.nativeInstalled()) {
+            if (!value || !/^(https?:|vless:|hysteria2:|hy2:)\/\//.test(value)) {
+              this.notify("Введите ссылку подписки.", true);
+              return;
+            }
+            this.confirmSubscription(value);
+          } else void this.perform("subscription", value);
+        } else {
           try {
             const u = new URL(this.input.value.trim());
             if (
@@ -575,7 +807,7 @@ export class App {
     const screenKeys: Record<string, Screen> = {
       h: "home",
       v: "servers",
-      c: "subscription",
+      c: this.nativeInstalled() && this.status?.subscription==="configured"?"profiles":"subscription",
       d: "diagnostics",
     };
     if (screenKeys[key.name]) {
@@ -700,12 +932,13 @@ export class App {
     return list.slice(this.viewStart, this.viewStart + this.rowCount());
   }
   private updateCatalog(reply: Reply, action: Action) {
-    if (action === "servers/check-batch" && reply.catalog?.servers) {
+    if ((action === "servers/check-batch" || action === "servers/speed-batch") && reply.catalog?.servers) {
       for (const row of reply.catalog.servers) {
         const at = this.servers.findIndex((s) => s.server_id === row.server_id);
         if (at >= 0)
           this.servers[at] = {
             ...this.servers[at],
+            ...(action === "servers/speed-batch" ? { status: row.status, download_mbps: row.download_mbps, download_seconds: row.download_seconds, downloaded_bytes: row.downloaded_bytes } : {}),
             ping_status: row.ping_status,
             latency_ms: row.latency_ms,
             availability:
@@ -719,7 +952,7 @@ export class App {
       const oldOrder = this.sortedServers();
       const anchor = oldOrder[this.viewStart]?.server_id;
       const cursorIndex = oldOrder.findIndex(s => s.server_id === this.serverID);
-      this.servers = reply.catalog.servers.map(s => {
+      this.servers = reply.catalog.servers.filter(s => !this.profiles || (s.profile_id ?? "profile_legacy1") === this.profiles.active).map(s => {
         const measured = previous.get(s.server_id);
         return { ...s, status: measured?.status ?? "untested",
           ping_status: measured?.ping_status ?? "untested", latency_ms: measured?.latency_ms,
@@ -772,8 +1005,9 @@ export class App {
   ): Promise<Reply | undefined> {
     if (this.closing || this.disposed) return;
     if (this.backendOffline || this.reconnecting && !["status", "servers/list"].includes(action)) {
-      this.notify("Связь со службой недоступна. [f] Восстановить связь", true); return;
+      this.notify("Служба управления недоступна. [f] Восстановить связь", true); return;
     }
+    if (!this.canPerform(action)) return;
     const measurementActive = !!this.batch || this.homeTesting;
     const allowedDuringMeasurement = ["servers/select", "status", "subscription/read"].includes(action);
     if ((measurementActive && !insideBatch && !allowedDuringMeasurement) ||
@@ -785,11 +1019,13 @@ export class App {
       if (action !== "status") this.notify("Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k].");
       return;
     }
-    if (action === "subscription" && (!value || !/^https?:\/\//.test(value))) {
+    if (action === "subscription" && (!value || !/^(https?:|vless:|hysteria2:|hy2:)\/\//.test(value))) {
       this.notify("Введите ссылку подписки.", true);
       return;
     }
     const requestID = `ui-${++this.nextTask}`;
+    const requestRuntime = this.status?.runtime;
+    const nativeSubscriptionSetup = action === "subscription" && this.nativeInstalled();
     this.tasks.set(requestID, { action, measurement: insideBatch, started: Date.now(), phase: "", value });
     const selectionRevision = this.selectionRevision;
     const revision = this.editorRevision,
@@ -798,12 +1034,15 @@ export class App {
     let reply: Reply | undefined;
     try {
       reply = await this.backend.request(action, value, requestID);
-      if (!action.startsWith("servers/") && !action.startsWith("autostart/") && action !== "subscription/read") {
+      if (!action.startsWith("servers/") && !action.startsWith("autostart/") && action !== "subscription/read" && !action.startsWith("profiles/")) {
         this.status = reply.status;
         this.checked = Date.now();
       }
       if (reply.ok && reply.autostart) this.autostart = reply.autostart;
-      if (!reply.ok && action === "autostart/set") this.autostart = undefined;
+      if (action === "autostart/read" || action === "autostart/set") {
+        this.serviceState = reply.ok ? reply.autostart_service : undefined;
+        if (!reply.ok && action === "autostart/set") this.autostart = undefined;
+      }
       const previousMeasurements = this.homeTesting && action === "servers/list"
         ? new Map(this.servers.map(row => [row.server_id, row])) : undefined;
       const currentSelection = this.servers.find(row => row.selected)?.server_id;
@@ -817,6 +1056,7 @@ export class App {
           download_mbps: previous.download_mbps, download_seconds: previous.download_seconds,
           downloaded_bytes: previous.downloaded_bytes } : row;
       });
+      if(reply.ok && reply.profiles) this.profiles=reply.profiles;
       if (action === "subscription/read" && reply.ok) {
         this.loadedSubscription = true;
         if (revision === this.editorRevision) {
@@ -825,12 +1065,14 @@ export class App {
         }
       }
       if (!reply.ok && reply.reason === "cancelled") this.recovery = undefined;
-      else if (!reply.ok) this.recovery = { ...recoveryFor(action, reply.reason), action, value,
+      else if (!reply.ok) this.recovery = { ...recoveryFor(action, reply.reason, this.status?.runtime), action, value,
         homeServerID: this.homeTesting ? this.homeSpeedServer?.id : undefined,
         batchRetry: this.batch ? { kind: this.batch.kind, ids: [...(this.batch.ids ?? [])], target: this.batch.target ?? this.target } : undefined,
       };
       if (!reply.ok && !insideBatch) {
-        this.notice = reply.reason === "autostart-unavailable" ? "Не удалось настроить автозапуск. Проверьте пользовательскую службу systemd." : this.recovery?.message ?? failure(reply.reason, reply.code);
+        this.notice = nativeSubscriptionSetup
+          ? "Не удалось настроить native-пакет. Проверьте подтверждение администратора и повторите."
+          : reply.reason === "autostart-unavailable" ? "Не удалось настроить автозапуск. Проверьте пользовательскую службу systemd." : this.recovery?.message ?? failure(reply.reason, reply.code, this.status?.runtime);
         this.noticeAttempt = [
           "start",
           "backend/start",
@@ -849,16 +1091,23 @@ export class App {
         !insideBatch
       ) {
         const done: Partial<Record<Action, string>> = {
+          "profiles/list":"", "profiles/open":"Профиль открыт. Активный сервер не изменён.", "profiles/add":"Профиль добавлен.", "profiles/remove":"Профиль удалён. Активное подключение не изменено.",
           "autostart/read": "",
-          "autostart/set": "Сохранено. Настройка применяется при следующем входе в KDE.",
-          "backend/start": "Docker готов. Можно проверять серверы.",
+          "autostart/set": this.nativeMode() || this.autostart?.runtime === "native"
+            ? "Сохранено. Настройка применяется при входе в графическую сессию."
+            : "Сохранено. Настройка применяется при следующем входе в KDE.",
+          "backend/start": this.nativeMode()
+            ? "Native-служба готова. Доступны VPN и автозапуск; серверы пока не подключены."
+            : "Docker готов. Можно проверять серверы.",
           start: "",
-          disconnect: "VPN отключён. Docker работает.",
-          stop: "Docker и VPN остановлены.",
+          disconnect: this.nativeMode() ? "VPN отключён. Native-служба работает." : "VPN отключён. Docker работает.",
+          stop: this.nativeMode() ? "Native-служба и VPN остановлены." : "Docker и VPN остановлены.",
           "servers/list": "Список загружен.",
           "servers/refresh": "Каталог обновлён.",
           "servers/select": "Сервер выбран.",
-          subscription: "Подписка сохранена. Обновите список серверов.",
+          subscription: nativeSubscriptionSetup
+            ? "Native-пакет настроен; первый сервер выбран, это могло занять несколько минут.\nVPN не подключён — нажмите «Подключить VPN» отдельно. Автозапуск не изменён — настройте его отдельно при желании."
+            : "Подписка сохранена. Обновите список серверов.",
           diagnostics: "Состояние компонентов обновлено.",
           "toggle-mode": "Режим изменён.",
         };
@@ -885,9 +1134,18 @@ export class App {
       this.backendOffline = true;
       this.cancelled = true;
       this.queued = undefined;
-      this.recovery = { ...recoveryFor(action, "backend-unavailable"), action, value };
-      this.status = undefined;
-      this.notify(failure("backend-unavailable", null), true);
+      this.recovery = { ...recoveryFor(action, "backend-unavailable", this.status?.runtime), action, value };
+      this.forgetStatusHealth();
+      if (action === "autostart/read" || action === "autostart/set") {
+        this.serviceState = undefined;
+        if (action === "autostart/set") this.autostart = undefined;
+      }
+      this.notify(
+        nativeSubscriptionSetup
+          ? "Не удалось настроить native-пакет. Проверьте подтверждение администратора и повторите."
+          : failure("backend-unavailable", null, requestRuntime),
+        true,
+      );
     } finally {
       this.tasks.delete(requestID);
       if (action === "servers/speed" && value) this.liveSpeeds.delete(value);
@@ -903,12 +1161,17 @@ export class App {
         this.screen === "servers" &&
         this.status?.subscription === "configured" &&
         !this.catalogLoaded &&
-        !this.batch
+        !this.batch &&
+        !this.nativePreviewOnly()
       ) {
         await this.perform(
           this.catalogStale ? "servers/refresh" : "servers/list",
         );
       }
+    }
+    if(action==="servers/refresh" && reply?.ok && this.profiles){
+      await this.perform("profiles/list");
+      if(this.profiles.items.find(p=>p.id===this.profiles?.active)?.stale) this.notify("Источник недоступен. Показаны ранее сохранённые серверы.");
     }
     await this.loadPendingSubscription();
     return reply;
@@ -918,7 +1181,8 @@ export class App {
   }
   private async testHomeSpeed(sourceID?: string) {
     if (this.busy || this.batch || this.homeTesting) return;
-    if (!this.ready()) { this.notify("Сначала запустите Docker.", true); return; }
+    if (this.nativePreviewOnly()) { this.notify(this.nativeUnavailable("servers/speed"), true); return; }
+    if (!this.ready()) { this.notify(`Сначала запустите ${this.serviceObject()}.`, true); return; }
     this.homeTesting = true;
     this.cancelled = false;
     this.homeSpeed = undefined;
@@ -967,8 +1231,12 @@ export class App {
       this.notify("Дождитесь завершения или отмените текущую операцию [k].");
       return;
     }
+    if (this.nativePreviewOnly()) {
+      this.notify(this.nativeUnavailable("servers/check-batch"), true);
+      return;
+    }
     if (!this.ready()) {
-      this.notify("Сначала запустите Docker.", true);
+      this.notify(`Сначала запустите ${this.serviceObject()}.`, true);
       return;
     }
     this.cancelled = false;
@@ -983,7 +1251,7 @@ export class App {
       total: this.servers.length,
       failed: 0,
       target: retry?.target ?? this.target,
-      running: new Set(),
+      running: new Set(), stages: new Map(),
       pinged: new Set(), completed: new Set(), failures: new Set(),
     };
     if (!this.catalogLoaded || this.catalogStale) {
@@ -996,8 +1264,8 @@ export class App {
         this.batch = undefined;
         this.notify(
           result?.reason === "backend-outdated"
-            ? failure("backend-outdated", null)
-            : "Не удалось загрузить серверы. Проверьте подписку и Docker.",
+            ? failure("backend-outdated", null, this.status?.runtime)
+            : `Не удалось загрузить серверы. Проверьте подписку и ${this.serviceLabel()}.`,
           true,
         );
         if (this.closing && !this.tasks.size && !this.homeTesting && !this.batch) await this.finishClose();
@@ -1014,60 +1282,17 @@ export class App {
     this.batch.total = ids.length;
     const target = this.batch.target!;
     let stoppedReason: string | undefined;
-    const groupSize = kind === "speed" ? 1 : Math.max(1, ids.length);
-    for (let offset = 0; offset < ids.length; offset += groupSize) {
-      const group = ids.slice(offset, offset + groupSize);
-      const id = group[0];
-      if (this.cancelled || this.closing) break;
-      this.batch.id = id;
-      this.batch.ids = group;
-      let result: Reply | undefined;
-      if (kind === "speed") {
-        // A fresh TCP ping gates each download; cached reachability is not enough.
-        this.servers = this.servers.map((server) => server.server_id === id
-          ? { ...server, status: "untested", download_mbps: undefined,
-              download_seconds: undefined, downloaded_bytes: undefined }
-          : server);
-        result = await this.perform("servers/ping", id, true);
-        if (this.cancelled || this.closing) break;
-        if (result?.ok && result.catalog?.server?.ping_status === "ready") {
-          this.batch.pinged.add(id!);
-          result = await this.perform("servers/speed", id, true);
-        } else if (result?.ok) {
-          result = { ...result, ok: false, reason: "failed" };
-        }
-      } else {
-        result = await this.perform(
-          "servers/check-batch", JSON.stringify({ ids: group, url: target }), true,
-        );
-      }
-      if (this.cancelled) break;
-      if (kind === "speed") {
-        this.batch.done++;
-        if (!result?.ok) this.batch.failed++;
-      } else {
-        const measured = result?.catalog?.servers ?? [];
-        for (const row of measured) {
+    if (!this.cancelled && !this.closing && ids.length) {
+      this.batch.ids = ids;
+      const result = await this.perform(kind === "speed" ? "servers/speed-batch" : "servers/check-batch", JSON.stringify({ ids, url: target }), true);
+      if (!this.cancelled && !this.closing) {
+        for (const row of result?.catalog?.servers ?? []) {
           this.batch.completed.add(row.server_id);
-          if (row.ping_status !== "ready" || row.availability !== "ready") this.batch.failures.add(row.server_id);
+          if (row.ping_status !== "ready" || row.availability !== "ready" || (kind === "speed" && row.status !== "ready")) this.batch.failures.add(row.server_id);
         }
         this.batch.done = this.batch.completed.size;
         this.batch.failed = this.batch.failures.size;
-      }
-      this.paint();
-      if (
-        !result ||
-        (kind !== "speed" && !result.ok) ||
-        [
-          "unavailable",
-          "stale",
-          "recovery_required",
-          "backend-outdated",
-        ].includes(result.reason)
-      ) {
-        stoppedReason = result?.reason ?? "unavailable";
-        this.cancelled = true;
-        break;
+        if (!result?.ok) { stoppedReason = result?.reason ?? "unavailable"; this.cancelled = true; }
       }
     }
     const { done, total, failed } = this.batch;
@@ -1075,8 +1300,8 @@ export class App {
     this.batch = undefined;
     this.notify(
       stoppedReason
-        ? `${failure(stoppedReason, null)} Проверено: ${done}/${total}.`
-        : `${this.cancelled || this.closing ? "Остановлено" : "Завершено"}: ${done}/${total} · ошибок ${failed}. ${kind !== "speed" && (this.cancelled || this.closing) ? "Показаны полученные результаты; проход не сохранён." : "Результаты сохранены."}`,
+        ? `${failure(stoppedReason, null, this.status?.runtime)} Проверено: ${done}/${total}.`
+        : `${this.cancelled || this.closing ? "Остановлено" : "Завершено"}: ${done}/${total} · ошибок ${failed}. ${(this.cancelled || this.closing) ? (kind === "speed" ? "Завершённые результаты сохранены." : "Показаны полученные результаты; проход не сохранён.") : "Результаты сохранены."}`,
       failed > 0 || !!stoppedReason,
     );
     if (this.closing && !this.tasks.size && !this.homeTesting && !this.batch) await this.finishClose();
@@ -1136,7 +1361,7 @@ export class App {
     const width = Math.max(10, this.renderer.terminalWidth - 2),
       state = connection(this.status);
     this.headline.content = cell(
-      `◈ VPNKIT${this.demo ? " · ДЕМО" : ""}    ${state.title}`,
+      `◈ VPNKIT${this.demo ? " · ДЕМО" : ""}${this.nativeMode() ? (this.nativeInstalled() ? " · NATIVE" : " · NATIVE PREVIEW") : ""}    ${state.title}`,
       width,
     );
     this.headline.fg = state.color;
@@ -1154,10 +1379,12 @@ export class App {
       running: "проверяется",
     };
     this.facts.content = cell(
-      `Docker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"} · Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}`,
+      this.nativeMode()
+        ? `Native-служба: ${gatewayNames[gateway ?? ""] ?? "неизвестно"} · runtime: native · Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}`
+        : `Docker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"} · Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}`,
       width,
     );
-    const editor = this.screen === "subscription" || this.screen === "target";
+    const editor = this.screen === "subscription" || this.screen === "target" || this.screen === "profile-name" || this.screen === "profile-source";
     this.input.visible = editor;
     this.editorHint.visible = editor;
     if (editor && !this.closing) this.input.focus();
@@ -1186,19 +1413,28 @@ export class App {
       const stages: Record<string, string> = { docker: "Docker", routes: "Маршруты", profile: "Профиль KDE", dns: "DNS", server: "Сервер", management: "Служба управления", input: "Ввод данных", unknown: "Операция" };
       this.summary.content = `${stages[this.recovery?.stage ?? "unknown"]}\n${this.recovery?.message ?? "Проверьте состояние."}`;
     }
-    if (this.screen === "confirm")
-      this.summary.content =
-        this.confirmation === "disconnect"
-          ? "Точно хотите отключить VPN?"
-          : "Точно хотите остановить Docker и отключить VPN?";
+    if (this.screen === "confirm") {
+      if (this.confirmation === "subscription") {
+        this.summary.height = 4;
+        this.summary.content =
+          "Настроить native-пакет?\nСистемное окно Polkit попросит подтверждение администратора.\nПервичный выбор сервера может занять несколько минут.\nVPN не запускается; автозапуск не изменяется.";
+      } else {
+        this.summary.content =
+          this.confirmation === "disconnect"
+            ? "Точно хотите отключить VPN?"
+            : `Точно хотите остановить ${this.serviceObject()} и отключить VPN?`;
+      }
+    }
     if (this.screen === "home")
       this.summary.content = !this.status
         ? "Проверяем состояние…"
-        : !this.ready()
-          ? "Подписку можно настроить до запуска Docker."
-          : this.status.subscription !== "configured"
-            ? "Добавьте подписку, затем откройте серверы."
-            : "";
+        : this.nativePreviewOnly()
+          ? this.nativePreview()
+          : !this.ready()
+            ? `Подписку можно настроить до запуска ${this.serviceObject()}.`
+            : this.status.subscription !== "configured"
+              ? "Добавьте подписку, затем откройте серверы."
+              : "";
     this.summary.visible = this.screen !== "home" || this.summary.chunks.some(chunk => chunk.text.length > 0);
     if (!this.summary.visible) this.summary.height = 0;
     this.measurementInfo.visible = this.screen === "home" && this.inlineSpeed() && !!this.homeSpeedServer;
@@ -1216,53 +1452,70 @@ export class App {
       ...t`\n${cell(this.homeSpeedLabel, width).trimEnd()}${this.homeSpeedAt ? `\nПоследний замер: ${new Date(this.homeSpeedAt).toLocaleTimeString("ru-RU", { hour12: false })}` : ""}`.chunks,
     ]);
     if (this.screen === "autostart") {
-      const results: Record<string, string> = { ready: "выполнен", failed: "ошибка, откройте диагностику", "prerequisites-unavailable": "Docker или сеть не готовы", cancelled: "отменён", disabled: "отключён", running: "выполняется" };
-      this.summary.height = 3;
-      this.summary.content = `При входе в KDE\nОтключение автозапуска не отключает работающий VPN.\nПоследний запуск: ${results[this.autostart?.last_result ?? ""] ?? "не выполнялся"}`;
+      const nativeAutostart = this.nativeMode() || this.autostart?.runtime === "native";
+      const results: Record<string, string> = { ready: "выполнен", failed: "ошибка, откройте диагностику", "prerequisites-unavailable": `${nativeAutostart ? "Native-служба" : "Docker"} или сеть не готовы`, cancelled: "отменён", disabled: "отключён", running: "выполняется" };
+      const login = nativeAutostart
+        ? "Автозапуск native-службы при входе в графическую сессию"
+        : "При входе в KDE";
+      this.summary.height = nativeAutostart ? 5 : 4;
+      this.summary.content = `${login}\nОтключение автозапуска не отключает работающий VPN.\nПоследний запуск: ${results[this.autostart?.last_result ?? ""] ?? "не выполнялся"}${nativeAutostart ? "\nРежим: native-служба" : ""}\n${this.serviceStateLabel()}`;
     }
-    if (this.screen === "subscription")
-      this.summary.content =
-        this.busy === "subscription/read"
-          ? "Подписка · загрузка сохранённого адреса…"
-          : "Подписка";
+    if (this.screen === "subscription") {
+      this.summary.height = this.nativeInstalled() ? 4 : this.nativeMode() ? 3 : 2;
+      this.summary.content = this.nativeInstalled()
+        ? "Первичная настройка native-пакета\nСистемное окно Polkit попросит подтверждение администратора.\nВыбор первого сервера может занять несколько минут.\nПосле успеха нажмите «Подключить VPN» отдельно; автозапуск включается отдельно и не включается сам."
+        : this.nativeMode()
+          ? "Подписка\nВ native preview чтение и применение подписки пока не подключены."
+          : this.busy === "subscription/read"
+            ? "Подписка · загрузка сохранённого адреса…"
+            : "Подписка";
+    }
+    if(this.screen==="profiles") this.summary.content="Профили · у каждого свой список серверов\nВыбор профиля не меняет активное VPN-подключение.";
+    if(this.screen==="profile-name") this.summary.content="Новый профиль · имя\nНапример: Моя VPS или Основная подписка";
+    if(this.screen==="profile-source") this.summary.content=`${this.profileName} · ссылка\nHTTPS-подписка, vless://, hysteria2:// или hy2://`;
+    if(this.screen==="profile-remove") this.summary.content="Удалить выбранный профиль?\nЭто не останавливает уже работающий сервер.";
     if (this.screen === "target")
       this.summary.content =
         "Адрес для проверки доступности\nHTTPS-запрос через каждый сервер; это не тест скорости.";
     if (this.screen === "diagnostics")
-      this.summary.content = `OpenVPN / KDE: ${this.status?.networkmanager_active === "yes" ? "активен" : this.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nDocker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${this.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${this.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${this.status?.last_attempt ?? "—"}\nПроверка сайта и скорости — на экране серверов.`;
-    const table = this.screen === "servers" && this.ready();
+      this.summary.content = this.nativeMode()
+        ? `OpenVPN / KDE: ${this.status?.networkmanager_active === "yes" ? "активен" : this.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nNative-служба: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${this.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${this.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${this.status?.last_attempt ?? "—"}\nПроверки сайта и скорости — на экране серверов.`
+        : `OpenVPN / KDE: ${this.status?.networkmanager_active === "yes" ? "активен" : this.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nDocker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${this.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${this.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${this.status?.last_attempt ?? "—"}\nПроверка сайта и скорости — на экране серверов.`;
+    const table = this.screen === "servers" && this.ready() && !this.nativePreviewOnly();
     this.tableHeader.visible = table;
     if (this.screen === "servers")
-      this.summary.content = !this.ready()
-        ? "Для проверок нужен Docker. VPN подключать не требуется."
-        : this.status?.subscription !== "configured"
-          ? "Добавьте подписку для загрузки серверов."
-          : `${this.servers.length} серверов · Сортировка [o]: ${{ name: "имя ↑", ping: "ping ↑", speed: "скорость ↓", availability: "доступность ↓" }[this.sort]}${this.catalogStale ? " · каталог устарел" : ""}\nСайт: ${this.target}`;
-    if (compactServers && this.ready() && this.status?.subscription === "configured" && !this.catalogStale) {
+      this.summary.content = this.nativePreviewOnly()
+        ? !this.ready()
+          ? `Native-служба не готова. Запустите ${this.serviceObject()} для жизненного цикла VPN.\nВыбор серверов и проверки пока не подключены.`
+          : "Native preview: выбор серверов и проверки пока не подключены.\nЗапуск/остановка VPN и автозапуск доступны на главной."
+        : !this.ready()
+          ? `Для проверок запустите ${this.serviceObject()}. VPN подключать не требуется.`
+          : this.status?.subscription !== "configured"
+            ? "Добавьте подписку для загрузки серверов."
+            : `${this.profiles?.items.find(p=>p.id===this.profiles?.active)?.name ?? "Серверы"} · ${this.servers.length} серверов · Сортировка [o]: ${{ name: "имя ↑", ping: "ping ↑", speed: "скорость ↓", availability: "доступность ↓" }[this.sort]}${this.catalogStale ? " · каталог устарел" : ""}\nСайт: ${this.target}`;
+    if (compactServers && !this.profiles && !this.nativePreviewOnly() && this.ready() && this.status?.subscription === "configured" && !this.catalogStale) {
       this.summary.visible = false;
       this.summary.height = 0;
     }
-    const nameWidth = Math.max(10, width - 39);
+    const nameWidth = Math.max(10, width - 45);
     this.tableHeader.content = `   ${cell("Сервер", nameWidth)} ${cell("Ping мс", 8)} ${cell("Мбит/с", 8)} ${cell("Сайт", 7)} Статус`;
     const visible = this.visibleServers();
     this.rows.forEach((row, i) => {
       const s = visible[i];
       row.visible = table && i < this.rowCount() && !!s;
       if (!s) return;
-      const queued = this.batch?.kind === "ping" && this.batch.ids?.includes(s.server_id) && !this.batch.running.has(s.server_id) && !this.batch.completed.has(s.server_id);
-      const active = this.batch?.kind === "ping"
-        ? this.batch.running.has(s.server_id)
-        : this.batch?.id === s.server_id;
+      const queued = !!this.batch && this.batch.ids?.includes(s.server_id) && !this.batch.running.has(s.server_id) && !this.batch.completed.has(s.server_id);
+      const active = this.batch?.running.has(s.server_id) ?? false;
       const checking = (kind: Batch) =>
         active &&
         (this.batch?.kind === kind ||
-          (kind === "availability" && this.batch?.kind === "ping"));
+          (kind === "availability" && !!this.batch));
       const ping = queued ? "ждёт" : (checking("ping") || checking("speed")) && !this.batch?.pinged.has(s.server_id)
         ? frames[this.frame % 10]
         : s.ping_status === "failed"
           ? "ошибка"
           : (s.latency_ms?.toString() ?? "—");
-      const speed = checking("speed") && this.batch?.pinged.has(s.server_id)
+      const speed = checking("speed") && this.batch?.stages.get(s.server_id) === "speed"
         ? this.liveSpeeds.has(s.server_id) ? `~${this.liveSpeeds.get(s.server_id)!.toFixed(1)}` : frames[this.frame % 10]
         : s.status === "failed"
           ? "ошибка"
@@ -1274,7 +1527,7 @@ export class App {
           : s.availability === "failed"
             ? "нет"
             : "—";
-      row.content = `${s.server_id === this.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)} ${cell(ping, 8)} ${cell(speed, 8)} ${cell(site, 7)} ${queued ? "в очереди" : active ? "проверка" : s.ping_status === "failed" || s.availability === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не пров."}`;
+      row.content = `${s.server_id === this.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)} ${cell(ping, 8)} ${cell(speed, 8)} ${cell(site, 7)} ${queued ? "в очереди" : active ? ({ start: "подготовка", ping: "сайт / ждёт", speed: "замер", complete: "готов" }[this.batch!.stages.get(s.server_id) ?? "start"]) : s.ping_status === "failed" || s.availability === "failed" || s.status === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не пров."}`;
       row.fg =
         s.server_id === this.serverID
           ? p.accent
@@ -1286,13 +1539,11 @@ export class App {
     const activeTask = [...this.tasks.values()].find(task => task.measurement) ??
       [...this.tasks.values()].find(task => task.action !== "status");
     if (this.batch) {
-      const detail = this.batch.kind === "speed"
-        ? `Тест скорости · ${this.batch.done}/${this.batch.total} · ${cell(this.servers.find((s) => s.server_id === this.batch?.id)?.display_name ?? "", 16).trim()}`
-        : `Ping → сайт · ${this.batch.done}/${this.batch.total} · ${Math.floor((Date.now() - this.started) / 1000)} с`;
+      const detail = `${this.batch.kind === "speed" ? "Ping → сайт + скорость" : "Ping → сайт"} · ${this.batch.done}/${this.batch.total} · ${Math.floor((Date.now() - this.started) / 1000)} с`;
       this.progress.content = `${frames[this.frame % 10]} ${detail}${this.cancelled ? " · отмена…" : " · [k] отменить"}`;
     }
     else if (activeTask) {
-      this.progress.content = `${frames[this.frame % 10]} ${names[activeTask.action] ?? "Операция"} · ${activeTask.phase || "выполняется"} · ${Math.floor((Date.now() - activeTask.started) / 1000)} с`;
+      this.progress.content = `${frames[this.frame % 10]} ${this.actionLabel(activeTask.action)} · ${activeTask.phase || "выполняется"} · ${Math.floor((Date.now() - activeTask.started) / 1000)} с`;
     }
     else
       this.progress.content =
@@ -1329,6 +1580,7 @@ export class App {
     this.closing = true;
     this.queued = undefined;
     this.input.blur();
+    this.pendingSubscription = undefined;
     this.draft = "";
     this.input.value = "";
     if (this.tasks.size || this.batch || this.homeTesting) {

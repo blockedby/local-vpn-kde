@@ -58,7 +58,7 @@ func fakeWorker() {
 		}
 	}
 	switch mode {
-	case "stream-check", "stream-speed":
+	case "stream-check", "stream-speed", "stream-speed-batch":
 		if mode == "stream-speed" {
 			fmt.Fprintf(os.Stdout, `{"event":"speed-progress","server_id":%q,"downloaded_bytes":1000,"elapsed_seconds":0.1,"download_mbps":0.08,"secret":"private-marker"}`+"\n", testServerID)
 		} else {
@@ -70,6 +70,10 @@ func fakeWorker() {
 				break
 			}
 			time.Sleep(5 * time.Millisecond)
+		}
+		if mode == "stream-speed-batch" {
+			fmt.Fprintf(os.Stdout, "{\"event\":\"server-check\",\"server_id\":%q,\"stage\":\"speed\",\"ping_status\":\"ready\",\"latency_ms\":17,\"availability\":\"failed\"}\n", testServerID)
+			fmt.Fprintf(os.Stdout, "{\"event\":\"server-check\",\"server_id\":%q,\"stage\":\"complete\",\"ping_status\":\"ready\",\"latency_ms\":17,\"availability\":\"failed\",\"status\":\"ready\",\"download_mbps\":8,\"download_seconds\":3,\"downloaded_bytes\":3000000,\"secret\":\"private-marker\"}\n", testServerID)
 		}
 		fmt.Fprintln(os.Stdout, `{"schema":"vibe-vpn.server-browser.v2","status":"ok","servers":[]}`)
 	case "normal":
@@ -964,61 +968,139 @@ func TestAvailabilityTargetIsBoundToOperationIdentity(t *testing.T) {
 }
 
 func TestCheckBatchRequestBoundsAndIdentity(t *testing.T) {
-	ids := make([]string, 1001)
-	for i := range ids {
-		ids[i] = fmt.Sprintf("srv_%027d", i)
-	}
-	good := []string{testToken, "check-batch", strings.Join(ids[:1000], ","), "https://example.com/"}
-	if _, err := parseOperationRequest(good); err != nil {
-		t.Fatal(err)
-	}
-	for _, csv := range []string{strings.Join(ids, ","), ids[0] + "," + ids[0], ids[0] + ",", "$(id)"} {
-		if _, err := parseOperationRequest([]string{testToken, "check-batch", csv, good[3]}); err == nil {
-			t.Fatal("invalid batch accepted")
-		}
-	}
-	if _, err := parseOperationRequest([]string{testToken, "check-batch", ids[0], "http://example.com/"}); err == nil {
-		t.Fatal("insecure target accepted")
+	for _, operation := range []string{"check-batch", "speed-batch"} {
+		t.Run(operation, func(t *testing.T) {
+			ids := make([]string, 1001)
+			for i := range ids {
+				ids[i] = fmt.Sprintf("srv_%027d", i)
+			}
+			good := []string{testToken, operation, strings.Join(ids[:1000], ","), "https://example.com/"}
+			if _, err := parseOperationRequest(good); err != nil {
+				t.Fatal(err)
+			}
+			for _, csv := range []string{strings.Join(ids, ","), ids[0] + "," + ids[0], ids[0] + ",", "$(id)"} {
+				if _, err := parseOperationRequest([]string{testToken, operation, csv, good[3]}); err == nil {
+					t.Fatal("invalid batch accepted")
+				}
+			}
+			if _, err := parseOperationRequest([]string{testToken, operation, ids[0], "http://example.com/"}); err == nil {
+				t.Fatal("insecure target accepted")
+			}
+
+		})
 	}
 }
 
 func TestSupervisorStreamsSafePingWhileWorkerIsStillRunning(t *testing.T) {
-	release := filepath.Join(t.TempDir(), "release")
-	s := newTestSupervisor(t, "stream-check", "VPNKIT_CHECK_RELEASE="+release)
-	args := []string{testToken, "check-batch", testServerID, "https://example.com"}
-	if err := s.prepare(args); err != nil {
+	for _, operation := range []string{"check-batch", "speed-batch"} {
+		t.Run(operation, func(t *testing.T) {
+			release := filepath.Join(t.TempDir(), "release")
+			mode := "stream-check"
+			if operation == "speed-batch" {
+				mode = "stream-speed-batch"
+			}
+			argvPath := filepath.Join(t.TempDir(), "argv")
+			s := newTestSupervisor(t, mode, "VPNKIT_CHECK_RELEASE="+release, "VPNKIT_OP_SUPERVISOR_TEST_ARGV="+argvPath)
+			args := []string{testToken, operation, testServerID, "https://example.com"}
+			if err := s.prepare(args); err != nil {
+				t.Fatal(err)
+			}
+			reader, writer := io.Pipe()
+			defer reader.Close()
+			done := make(chan int, 1)
+			go func() { defer writer.Close(); done <- dispatch(append([]string{"run"}, args...), s, writer) }()
+			defer func() { os.WriteFile(release, []byte("go"), 0600) }()
+			decoder := json.NewDecoder(reader)
+			var event map[string]any
+			if err := decoder.Decode(&event); err != nil {
+				t.Fatal(err)
+			}
+			if event["event"] != "server-check" || event["latency_ms"] != float64(17) || event["secret"] != nil {
+				t.Fatalf("invalid progress: %v", event)
+			}
+			select {
+			case <-done:
+				t.Fatal("progress waited for worker exit")
+			default:
+			}
+			if err := os.WriteFile(release, []byte("go"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if operation == "speed-batch" {
+				for _, stage := range []string{"speed", "complete"} {
+					var p map[string]any
+					if err := decoder.Decode(&p); err != nil || p["stage"] != stage || p["secret"] != nil {
+						t.Fatal("speed progress lost", p, err)
+					}
+					if stage == "complete" && (p["downloaded_bytes"] != float64(3000000) || p["download_seconds"] != float64(3) || p["download_mbps"] != float64(8) || p["availability"] != "failed") {
+						t.Fatal("speed metrics lost", p)
+					}
+				}
+			}
+			var final map[string]any
+			if err := decoder.Decode(&final); err != nil || final["status"] != "ok" {
+				t.Fatal("final response lost", err)
+			}
+			if code := <-done; code != 0 {
+				t.Fatalf("exit %d", code)
+			}
+			argvData, err := os.ReadFile(argvPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var argv []string
+			if json.Unmarshal(argvData, &argv) != nil {
+				t.Fatal("missing argv")
+			}
+			expected := []string{"--config", s.config.workerConfig, operation, "--server-id", testServerID, "--url", "https://example.com", "--json", "--progress"}
+			if strings.Join(argv, "\n") != strings.Join(expected, "\n") {
+				t.Fatalf("unsafe argv: %q", argv)
+			}
+			if err := s.verify(testToken); err != nil {
+				t.Fatal("worker not drained", err)
+			}
+
+		})
+	}
+}
+
+func TestSpeedBatchCancellationDrainsOwnedWorker(t *testing.T) {
+	fixture := t.TempDir()
+	supervisor := newTestSupervisor(
+		t,
+		"ignore-term-tree",
+		"VPNKIT_OP_SUPERVISOR_TEST_PARENT_READY="+filepath.Join(fixture, "parent"),
+		"VPNKIT_OP_SUPERVISOR_TEST_CHILD_READY="+filepath.Join(fixture, "child"),
+	)
+	args := []string{testToken, "speed-batch", testServerID, "https://example.com/"}
+	if err := supervisor.prepare(args); err != nil {
 		t.Fatal(err)
 	}
-	reader, writer := io.Pipe()
-	defer reader.Close()
-	done := make(chan int, 1)
-	go func() { defer writer.Close(); done <- dispatch(append([]string{"run"}, args...), s, writer) }()
-	defer func() { os.WriteFile(release, []byte("go"), 0600) }()
-	decoder := json.NewDecoder(reader)
-	var event map[string]any
-	if err := decoder.Decode(&event); err != nil {
-		t.Fatal(err)
+	runDone := make(chan error, 1)
+	go func() {
+		_, err := supervisor.run(args)
+		runDone <- err
+	}()
+	record := waitForRecord(t, supervisor, testToken, "running")
+	if err := supervisor.verify(testToken); !errors.Is(err, errOpen) {
+		t.Fatalf("verify did not report open: %v", err)
 	}
-	if event["event"] != "server-check" || event["latency_ms"] != float64(17) || event["secret"] != nil {
-		t.Fatalf("invalid progress: %v", event)
+	if !processCanMutate(record.WorkerPID) {
+		t.Fatal("verify signaled worker")
+	}
+	if err := supervisor.cancel(testToken); err != nil {
+		t.Fatal(err)
 	}
 	select {
-	case <-done:
-		t.Fatal("progress waited for worker exit")
-	default:
+	case err := <-runDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("worker did not close")
 	}
-	if err := os.WriteFile(release, []byte("go"), 0600); err != nil {
+	if err := supervisor.verify(testToken); err != nil {
 		t.Fatal(err)
-	}
-	var final map[string]any
-	if err := decoder.Decode(&final); err != nil || final["status"] != "ok" {
-		t.Fatal("final response lost", err)
-	}
-	if code := <-done; code != 0 {
-		t.Fatalf("exit %d", code)
-	}
-	if err := s.verify(testToken); err != nil {
-		t.Fatal("worker not drained", err)
 	}
 }
 
