@@ -1036,7 +1036,19 @@ export class App {
         }
       }
     } catch {
-      if (!action.startsWith("servers/") && !action.startsWith("autostart/") && !action.startsWith("profiles/")) this.status = undefined;
+      if (!action.startsWith("servers/") && !action.startsWith("autostart/") && !action.startsWith("profiles/")) {
+        // Runtime/install identity survives a failed poll; connection and
+        // service readiness do not. Otherwise a native bridge failure makes
+        // the next render misleadingly fall back to Docker wording.
+        const known = this.status;
+        this.status = known?.runtime === "native" || known?.runtime === "docker" ? {
+          runtime: known.runtime, installed: known.installed,
+          vpn_state: "unknown", gateway_state: "unknown",
+          subscription: "unknown", routing_mode: "unknown",
+          networkmanager_configured: "unknown", networkmanager_active: "unknown",
+          diagnostics: "unknown",
+        } : undefined;
+      }
       if (action === "autostart/read" || action === "autostart/set") {
         this.serviceState = undefined;
         if (action === "autostart/set") this.autostart = undefined;
