@@ -21,6 +21,58 @@ func renderFixture(t *testing.T) RenderOptions {
 	return RenderOptions{Template: template, Base: t.TempDir(), Policy: "smart", RuleSets: "local-fixture", Outbound: "direct-fixture", Fixture: true, AllowMissingSubscription: true}
 }
 
+func TestRenderSmartGoogleRUOverridesDirectRules(t *testing.T) {
+	o := renderFixture(t)
+	if err := Render(o); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(o.Base, "rendered/sing-box/config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The native adapter must preserve the same routing priority as the shared
+	// renderer. domain_suffix includes the apex and its subdomains, unlike a
+	// domain-only match, without matching unrelated domains ending in google.ru.
+	native, err := nativeSingBoxConfig(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, encoded := range map[string][]byte{"shared": data, "native": native} {
+		t.Run(name, func(t *testing.T) {
+			var config struct {
+				Route struct {
+					Rules []struct {
+						DomainSuffix []string `json:"domain_suffix"`
+						RuleSet      string   `json:"rule_set"`
+						Outbound     string   `json:"outbound"`
+					} `json:"rules"`
+				} `json:"route"`
+			}
+			if err := json.Unmarshal(encoded, &config); err != nil {
+				t.Fatal(err)
+			}
+			google, geosite := -1, -1
+			for i, rule := range config.Route.Rules {
+				if reflect.DeepEqual(rule.DomainSuffix, []string{"google.ru"}) {
+					if google != -1 || rule.Outbound != "selected-native-out" {
+						t.Fatal("Google RU must have one explicit proxy rule")
+					}
+					google = i
+				}
+				if rule.Outbound == "direct-out" && google == -1 {
+					t.Fatal("direct rules can capture Google RU before its proxy exception")
+				}
+				if rule.RuleSet == "geosite-category-ru" {
+					geosite = i
+				}
+			}
+			if google < 0 || geosite <= google {
+				t.Fatal("Google RU proxy exception must precede Russian geosite direct routing")
+			}
+		})
+	}
+}
+
 // During migration the old renderer is an independent compatibility oracle.
 func TestRenderPythonParity(t *testing.T) {
 	python, err := exec.LookPath("python3")
