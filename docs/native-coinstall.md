@@ -18,6 +18,10 @@ IPv4 halves. A conflicting policy or equal-priority route can still prevent
 connection. A failed activation or readiness check disconnects only the attempted
 native UUID; the other VPN stays connected and its routes can take effect again.
 An already-active native connection is verified without reconnecting it.
+NetworkManager can translate OpenVPN's pushed `def1` option into one default
+route, so native also provisions the explicit `/1` routes on its owned profile.
+An older active profile without those routes needs a normal disconnect/reconnect;
+installation and repeated start do not silently reroute a live connection.
 
 First connect imports a missing native NetworkManager profile automatically.
 A stale capability whose UUID no longer exists can be recreated when no profile
