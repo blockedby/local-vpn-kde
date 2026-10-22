@@ -53,7 +53,7 @@ Architecture: amd64
 Maintainer: local-vpn-kde contributors <noreply@github.com>
 Section: net
 Priority: optional
-Depends: openvpn, network-manager, network-manager-openvpn, nftables, iptables, iproute2, polkitd, pkexec, passwd, util-linux, systemd, $libs
+Depends: ca-certificates, procps, openvpn, network-manager, network-manager-openvpn, nftables, iptables, iproute2, polkitd, pkexec, passwd, util-linux, systemd, $libs
 Homepage: https://github.com/blockedby/local-vpn-kde
 Description: Native VPN gateway with an OpenTUI interface for KDE
  Includes the compiled interface, Go services and sing-box engine.

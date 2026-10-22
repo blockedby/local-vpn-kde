@@ -12,6 +12,8 @@ url='https://github.com/blockedby/local-vpn-kde'
 # Upstream has not yet supplied publishable license metadata.
 license=('custom:unlicensed')
 depends=(
+  'ca-certificates'
+  'procps-ng'
   'openvpn'
   'networkmanager'
   'networkmanager-openvpn'

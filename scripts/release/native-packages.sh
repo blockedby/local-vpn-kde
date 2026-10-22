@@ -14,7 +14,7 @@ output=$(realpath -m "$3")
 [[ ! -e $output ]] || { echo 'Output already exists' >&2; exit 2; }
 work=$(mktemp -d)
 name="vpnkit-candidate-$distro-${UID}-$$"
-cleanup() { docker rm -f "$name" >/dev/null 2>&1 || true; rm -rf -- "$work"; }
+cleanup() { docker rm -f "$name" "$name-runtime" >/dev/null 2>&1 || true; rm -rf -- "$work"; }
 trap cleanup EXIT INT TERM
 python3 "$root/packaging/native/prepare-source.py" "$version" "$work/source"
 if [[ $distro == arch ]]; then
@@ -33,8 +33,19 @@ if [[ $distro == arch ]]; then
   docker exec "$name" bash -c 'set -Eeuo pipefail; packages=(/work/*.pkg.tar.zst); test "${#packages[@]}" = 1; pacman -U --noconfirm "${packages[0]}"; source=(/work/src/local-vpn-kde-native-*); python "${source[0]}/test/compiled-tui-installed-test.py"; pacman -U --noconfirm "${packages[0]}"; pacman -R --noconfirm local-vpn-kde-native; mkdir /artifacts; cp "${packages[0]}" /artifacts/'
 else
   docker exec "$name" bash -c 'set -Eeuo pipefail; mkdir /work/source; tar -xzf /input/*.tar.gz -C /work/source --strip-components=1; cd /work/source; bash packaging/debian/build.sh "$1" /artifacts' _ "$version"
-  docker network disconnect bridge "$name"
-  docker exec -e VPNKIT_DEBIAN_PACKAGE_LAB=1 "$name" bash -c 'set -Eeuo pipefail; files=(/artifacts/*.deb); test "${#files[@]}" = 1; python3 /work/source/test/native-debian-package-installed-test.py "${files[0]}"'
+  # Install into a fresh runtime, so build dependencies cannot hide omissions.
+  runtime_image=$(awk '/^FROM / {print $2; exit}' "$root/packaging/debian/Dockerfile")
+  docker run -d --name "$name-runtime" "$runtime_image" sleep infinity >/dev/null
+  mkdir "$work/runtime"
+  docker cp "$name:/artifacts/." "$work/runtime/"
+  docker cp "$work/runtime/." "$name-runtime:/tmp/"
+  docker exec "$name-runtime" mkdir -p /work/source/test
+  for fixture in compiled-tui-installed-test.py native-debian-package-installed-test.py; do
+    docker cp "$root/test/$fixture" "$name-runtime:/work/source/test/$fixture"
+  done
+  docker exec -e DEBIAN_FRONTEND=noninteractive "$name-runtime" bash -c 'set -Eeuo pipefail; apt-get update; apt-get install -y --no-install-recommends python3 /tmp/*.deb; useradd --create-home --shell /bin/bash builder'
+  docker network disconnect bridge "$name-runtime"
+  docker exec -e VPNKIT_DEBIAN_PACKAGE_LAB=1 "$name-runtime" bash -c 'set -Eeuo pipefail; files=(/tmp/*.deb); test "${#files[@]}" = 1; python3 /work/source/test/native-debian-package-installed-test.py "${files[0]}"'
 fi
 mkdir -p "$output"
 docker cp "$name:/artifacts/." "$output/"

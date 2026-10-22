@@ -47,8 +47,9 @@ these builds are not claimed bit-for-bit reproducible. Actual image identity and
 source checksums accompany the artifacts.
 
 Containers use a curated public source mount, no host network mode, no privileged
-mode, no Docker socket mount and no host configuration. Their network is detached
-before installed-package tests. Each runner removes its own container/staging on
+mode, no Docker socket mount and no host configuration. Debian installation uses a separate clean runtime container to resolve dependencies
+through apt, so build tools cannot mask missing runtime packages. The test
+container network is detached before installed-package tests. Each runner removes its own container/staging on
 exit. Existing host VPNs and application containers are untouched.
 
 ## Installing a tested candidate

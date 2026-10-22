@@ -3,6 +3,7 @@
 import fcntl
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -14,6 +15,9 @@ def run(*args, **kwargs):
     return subprocess.run(args, check=True, **kwargs)
 cli = "/usr/libexec/local-vpn-kde/local-vpn-kde.bin"
 run("dpkg", "-i", package)
+for command in ("ip", "nft", "iptables", "sysctl", "nmcli", "openvpn", "pkexec", "setpriv", "usermod", "systemd-run"):
+    assert shutil.which(command), command
+assert Path("/etc/ssl/certs/ca-certificates.crt").is_file()
 result = run("runuser", "-u", "builder", "--", "/usr/bin/local-vpn-kde", "ui", "--status-json", capture_output=True)
 status = json.loads(result.stdout)
 assert status["runtime"] == "native" and status["installed"] is True

@@ -3,7 +3,7 @@ FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20b
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl unzip golang-go python3 dpkg-dev binutils file \
-    openvpn network-manager network-manager-openvpn nftables iptables iproute2 \
+    procps openvpn network-manager network-manager-openvpn nftables iptables iproute2 \
     polkitd pkexec passwd util-linux systemd libstdc++6 zlib1g libbrotli1 libzstd1 \
  && rm -rf /var/lib/apt/lists/*
 RUN curl -fL --retry 2 https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-x64-baseline.zip -o /tmp/bun.zip \
