@@ -1,35 +1,71 @@
+<div align="center">
+
 # Local VPN KDE
 
-A VPN gateway for KDE, with NetworkManager integration, native and Docker runtimes, and a terminal UI. Choose servers, check ping and website availability, and measure download speed.
+**Ваши серверы. Ваши подписки. Один терминальный интерфейс.**
 
-## Native install (Arch x86_64)
+VPN для Linux и KDE с интеграцией в NetworkManager.<br>
+Native без Docker или отдельный Docker-шлюз.
 
-With a trusted locally built bundle containing `vpnkit-portable` and
-`install-native.sh`, verify its checksum and install from your desktop account:
+**Русский** · [English](README.en.md)
 
-```sh
+[Установка](#установка) · [Первое подключение](#первое-подключение) · [Обновление](#обновление) · [Документация](#документация)
+
+</div>
+
+---
+
+## Что умеет
+
+| Возможность | Как это работает |
+| :--- | :--- |
+| **Несколько профилей** | Подписки и одиночные ссылки, отдельный список серверов для каждого профиля |
+| **Собственный сервер** | Добавление `vless://`, `hysteria2://` и `hy2://` прямо в TUI |
+| **Проверки серверов** | Задержка, доступность выбранного сайта и скорость скачивания |
+| **Режимы маршрутизации** | Строгий и умный режимы, переключение из интерфейса |
+| **Управление подключением** | Запуск шлюза, подключение и отключение VPN — отдельные действия |
+| **Автозапуск** | Запуск шлюза при входе в KDE, с подключением VPN по желанию |
+| **Диагностика** | Состояние служб и проверки из того же интерфейса |
+
+В native-версии выбор профиля меняет отображаемый список серверов. Применение сервера и подключение системного VPN выполняются отдельно.
+
+## Установка
+
+Выберите подходящий вариант:
+
+| | Native | Docker |
+| :--- | :--- | :--- |
+| **Система** | Arch Linux / CachyOS, x86_64 | Ubuntu 24.04+, Debian 13+, Fedora, Arch / CachyOS, x86-64 |
+| **Запуск шлюза** | Системная служба, без Docker | Контейнер Docker |
+| **Способ установки** | Готовый локальный bundle | Сборка из репозитория |
+| **Запуск интерфейса** | `local-vpn-kde` | `./run.sh` |
+
+Оба варианта рассчитаны на Linux с KDE и NetworkManager. Для установки нужны интернет и права администратора.
+
+### Native · одна команда с sudo
+
+В каталоге доверенного bundle должны находиться `install-native.sh`, исполняемый `vpnkit-portable` и его файл контрольной суммы. Проверьте сумму, затем запустите установку **из своей обычной учётной записи**:
+
+```bash
 sha256sum -c vpnkit-portable.sha256
 sudo bash ./install-native.sh
+```
+
+Установщик добавит недостающие системные зависимости, установит приложение и настроит права пользователя. Если конфигурация уже есть, подготовит профиль NetworkManager. На новой установке профиль будет создан после настройки сервера, при первом подключении.
+
+**Установка сама не запускает и не подключает VPN.** Go, Bun и Docker на целевом компьютере не нужны. Системные компоненты — NetworkManager, его OpenVPN-плагин, OpenVPN, systemd, polkit и сетевые утилиты — устанавливаются через pacman.
+
+Запускайте интерфейс **без sudo**:
+
+```bash
 local-vpn-kde
 ```
 
-The one-sudo installer installs dependencies and the complete native application,
-enrolls your user, and prepares its NetworkManager profile when configuration and
-a desktop session are available. Fresh installs add a server/profile in the app;
-profile import is deferred until setup/first connect. Installation never starts
-or connects the VPN. No Go, Bun or Docker is needed on this target computer.
-See [native bundle and local build instructions](docs/portable-installer.md).
-There is no published download URL assumed by this command.
+> Native bundle пока собирается локально; публичная загрузка готового релиза здесь не предполагается. Состав bundle и команды сборки: [native-установщик](docs/portable-installer.md).
 
-Native first connect creates a missing owned NetworkManager profile automatically.
-Another VPN may remain connected: native prefers ordinary full-tunnel traffic,
-while more-specific routes retain precedence. Other profiles are not changed.
-Conflicting route policies fail with only the attempted native connection rolled
-back. See [coexistence and ownership limits](docs/native-coinstall.md).
+### Docker · из исходников
 
-## Docker install
-
-Linux x86-64 with KDE: Ubuntu 24.04+, Debian 13+, Fedora, or Arch/CachyOS. You need internet access and administrator privileges through sudo or Polkit.
+Установите Git через пакетный менеджер, если его ещё нет. Затем выполните **без sudo**:
 
 ```bash
 git clone https://github.com/blockedby/local-vpn-kde.git
@@ -38,18 +74,87 @@ cd local-vpn-kde
 ./run.sh
 ```
 
-Run as your regular user, **without sudo**. The installer requests administrator access when needed, installs dependencies (including Go, Bun, Docker Compose, and OpenVPN), builds the app, and configures the KDE profile. Install Git through your system package manager first if it is missing.
+Установщик сам запросит права администратора, установит зависимости для сборки и работы, включая Go, Bun, Docker Compose и OpenVPN, и подготовит профиль KDE.
 
-In the app, open **Subscription** (Подписка), paste your subscription URL, start the gateway, and select a server. Connect the VPN manually.
+## Первое подключение
 
-Optional: open **Autostart** (Автозапуск) to start the gateway at KDE login and optionally connect the VPN. Settings apply on the next login; disabling autostart leaves the current connection running. The terminal UI does not open automatically. Docker may also restart an already-running gateway through its existing restart policy.
+1. Откройте **Профили** (`c`) и добавьте подписку или одиночную ссылку на сервер.
+2. Откройте **Серверы** (`v`). Для новой подписки обновите список (`r`), затем выберите и примените сервер.
+3. При желании проверьте задержку, сайт или скорость в списке серверов.
+4. Вернитесь на главный экран. Запустите службу, если она остановлена, затем выберите **Подключить VPN** (`s`).
 
-Use `./run.sh` for subsequent launches. To update, run `git pull` followed by `./install.sh`.
+**«Служба готова» ещё не означает «VPN подключён».** Служба может работать для проверок, пока системное подключение выключено.
 
-Subscriptions, keys, and logs stay in the gitignored `secrets/` directory.
+### Всё управление — в TUI
 
-## Container smoke test
+| Клавиша | Действие |
+| :---: | :--- |
+| `s` / `x` | Запустить службу или подключить VPN / отключить VPN, в зависимости от состояния |
+| `v` | Серверы и их проверки |
+| `c` | Профили: подписки и отдельные серверы |
+| `m` | Строгий / умный режим |
+| `a` | Настройки автозапуска |
+| `d` | Диагностика |
+| `z` | Остановить native-службу вместе с VPN |
+| `Esc` / `q` | Назад / выйти из интерфейса |
 
-Run `test/vpnkit-local-install-container-test.sh` to test the real installer on a clean Debian container without Go or Bun, then check the subscription, ping, speed, website access, and VPN connection. It uses a separate Docker daemon and temporary network rules through the physical uplink; it does not connect the host VPN.
+В меню также работают стрелки, `Tab` и `Enter`. Доступные действия зависят от экрана и состояния службы.
 
-Requires Docker, the `local-vpn-kde:latest` image, and an existing physical underlay routing table (default `51840`). Supply `VPNKIT_LAB_SUBSCRIPTION_URL` or `VPNKIT_LAB_SUBSCRIPTION_FILE`, or use the saved subscription. Run with `--help` for network overrides. Private logs stay in `secrets/install-lab/`. The smoke test tries the selected server first, with up to five candidates. KDE desktop interaction is not covered.
+Настройки автозапуска применяются при следующем входе в KDE. Можно запускать только шлюз либо шлюз с подключением VPN. Отключение автозапуска не разрывает текущее соединение; TUI при входе автоматически не открывается. У Docker уже работающий шлюз также может перезапускаться согласно политике контейнера.
+
+### Если другой VPN уже подключён
+
+Native может работать рядом с другим VPN. При подключении native обычный full-tunnel трафик получает его маршруты; более специфичные маршруты сохраняют приоритет. Чужие профили не изменяются. Если проверить маршрутизацию не удалось, откатывается только предпринятое подключение native.
+
+Отсутствующий собственный профиль NetworkManager создаётся автоматически. Чужой или изменённый профиль не перезаписывается. Подробнее: [совместная работа VPN и защита профилей](docs/native-coinstall.md).
+
+## Обновление
+
+**Native:** запустите тот же установщик из нового проверенного bundle:
+
+```bash
+sudo bash ./install-native.sh
+```
+
+Совместимые обновления приложения сохраняют работающее соединение. Переоткройте TUI, чтобы загрузить новый интерфейс. Работающий VPN-движок получит новую версию при явном перезапуске службы. Обновления системных зависимостей и переход со старых пакетов без этой поддержки имеют отдельные ограничения — см. [обновление без отключения](docs/native-hot-upgrade.md).
+
+**Docker:** в каталоге репозитория:
+
+```bash
+git pull
+./install.sh
+```
+
+## Документация
+
+| Тема | Руководство |
+| :--- | :--- |
+| Native bundle: состав, зависимости, сборка | [Portable installer](docs/portable-installer.md) |
+| Совместная работа с другими VPN | [Native coexistence](docs/native-coinstall.md) |
+| Обновления работающего приложения | [Hot upgrade](docs/native-hot-upgrade.md) |
+| Архитектура native и профили источников | [Native runtime](docs/native-runtime.md) |
+| Проверки установщика и подключения | [E2E matrix](docs/native-e2e.md) |
+
+Технические руководства преимущественно на английском. Подписки, ключи и сгенерированные конфигурации — приватные данные; не добавляйте их в Git или отчёты об ошибках. Установка из исходников хранит приватные данные в игнорируемом каталоге `secrets/`; native-пакет использует отдельные приватные каталоги пользователя и службы.
+
+## Разработка и тестирование
+
+Локальные проверки из корня репозитория:
+
+```bash
+go test -race ./...
+mkdir -p .build
+go build -o .build/local-vpn-kde.bin ./cmd/local-vpn-kde
+cd scripts/vpnkit/tui
+bun install --frozen-lockfile
+bun run check
+bun test
+```
+
+Установку и сетевые изменения проверяйте в изолированной среде:
+
+- `test/native-arch-package-build-test.sh` — сборка и установка native-пакета в одноразовом Arch-контейнере.
+- [Native E2E](docs/native-e2e.md) — проверки NetworkManager, профилей, маршрутизации и автозапуска в выделенной VM.
+- `test/vpnkit-local-install-container-test.sh --help` — Docker-установщик и сетевые проверки, требования и параметры стенда.
+
+Тесты с настоящими подписками получают их через поддерживаемые переменные окружения, без сохранения в репозитории. Рабочие VPN, DNS и маршруты хоста не должны быть частью тестового стенда.
