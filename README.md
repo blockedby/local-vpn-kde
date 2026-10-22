@@ -21,6 +21,12 @@ or connects the VPN. No Go, Bun or Docker is needed on this target computer.
 See [native bundle and local build instructions](docs/portable-installer.md).
 There is no published download URL assumed by this command.
 
+Native first connect creates a missing owned NetworkManager profile automatically.
+Another VPN may remain connected: native prefers ordinary full-tunnel traffic,
+while more-specific routes retain precedence. Other profiles are not changed.
+Conflicting route policies fail with only the attempted native connection rolled
+back. See [coexistence and ownership limits](docs/native-coinstall.md).
+
 ## Docker install
 
 Linux x86-64 with KDE: Ubuntu 24.04+, Debian 13+, Fedora, or Arch/CachyOS. You need internet access and administrator privileges through sudo or Polkit.

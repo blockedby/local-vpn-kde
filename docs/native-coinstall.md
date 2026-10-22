@@ -5,9 +5,25 @@ The package does not start the gateway or connect NetworkManager automatically.
 The native gateway can start while the Docker VPN remains connected. Its
 namespace traffic uses a dedicated physical-underlay table through source-scoped
 rules at priorities 900/901, ahead of Docker rules at 998+. Host routes and the
-active NetworkManager profile remain unchanged. Only explicit native profile
-activation checks for another active NetworkManager VPN and asks the user to
-disconnect it first. The Docker engine and unrelated containers may stay up.
+active NetworkManager profile remain unchanged until explicit native connection.
+Connecting native may keep another VPN connected: the owned native profile uses
+IPv4 route metric 0, ahead of an ordinary competing full-tunnel route with a
+higher metric. More-specific routes, including corporate network routes, retain
+normal kernel precedence. No other VPN profile is modified or disconnected.
+The Docker engine and unrelated containers may stay up.
+
+Before reporting a successful native connection, the application proves the
+owned TUN address, both native `/1` routes, and effective route lookup in both
+IPv4 halves. A conflicting policy or equal-priority route can still prevent
+connection. A failed activation or readiness check disconnects only the attempted
+native UUID; the other VPN stays connected and its routes can take effect again.
+An already-active native connection is verified without reconnecting it.
+
+First connect imports a missing native NetworkManager profile automatically.
+A stale capability whose UUID no longer exists can be recreated when no profile
+with the owned name collides. A proven, inactive owned profile can be refreshed
+from the validated generated source. Foreign, renamed, invalid, or duplicate
+profiles are refused; a name alone never authorizes adoption or deletion.
 Unknown rules preceding 900, missing/ambiguous physical defaults, and reserved
 resource collisions still block startup. This is not a claim of compatibility
 with arbitrary third-party VPN firewalls.
@@ -32,9 +48,10 @@ address and physical interface; it does not change the policy or Docker chains.
 The existing native nft table still restricts ingress to established return
 traffic. Both rules participate in the ownership journal and are removed only
 when their exact contents and uniqueness are verified. Network journal schema
-is now version 4. The package's old-version pre-upgrade hook must stop the old
-native gateway before replacing its binaries; do not copy binaries over an
-active old service. Restarting/changing host firewalls during a native session
+is version 5 and records the boot identity. Supported package upgrade hooks
+preserve the running gateway using its pinned runtime when available; older
+preview hooks may stop their old gateway. Do not copy binaries over an active
+service. Restarting/changing host firewalls during a native session
 is outside the ownership transaction's concurrency guarantee.
 
 For an earlier native preview using vpnkit-local/21194, stop it before upgrading
@@ -48,8 +65,15 @@ logging in; the new native unit remains independently opt-in.
 - Regression tests import native with an active Docker profile and retained
   legacy capability; Docker name/capability bytes remain unchanged.
 - Native autostart creation preserves the Docker user unit byte-for-byte.
-- Full `go test -race ./...` passes; OpenTUI check and 67 tests pass after merging
-  the compiled UI installer into the native branch.
+- Release-candidate checks are `go test -race ./...`, `bun run check`, and
+  `bun test` in `scripts/vpnkit/tui`; record the exact revision and outcomes.
+- Native connection regression tests exercise missing/stale-profile cold starts,
+  foreign/tampered refusal, owned metric upgrades, both route halves, idempotent
+  reconnect checks, and bounded rollback of a failed native activation.
+- `test/native-nm-bootstrap-installed-vm-test.py` exercises installed profile
+  bootstrap and controlled second-VPN coexistence in a disposable VM. Its peer
+  verifies a local tunnel; the rival full-tunnel routes are a priority fixture,
+  not a claim that this peer provides Internet egress.
 - `test/native-gateway-network-container-test.sh` runs the real journal,
   controller and inspector with FORWARD DROP and an unrelated rule. Start,
   stop and recovery pass, and the complete pre/post FORWARD rules are identical.
