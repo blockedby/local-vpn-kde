@@ -15,7 +15,7 @@ if len(sys.argv) != 3 or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:~?rc[1-9][0
 version, output = sys.argv[1], Path(sys.argv[2]).resolve()
 if output.exists() or output.is_relative_to(root):
     raise SystemExit("Output must be a new directory outside the checkout")
-source.ALLOWLIST += ("packaging/debian", "packaging/portable", "cmd/vpnkit-portable", "install-native.sh", "test/compiled-tui-installed-test.py", "test/native-debian-package-installed-test.py")
+source.ALLOWLIST += ("VERSION", "packaging/debian", "packaging/portable", "cmd/vpnkit-portable", "install-native.sh", "test/compiled-tui-installed-test.py", "test/native-debian-package-installed-test.py")
 files = source.inventory(root)
 output.mkdir(parents=True)
 epoch = int(source.git(root, "show", "-s", "--format=%ct", "HEAD"))

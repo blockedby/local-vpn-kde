@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
-# Build only the selected tag, never the working tree. Does not publish anything.
+# Build only the selected revision, never working-tree files. Does not publish.
 set -Eeuo pipefail
 umask 022
-[[ $# == 2 ]] || { echo 'Usage: package.sh vMAJOR.MINOR.PATCH OUTPUT_DIRECTORY' >&2; exit 2; }
+[[ $# == 2 || $# == 3 ]] || { echo 'Usage: package.sh vMAJOR.MINOR.PATCH OUTPUT_DIRECTORY [COMMIT]' >&2; exit 2; }
 tag=$1
 [[ $tag =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo 'Expected a stable semantic version tag.' >&2; exit 2; }
 repo=$(git rev-parse --show-toplevel)
-commit=$(git rev-parse --verify "refs/tags/$tag^{commit}")
+if [[ $# == 3 ]]; then
+  [[ $3 =~ ^[0-9a-f]{40}$ ]] || { echo 'Expected full commit SHA.' >&2; exit 2; }
+  commit=$(git rev-parse --verify "$3^{commit}")
+  if git show-ref --verify --quiet "refs/tags/$tag"; then
+    [[ $(git rev-parse "refs/tags/$tag^{commit}") == "$commit" ]] || { echo 'Tag belongs to a different revision.' >&2; exit 2; }
+  fi
+else
+  commit=$(git rev-parse --verify "refs/tags/$tag^{commit}")
+fi
 output=$(realpath -m -- "$2")
 name="local-vpn-kde-$tag-linux-amd64"
 [[ ! -e $output/$name.tar.gz && ! -e $output/SHA256SUMS ]] || { echo 'Release assets already exist; refusing overwrite.' >&2; exit 2; }
@@ -17,7 +25,7 @@ paths=()
 while IFS= read -r -d '' path; do
   case "$path" in
     *_test.go|*.test.ts|*/node_modules/*|*.local.env|*.log|*.key|*.pem|*/speed-demo*) continue ;;
-    install.sh|run.sh|README.md|README.en.md|docs/*.md|docs/images/*.png|go.mod|go.sum|.dockerignore|.gitignore|compose.local.yaml|docker-compose.yml|cmd/*|internal/*|config/*|docker/*|scripts/vpnkit/*) paths+=("$path") ;;
+    install.sh|run.sh|VERSION|README.md|README.en.md|docs/*.md|docs/images/*.png|go.mod|go.sum|.dockerignore|.gitignore|compose.local.yaml|docker-compose.yml|cmd/*|internal/*|config/*|docker/*|scripts/vpnkit/*) paths+=("$path") ;;
   esac
 done < <(git ls-tree -r --name-only -z "$commit")
 [[ ${#paths[@]} -gt 0 ]] || { echo 'No application assets found.' >&2; exit 2; }
