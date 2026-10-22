@@ -17,7 +17,7 @@ paths=()
 while IFS= read -r -d '' path; do
   case "$path" in
     *_test.go|*.test.ts|*/node_modules/*|*.local.env|*.log|*.key|*.pem|*/speed-demo*) continue ;;
-    install.sh|run.sh|README.md|go.mod|go.sum|.dockerignore|.gitignore|compose.local.yaml|docker-compose.yml|cmd/*|internal/*|config/*|docker/*|scripts/vpnkit/*) paths+=("$path") ;;
+    install.sh|run.sh|README.md|README.en.md|docs/*.md|docs/images/*.png|go.mod|go.sum|.dockerignore|.gitignore|compose.local.yaml|docker-compose.yml|cmd/*|internal/*|config/*|docker/*|scripts/vpnkit/*) paths+=("$path") ;;
   esac
 done < <(git ls-tree -r --name-only -z "$commit")
 [[ ${#paths[@]} -gt 0 ]] || { echo 'No application assets found.' >&2; exit 2; }
