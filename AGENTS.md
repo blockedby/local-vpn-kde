@@ -9,11 +9,11 @@
 
 ## Stable versions and GitHub releases
 
-- Only a human can approve a specific revision as stable. Successful tests, a merge, or an agent's judgment do not grant this approval. An explicit approval already provided in the conversation remains valid for the specified revision.
+- Only a human can approve a revision as stable. Under the explicitly authorized release process, a maintainer merging a PR into `main` with the `release` label and a changed `VERSION` approves the exact merged revision and its release workflow. An ordinary merge or an agent's judgment does not grant approval. Agents must not label or merge a release PR without explicit release authorization.
 - Stable version tags are immutable. Never force-update or reuse one for a different commit; corrections get a new version.
 - Use the `release-vpn` skill when preparing or publishing a release. If it is unavailable, follow these rules and report that limitation.
-- Run routine checks locally. Do not add GitHub Actions triggers for pushes, pull requests, tags, or schedules. Release automation is manual (`workflow_dispatch`) and targets an explicitly selected stable tag.
-- Creating/pushing a stable tag does not authorize paid CI. Start a GitHub release workflow only when the user has explicitly authorized that run. Do not automatically retry failed runs.
-- Before publishing, verify the selected tag resolves to the human-approved, locally tested commit. Release assets must come from that revision and include SHA-256 checksums.
+- Run routine checks locally. The release workflow may run only on `pull_request: closed` targeting `main`, gated on merged=true and the `release` label. It reads `VERSION` from the exact merge SHA, checks and builds before creating the immutable tag. Ordinary PRs have no build jobs; pushes, tag pushes and schedules must not trigger CI. The native candidate workflow remains manual (`workflow_dispatch`).
+- A human-approved release-labelled PR merge authorizes its configured CI run and publication. Creating/pushing a tag alone does not authorize or trigger CI. Manual candidate runs and retries still require explicit authorization; never automatically retry failed runs.
+- Before publication, verify all assets and source manifests belong to the approved merged commit. Create the tag only after checks/builds pass; verify it resolves to that commit. Upload as a draft, verify downloaded SHA-256 checksums, then make it public. Never replace existing tags/releases/assets.
 - This application includes Go code, a Bun/OpenTUI interface, container configuration, and installer assets. Do not present a Go binary alone as the complete application. Describe the contents and remaining installation dependencies of the release archive accurately.
 - Do not deploy or reconnect the live VPN as part of tagging or publishing a release.

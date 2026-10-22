@@ -95,9 +95,9 @@ real systemd/VPN connection or uninterrupted live upgrade on Debian. Debian
 Before publication: approve the final tested commit as stable, resolve the
 project's unspecified redistribution license and bundled dependency obligations,
 and explicitly authorize the release run. Candidate artifacts alone do not
-fulfil these requirements. The existing `release.yml` still publishes the Docker
-installer archive; promoting native candidate packages into a stable release is
-a separate step. Do not publish this candidate workflow's artifacts as a stable
-release without completing those checks.
+fulfil these requirements. The separate `release.yml` builds fresh Arch/Debian packages and a Docker
+installer archive from a merged release-labelled PR. It takes the stable version
+from `VERSION`; see [release process](releases.md). Candidate artifacts are not
+automatically promoted, and the platform/licensing checks still apply.
 
 Maintainer-script behavior follows the [Debian Policy installation lifecycle](https://www.debian.org/doc/debian-policy/ch-maintainerscripts.html).

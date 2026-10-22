@@ -63,4 +63,4 @@ cd local-vpn-kde
 
 ## Подробнее
 
-[Руководство и обновление](docs/guide.ru.md) · [Совместная работа с другими VPN](docs/native-coinstall.md) · [Обновление без отключения](docs/native-hot-upgrade.md) · [Тестирование](docs/native-e2e.md)
+[Руководство и обновление](docs/guide.ru.md) · [Совместная работа с другими VPN](docs/native-coinstall.md) · [Обновление без отключения](docs/native-hot-upgrade.md) · [Тестирование](docs/native-e2e.md) · [Процесс выпуска](docs/releases.md)
