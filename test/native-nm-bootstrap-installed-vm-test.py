@@ -178,13 +178,14 @@ def private_identity():
     return [hashlib.sha256(subprocess.check_output(["sudo", "-n", "cat", path])).hexdigest() for path in paths]
 
 
-def connected():
+def connected(require_split=True):
     s = run("status")["status"]
     assert s.get("runtime") == "native" and s.get("installed") is True
     assert s.get("gateway_state") == "healthy" and s.get("networkmanager_active") == "yes"
     routes = json.loads(subprocess.check_output(["ip", "-j", "-4", "route", "show"]))
-    for destination in ("0.0.0.0/1", "128.0.0.0/1"):
-        assert any(r.get("dst") == destination and r.get("dev", "").startswith("tun") for r in routes), "missing full-tunnel route"
+    if require_split:
+        for destination in ("0.0.0.0/1", "128.0.0.0/1"):
+            assert any(r.get("dst") == destination and r.get("dev", "").startswith("tun") for r in routes), "missing full-tunnel route"
     subprocess.run(["curl", "--silent", "--fail", "--noproxy", "*", "--max-time", "20",
                     "https://www.gstatic.com/generate_204"], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -212,7 +213,7 @@ def restore_capability():
 
 
 try:
-    connected()
+    connected(require_split=False)  # The pre-upgrade profile can use a /0 route.
     restore_active = True
     # Apply the supported owned-profile metric migration before the fixture
     # snapshot. The new coexistence policy deliberately changes old metric 50
