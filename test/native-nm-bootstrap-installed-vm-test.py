@@ -47,6 +47,11 @@ summary = []
 secondary = None
 
 
+def record(case):
+    summary.append(case)
+    print(json.dumps({"case": case, "result": "passed"}), flush=True)
+
+
 class SecondaryVPN:
     """Independent TLS OpenVPN peer; its full-tunnel overlap is route-only.
 
@@ -239,7 +244,7 @@ try:
     run("start")
     assert capability() == generated, "repeated start replaced the profile"
     connected()
-    summary.append("absent_profile_import_connect_and_idempotence")
+    record("absent_profile_import_connect_and_idempotence")
     run("stop")  # Exercise the cold gateway lifecycle with a stale capability.
     stale_uuid = generated
     delete_tracked(stale_uuid, {"vpnkit-native"})
@@ -247,7 +252,7 @@ try:
     generated = capability()
     assert generated not in (original_uuid, stale_uuid), "stale capability was not replaced"
     connected()
-    summary.append("stale_capability_missing_uuid_import_connect")
+    record("stale_capability_missing_uuid_import_connect")
     run("disconnect")
     secondary = SecondaryVPN()
     secondary.start()
@@ -272,7 +277,7 @@ try:
     assert restored_routes == baseline_routes, "previous VPN routes were not restored"
     secondary.stop()
     secondary = None
-    summary.append("real_secondary_split_tunnel_native_overlap_priority_and_restoration")
+    record("real_secondary_split_tunnel_native_overlap_priority_and_restoration")
     # An existing owned UUID with a changed name must never be silently adopted.
     nm("connection", "modify", "uuid", generated, "connection.id", tampered_name)
     tampered = profile_digest(generated)
@@ -280,7 +285,7 @@ try:
     assert profile_digest(generated) == tampered, "tampered profile changed"
     assert run("status")["status"].get("networkmanager_active") != "yes"
     nm("connection", "modify", "uuid", generated, "connection.id", "vpnkit-native")
-    summary.append("tampered_owned_profile_refused_unchanged")
+    record("tampered_owned_profile_refused_unchanged")
     prior = inventory()
     nm("connection", "clone", "uuid", generated, foreign_name)
     created = inventory()-prior
@@ -291,7 +296,7 @@ try:
     run("start", ok=False)
     assert {item: profile_digest(item) for item in both} == both, "collision profiles changed"
     assert run("status")["status"].get("networkmanager_active") != "yes"
-    summary.append("foreign_same_name_collision_refused_unchanged")
+    record("foreign_same_name_collision_refused_unchanged")
 finally:
     cleanup_errors = []
     def cleanup_step(label, operation):
