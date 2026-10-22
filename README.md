@@ -1,10 +1,52 @@
+<div align="center">
+
 # Local VPN KDE
 
-A Docker VPN gateway for KDE, with NetworkManager integration and a terminal UI. Choose servers, check ping and website availability, and measure download speed.
+**Ваши серверы. Ваши подписки. Один терминальный интерфейс.**
 
-## Install
+VPN для Linux и KDE · NetworkManager · Native и Docker
 
-Linux x86-64 with KDE: Ubuntu 24.04+, Debian 13+, Fedora, or Arch/CachyOS. You need internet access and administrator privileges through sudo or Polkit.
+**Русский** · [English](README.en.md)
+
+</div>
+
+![Главный экран: подключение, умный режим и управление VPN](docs/images/home.png)
+
+Подписки и одиночные **VLESS / Hysteria2** ссылки, отдельные списки серверов, строгий и умный роутинг, автозапуск и диагностика — из одного TUI.
+
+## Серверы и профили
+
+Проверьте задержку, скорость и доступность нужного сайта перед подключением.
+
+![Список серверов с результатами проверок](docs/images/servers.png)
+
+Собственная VPS и несколько подписок могут жить рядом. Выбор профиля меняет список серверов; подключение VPN — отдельное действие.
+
+![Профили подписок и отдельного Hysteria2-сервера](docs/images/profiles.png)
+
+<sub>Снимки настоящего интерфейса с демонстрационными данными. Адреса и ключи не используются; результаты замеров иллюстративные.</sub>
+
+## Установка
+
+Подготовка пакетов Arch / Debian для `v0.2.0`: [кандидаты и ручной CI](docs/native-packages.md). Пакеты пока не опубликованы.
+
+### Native · Arch / CachyOS x86_64
+
+Из каталога доверенного локального bundle (`vpnkit-portable`, контрольная сумма и `install-native.sh`):
+
+```bash
+sha256sum -c vpnkit-portable.sha256
+sudo bash ./install-native.sh
+local-vpn-kde
+```
+
+Один запуск установщика с sudo; интерфейс запускается обычным пользователем. Go, Bun и Docker на этом компьютере не нужны. Установка не подключает VPN.
+
+[Как собрать bundle и что в него входит →](docs/portable-installer.md)
+
+### Docker · Linux x86-64 с KDE
+
+Ubuntu 24.04+, Debian 13+, Fedora, Arch / CachyOS. Выполняйте без sudo — установщик запросит права сам:
 
 ```bash
 git clone https://github.com/blockedby/local-vpn-kde.git
@@ -13,18 +55,12 @@ cd local-vpn-kde
 ./run.sh
 ```
 
-Run as your regular user, **without sudo**. The installer requests administrator access when needed, installs dependencies (including Go, Bun, Docker Compose, and OpenVPN), builds the app, and configures the KDE profile. Install Git through your system package manager first if it is missing.
+## Начать пользоваться
 
-In the app, open **Subscription** (Подписка), paste your subscription URL, start the gateway, and select a server. Connect the VPN manually.
+**`c` Профили** → добавить ссылку → **`v` Серверы** → выбрать сервер → **`s` Подключить VPN**. Если служба остановлена, сначала запустите её тем же пунктом меню.
 
-Optional: open **Autostart** (Автозапуск) to start the gateway at KDE login and optionally connect the VPN. Settings apply on the next login; disabling autostart leaves the current connection running. The terminal UI does not open automatically. Docker may also restart an already-running gateway through its existing restart policy.
+`m` — режим · `a` — автозапуск · `d` — диагностика · `x` — отключить VPN.
 
-Use `./run.sh` for subsequent launches. To update, run `git pull` followed by `./install.sh`.
+## Подробнее
 
-Subscriptions, keys, and logs stay in the gitignored `secrets/` directory.
-
-## Container smoke test
-
-Run `test/vpnkit-local-install-container-test.sh` to test the real installer on a clean Debian container without Go or Bun, then check the subscription, ping, speed, website access, and VPN connection. It uses a separate Docker daemon and temporary network rules through the physical uplink; it does not connect the host VPN.
-
-Requires Docker, the `local-vpn-kde:latest` image, and an existing physical underlay routing table (default `51840`). Supply `VPNKIT_LAB_SUBSCRIPTION_URL` or `VPNKIT_LAB_SUBSCRIPTION_FILE`, or use the saved subscription. Run with `--help` for network overrides. Private logs stay in `secrets/install-lab/`. The smoke test tries the selected server first, with up to five candidates. KDE desktop interaction is not covered.
+[Руководство и обновление](docs/guide.ru.md) · [Совместная работа с другими VPN](docs/native-coinstall.md) · [Обновление без отключения](docs/native-hot-upgrade.md) · [Тестирование](docs/native-e2e.md) · [Процесс выпуска](docs/releases.md)

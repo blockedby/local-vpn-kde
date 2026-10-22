@@ -37,6 +37,8 @@ type NetworkManager struct {
 }
 
 var ErrForeignNMProfile = errors.New("existing vpnkit-local profile belongs to another installation; ownership migration could not be verified")
+var ErrNMAuthorization = errors.New("NetworkManager permission denied; authorize local VPN profile changes and retry")
+
 var ErrOtherVPNActive = errors.New("another VPN profile is active; disconnect it before connecting native VPN")
 
 var ErrActiveNMMigration = errors.New("disconnect the previous local VPN before migrating its profile")
@@ -109,6 +111,12 @@ func (n NetworkManager) call(ctx context.Context, args ...string) (string, error
 	if err != nil {
 		if os.Getenv("VPNKIT_TUI_DIAGNOSTICS") == "1" && os.Getenv("VPNKIT_TUI_SUPERVISED") == "1" {
 			fmt.Fprintf(os.Stderr, "NetworkManager command diagnostic: %v\n%s\n", err, data)
+		}
+		message := strings.ToLower(data)
+		for _, denied := range []string{"not authorized", "not authorised", "permission denied", "insufficient privileges", "not allowed", "authorization failed"} {
+			if strings.Contains(message, denied) {
+				return data, ErrNMAuthorization
+			}
 		}
 		return data, errors.New("NetworkManager command failed")
 	}
@@ -466,7 +474,11 @@ func (n NetworkManager) namedAllowlist(ctx context.Context, old, new string) err
 	return nil
 }
 func (n NetworkManager) harden(ctx context.Context, uuid, name string) error {
-	_, err := n.call(ctx, "connection", "modify", "uuid", uuid, "connection.id", name, "connection.autoconnect", "no", "ipv4.route-metric", "50", "ipv6.method", "disabled")
+	args := []string{"connection", "modify", "uuid", uuid, "connection.id", name, "connection.autoconnect", "no", "ipv4.route-metric", n.routeMetric(), "ipv6.method", "disabled"}
+	if n.Native {
+		args = append(args, "ipv4.never-default", "yes", "ipv4.routes", nativeSplitRoutes())
+	}
+	_, err := n.call(ctx, args...)
 	return err
 }
 func (n NetworkManager) delete(ctx context.Context, uuid string) error {
@@ -536,6 +548,9 @@ func (n NetworkManager) importProfile(ctx context.Context, cap nmCapability, own
 		}
 	}
 	if imported == "" || known[imported] || imported == old {
+		if importErr != nil {
+			return fmt.Errorf("NetworkManager profile import failed before a new connection could be verified: %w", importErr)
+		}
 		return errors.New("import result is not a unique new UUID")
 	}
 	committed := false
@@ -617,7 +632,7 @@ func (n NetworkManager) importProfile(ctx context.Context, cap nmCapability, own
 	return nil
 }
 
-func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output io.Writer) error {
+func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output io.Writer) (resultErr error) {
 	switch action {
 	case "plan", "status", "verify":
 	case "import", "connect", "disconnect", "remove":
@@ -648,7 +663,7 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 		return lockErr
 	}
 	defer unix.Close(lock)
-	checkSource := action != "import"
+	checkSource := action != "import" && !(n.Native && (action == "connect" || action == "disconnect"))
 	cap, ownership, err := n.assess(ctx, checkSource)
 	if err != nil {
 		return err
@@ -705,7 +720,22 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 		fmt.Fprintf(output, "networkmanager_import=%s\nconnection=%s\n", result, n.connectionName())
 		return nil
 	}
-	if ownership == "missing" && (action == "disconnect" || action == "remove") {
+	if n.Native && action == "connect" {
+		// Never import over a name collision or a changed live connection. The
+		// existing import transaction proves ownership, validates the generated
+		// source, and replaces an outdated owned profile only while inactive.
+		if ownership != "owned" && ownership != "missing" && ownership != "stale" {
+			return errors.New("refusing unowned or changed NetworkManager profile")
+		}
+		if err = n.importProfile(ctx, cap, ownership); err != nil {
+			return err
+		}
+		cap, ownership, err = n.assess(ctx, true)
+		if err != nil {
+			return err
+		}
+	}
+	if (ownership == "missing" || n.Native && ownership == "stale") && (action == "disconnect" || action == "remove") {
 		fmt.Fprintf(output, "networkmanager_%s=not-configured\nconnection=%s\n", action, n.connectionName())
 		return nil
 	}
@@ -722,9 +752,6 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 		return nil
 	case "connect":
 		if n.Native {
-			if err = n.checkOtherVPN(ctx, cap.UUID); err != nil {
-				return err
-			}
 			// Repeated native start must not ask NM to activate an already
 			// active UUID. Prove its owned TUN mapping and full routes first;
 			// a stale or partial connection must never become silent success.
@@ -737,12 +764,30 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 				if e != nil {
 					return e
 				}
-				if e = hostRoutes(ctx, device); e != nil {
+				if e = nativeFullTunnelRoutes(ctx, device); e != nil {
 					return fmt.Errorf("already active native VPN routes are not ready: %w", e)
 				}
 				fmt.Fprintf(output, "networkmanager_connect=already-connected\nconnection=%s\ndevice=%s\n", n.connectionName(), device)
 				return nil
 			}
+		}
+		verified := false
+		if n.Native {
+			if err = n.preferNativeRoutes(ctx, cap.UUID); err != nil {
+				return err
+			}
+			// An unsuccessful reply may follow activation. Remove only this
+			// attempted owned tunnel on every failed readiness proof, restoring
+			// the still-connected VPN's routes before gateway compensation.
+			defer func() {
+				if !verified {
+					cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+					defer cancel()
+					if _, e := n.call(cleanup, "connection", "down", "uuid", cap.UUID); e != nil {
+						resultErr = errors.Join(resultErr, errors.New("owned native connection rollback failed"))
+					}
+				}
+			}()
 		}
 		if _, err = n.call(ctx, "--wait", "0", "connection", "up", "uuid", cap.UUID); err != nil {
 			return err
@@ -752,8 +797,13 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 		for {
 			device, e := n.activeDevice(timeout, cap.UUID)
 			if e == nil {
-				e = hostRoutes(timeout, device)
+				if n.Native {
+					e = nativeFullTunnelRoutes(timeout, device)
+				} else {
+					e = hostRoutes(timeout, device)
+				}
 				if e == nil {
+					verified = true
 					fmt.Fprintf(output, "networkmanager_connect=ok\nconnection=%s\ndevice=%s\n", n.connectionName(), device)
 					return nil
 				}

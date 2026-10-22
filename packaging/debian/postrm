@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+# Private configuration, accounts and desktop profiles intentionally survive
+# removal and purge. No service activation or user enrollment in dpkg hooks.
+case "$1" in
+  remove|purge) if [ -d /run/systemd/system ]; then systemctl daemon-reload; fi ;;
+esac

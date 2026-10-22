@@ -314,3 +314,18 @@ func TestRunNativeDesktopRecoveryRefusesForeignProfileBeforeGatewayStart(t *test
 		t.Fatalf("events=%v", events)
 	}
 }
+
+func TestNativeStartFailureDoesNotReachProfileImportOrActivation(t *testing.T) {
+	events := []string{}
+	startup := errors.New("gateway startup failed")
+	service := &fakeNativeDesktopService{events: &events, startErr: startup}
+	nm := &fakeNativeDesktopNM{events: &events, errors: map[string]error{}}
+	installNativeDesktopFakes(t, service, nm)
+	if err := RunNativeDesktop(context.Background(), t.TempDir(), "start", true, io.Discard); !errors.Is(err, startup) {
+		t.Fatalf("error=%v", err)
+	}
+	want := []string{"service-status", "nm-disconnect", "service-start"}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("events=%v", events)
+	}
+}

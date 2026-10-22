@@ -1,76 +1,139 @@
-name: Manual stable release
+name: Release merged PR
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Human-approved stable tag (vMAJOR.MINOR.PATCH)
-        required: true
-        type: string
-      commit:
-        description: Full commit SHA approved and validated locally
-        required: true
-        type: string
+  pull_request:
+    types: [closed]
+    branches: [main]
 permissions:
   contents: read
 concurrency:
-  group: release-${{ inputs.tag }}
+  group: stable-release
   cancel-in-progress: false
 jobs:
-  build:
+  plan:
+    if: github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'release')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      commit: ${{ steps.plan.outputs.commit }}
+      pr: ${{ steps.plan.outputs.pr }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate release approval and VERSION
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --paginate --slurp "repos/$GH_REPO/pulls/$PR_NUMBER/files" > "$RUNNER_TEMP/files.json"
+          python3 scripts/release/plan.py "$GITHUB_EVENT_PATH" "$RUNNER_TEMP/files.json" "$GH_REPO" "$RUNNER_TEMP/plan.json" >> "$GITHUB_OUTPUT"
+  checks:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Go, OpenTUI and release regression checks
+        run: |
+          go test -race ./...
+          mkdir -p .build
+          go build -o .build/local-vpn-kde.bin ./cmd/local-vpn-kde
+          (cd scripts/vpnkit/tui && bun install --frozen-lockfile && bun run check && bun test)
+          python3 test/release-workflow-test.py
+          python3 test/native-debian-hooks-test.py
+          bash test/release-package-test.sh
+  native:
+    needs: [plan, checks]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [arch, debian]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          persist-credentials: false
+      - name: Build and validate native package
+        env:
+          DISTRO: ${{ matrix.distro }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: bash scripts/release/native-packages.sh "$DISTRO" "$VERSION" "$RUNNER_TEMP/native-assets"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.distro }}
+          path: ${{ runner.temp }}/native-assets/
+          retention-days: 7
+          if-no-files-found: error
+  docker:
+    needs: [plan, checks]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: ${{ needs.plan.outputs.commit }}
           persist-credentials: false
-      - name: Validate the approved tag
-        env:
-          RELEASE_TAG: ${{ inputs.tag }}
-          APPROVED_COMMIT: ${{ inputs.commit }}
-        run: |
-          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-          [[ "$APPROVED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
-          test "$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")" = "$APPROVED_COMMIT"
-          git show "$APPROVED_COMMIT:go.mod" > /tmp/release-go.mod
       - uses: actions/setup-go@v5
         with:
-          go-version-file: /tmp/release-go.mod
+          go-version: stable
           cache: false
-      - name: Package selected revision
+      - name: Package merged revision without creating a tag
         env:
-          RELEASE_TAG: ${{ inputs.tag }}
-        run: bash scripts/release/package.sh "$RELEASE_TAG" "$RUNNER_TEMP/release-assets"
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+        run: bash scripts/release/package.sh "$RELEASE_TAG" "$RUNNER_TEMP/docker-assets" "$RELEASE_COMMIT"
       - uses: actions/upload-artifact@v4
         with:
-          name: release-assets
-          path: ${{ runner.temp }}/release-assets/*
-          retention-days: 1
+          name: release-docker
+          path: ${{ runner.temp }}/docker-assets/
+          retention-days: 7
           if-no-files-found: error
   publish:
-    needs: build
+    needs: [plan, native, docker]
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: release-assets
-          path: assets
-      - name: Verify and publish without replacing existing releases
+          pattern: release-*
+          path: ${{ runner.temp }}/artifacts
+      - name: Verify all packages belong to the approved revision
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+        run: python3 scripts/release/assemble.py "$RUNNER_TEMP/artifacts" "$RUNNER_TEMP/release-assets" "$VERSION" "$RELEASE_COMMIT"
+      - name: Create immutable tag, upload and verify release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ inputs.tag }}
-          APPROVED_COMMIT: ${{ inputs.commit }}
-        run: |
-          test "$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)" = "$APPROVED_COMMIT"
-          cd assets
-          sha256sum --check SHA256SUMS
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo 'Release exists; refusing to replace its assets.' >&2
-            exit 1
-          fi
-          printf 'Revision: `%s`\n\nLinux x86-64 installer archive with Go source, a prebuilt host executable, Bun/OpenTUI source, and Docker gateway assets. Extract, run `./install.sh` as your desktop user, then `./run.sh`. The installer installs dependencies and rebuilds the application; this is not a standalone VPN binary. The archive includes empty Git metadata for legacy installer root discovery, not source history. For updates, download the next archive and preserve secrets/ instead of using git pull. Routine tests were run locally before human approval.\n' "$APPROVED_COMMIT" > "$RUNNER_TEMP/release-notes.md"
-          gh release create "$RELEASE_TAG" ./*.tar.gz SHA256SUMS --verify-tag --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+          VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          PR_NUMBER: ${{ needs.plan.outputs.pr }}
+        run: python3 scripts/release/publish.py "$RUNNER_TEMP/release-assets" "$VERSION" "$RELEASE_COMMIT" "$PR_NUMBER"

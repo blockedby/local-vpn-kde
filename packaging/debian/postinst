@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+case "$1" in
+  configure|abort-upgrade|abort-remove|abort-deconfigure)
+    systemd-sysusers /usr/lib/sysusers.d/local-vpn-kde-native.conf
+    systemd-tmpfiles --create /usr/lib/tmpfiles.d/local-vpn-kde-native.conf
+    if [ -d /run/systemd/system ]; then systemctl daemon-reload; fi
+    /usr/libexec/local-vpn-kde/local-vpn-kde.bin native-package --action post-change
+    ;;
+esac

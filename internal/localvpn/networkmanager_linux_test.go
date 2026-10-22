@@ -259,7 +259,7 @@ func TestNMRefreshRefusesActiveProfileBeforeImport(t *testing.T) {
 	}
 }
 
-func TestNativeNMConnectAlreadyActiveRequiresOwnedTunnelRoutesAndNoOtherVPN(t *testing.T) {
+func TestNativeNMConnectAlreadyActiveRequiresOwnedTunnelRoutes(t *testing.T) {
 	for _, scenario := range []string{"healthy", "stale-route", "foreign-vpn", "ambiguous-address"} {
 		t.Run(scenario, func(t *testing.T) {
 			base := t.TempDir()
@@ -307,18 +307,15 @@ func TestNativeNMConnectAlreadyActiveRequiresOwnedTunnelRoutesAndNoOtherVPN(t *t
 			if scenario == "stale-route" {
 				device = "eth0"
 			}
-			ip := "#!/bin/sh\nif [ \"$1\" = -o ]; then printf '7: tun0 inet 10.80.0.2/24 scope global tun0\\n'; else printf '%s dev " + device + " src 10.80.0.2\\n' \"$4\"; fi\n"
+			ip := "#!/bin/sh\nif [ \"$1\" = -json ]; then echo '[{\"dst\":\"0.0.0.0/1\"},{\"dst\":\"128.0.0.0/1\"}]'; elif [ \"$1\" = -o ]; then printf '7: tun0 inet 10.80.0.2/24 scope global tun0\\n'; else printf '%s dev " + device + " src 10.80.0.2\\n' \"$4\"; fi\n"
 			if err := os.WriteFile(filepath.Join(bin, "ip"), []byte(ip), 0700); err != nil {
 				t.Fatal(err)
 			}
 			t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 			var output bytes.Buffer
 			err = n.Run(context.Background(), "connect", true, &output)
-			if (err == nil) != (scenario == "healthy") {
+			if (err == nil) != (scenario == "healthy" || scenario == "foreign-vpn") {
 				t.Fatalf("scenario %s: error=%v", scenario, err)
-			}
-			if scenario == "foreign-vpn" && !errors.Is(err, ErrOtherVPNActive) {
-				t.Fatalf("foreign VPN error=%v", err)
 			}
 			if mutations != 0 {
 				t.Fatalf("issued %d mutations for already active UUID", mutations)

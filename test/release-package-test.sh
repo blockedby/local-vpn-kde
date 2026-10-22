@@ -42,4 +42,12 @@ if bash "$helper" v9.9.9 "$work/missing" >/dev/null 2>&1; then echo 'Accepted ab
 if [[ -n ${VPNKIT_RELEASE_TEST_IMAGE:-} ]]; then
   docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /release/.build/local-vpn-kde.bin -v "$release:/release:ro" "$VPNKIT_RELEASE_TEST_IMAGE" | grep -Fx tagged-release
 fi
-echo 'PASS: tagged source, binary, checksums, exclusions, permissions, overwrite and tag guards'
+# Release builds may package an exact merged SHA before the tag exists.
+bash "$helper" v1.2.4 "$work/pretag" "$commit"
+test ! "$(git tag -l v1.2.4)"
+(cd "$work/pretag"; sha256sum -c SHA256SUMS)
+if bash "$helper" v1.2.5 "$work/invalid-sha" main >/dev/null 2>&1; then echo 'Accepted symbolic source revision' >&2; exit 1; fi
+printf 'new fixture\n' > README.md
+git add README.md && git commit -qm 'new fixture'
+if bash "$helper" v1.2.3 "$work/reused-tag" "$(git rev-parse HEAD)" >/dev/null 2>&1; then echo 'Accepted tag for different commit' >&2; exit 1; fi
+echo 'PASS: exact SHA before tag creation, tagged source, binary, checksums, exclusions, permissions, overwrite and tag guards'
