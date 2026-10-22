@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/netip"
 	"strconv"
 	"strings"
 )
@@ -26,11 +27,49 @@ func (n NetworkManager) preferNativeRoutes(ctx context.Context, uuid string) err
 	if err != nil || metric < -1 || metric > 1<<32-1 {
 		return errors.New("invalid owned native route metric")
 	}
-	if metric == 0 {
+	routes, err := n.call(ctx, "-g", "ipv4.routes", "connection", "show", "uuid", uuid)
+	if err != nil {
+		return err
+	}
+	neverDefault, err := n.call(ctx, "-g", "ipv4.never-default", "connection", "show", "uuid", uuid)
+	if err != nil {
+		return err
+	}
+	if metric == 0 && strings.TrimSpace(neverDefault) == "yes" && nativeSplitRoutesMatch(routes) {
 		return nil
 	}
-	_, err = n.call(ctx, "connection", "modify", "uuid", uuid, "ipv4.route-metric", "0")
+	_, err = n.call(ctx, "connection", "modify", "uuid", uuid, "ipv4.route-metric", "0", "ipv4.never-default", "yes", "ipv4.routes", nativeSplitRoutes())
 	return err
+}
+
+// NetworkManager may turn OpenVPN's pushed def1 directive into a single
+// default route. Provision explicit split routes so an existing VPN's /1s
+// cannot outrank the owned connection merely by having longer prefixes.
+func nativeSplitRoutes() string {
+	gateway := netip.MustParsePrefix(NativeRuntimeConfig().CIDR).Addr().Next().String()
+	return "0.0.0.0/1 " + gateway + " 0, 128.0.0.0/1 " + gateway + " 0"
+}
+
+func nativeSplitRoutesMatch(raw string) bool {
+	expected := strings.Split(nativeSplitRoutes(), ",")
+	got := strings.Split(strings.TrimSpace(raw), ",")
+	if len(got) != len(expected) {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, route := range got {
+		normalized := strings.Join(strings.Fields(route), " ")
+		if seen[normalized] {
+			return false
+		}
+		seen[normalized] = true
+	}
+	for _, route := range expected {
+		if !seen[strings.TrimSpace(route)] {
+			return false
+		}
+	}
+	return true
 }
 
 // Both full-tunnel halves must belong to the owned TUN. More-specific existing

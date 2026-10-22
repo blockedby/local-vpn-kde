@@ -474,7 +474,11 @@ func (n NetworkManager) namedAllowlist(ctx context.Context, old, new string) err
 	return nil
 }
 func (n NetworkManager) harden(ctx context.Context, uuid, name string) error {
-	_, err := n.call(ctx, "connection", "modify", "uuid", uuid, "connection.id", name, "connection.autoconnect", "no", "ipv4.route-metric", n.routeMetric(), "ipv6.method", "disabled")
+	args := []string{"connection", "modify", "uuid", uuid, "connection.id", name, "connection.autoconnect", "no", "ipv4.route-metric", n.routeMetric(), "ipv6.method", "disabled"}
+	if n.Native {
+		args = append(args, "ipv4.never-default", "yes", "ipv4.routes", nativeSplitRoutes())
+	}
+	_, err := n.call(ctx, args...)
 	return err
 }
 func (n NetworkManager) delete(ctx context.Context, uuid string) error {

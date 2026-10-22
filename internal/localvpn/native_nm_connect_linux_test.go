@@ -13,7 +13,7 @@ import (
 )
 
 func TestNativeConnectImportsOnlyProvenProfiles(t *testing.T) {
-	for _, scenario := range []string{"missing", "stale", "refresh", "existing", "foreign", "tampered", "other-vpn", "denied", "route-conflict", "activation-failed", "metric-upgrade"} {
+	for _, scenario := range []string{"missing", "stale", "refresh", "existing", "foreign", "tampered", "other-vpn", "denied", "route-conflict", "activation-failed", "metric-upgrade", "route-upgrade"} {
 		t.Run(scenario, func(t *testing.T) {
 			n := NetworkManager{Base: t.TempDir(), Native: true}
 			if err := os.MkdirAll(filepath.Dir(n.profilePath()), 0700); err != nil {
@@ -29,6 +29,12 @@ func TestNativeConnectImportsOnlyProvenProfiles(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			metric := "0"
+			routes := nativeSplitRoutes()
+			neverDefault := "yes"
+			if scenario == "metric-upgrade" || scenario == "route-upgrade" {
+				routes = ""
+				neverDefault = "no"
+			}
 			if scenario == "metric-upgrade" {
 				metric = "50"
 			}
@@ -42,7 +48,7 @@ func TestNativeConnectImportsOnlyProvenProfiles(t *testing.T) {
 				if err = n.writeCapability(nmCapability{UUID: old, Fingerprint: fp}); err != nil {
 					t.Fatal(err)
 				}
-			case "refresh", "existing", "tampered", "metric-upgrade":
+			case "refresh", "existing", "tampered", "metric-upgrade", "route-upgrade":
 				saved := fp
 				if scenario == "refresh" {
 					saved = strings.Repeat("0", 64)
@@ -88,6 +94,10 @@ func TestNativeConnectImportsOnlyProvenProfiles(t *testing.T) {
 					return fresh, nil
 				case strings.HasPrefix(joined, "-g ipv4.route-metric "):
 					return metric, nil
+				case strings.HasPrefix(joined, "-g ipv4.routes "):
+					return routes, nil
+				case strings.HasPrefix(joined, "-g ipv4.never-default "):
+					return neverDefault, nil
 				case strings.HasPrefix(joined, "connection down uuid "):
 					downs++
 					if commandCtx.Err() != nil {
@@ -100,10 +110,17 @@ func TestNativeConnectImportsOnlyProvenProfiles(t *testing.T) {
 					return "", nil
 				case strings.HasPrefix(joined, "connection modify uuid "):
 					modifies++
-					if args[4] == "ipv4.route-metric" {
-						metric = args[5]
-					} else {
-						names[args[3]] = args[5]
+					for i := 4; i+1 < len(args); i += 2 {
+						switch args[i] {
+						case "connection.id":
+							names[args[3]] = args[i+1]
+						case "ipv4.route-metric":
+							metric = args[i+1]
+						case "ipv4.routes":
+							routes = args[i+1]
+						case "ipv4.never-default":
+							neverDefault = args[i+1]
+						}
 					}
 					return "", nil
 				case strings.HasPrefix(joined, "connection delete uuid "):
@@ -146,7 +163,7 @@ func TestNativeConnectImportsOnlyProvenProfiles(t *testing.T) {
 			} else {
 				err = n.Run(ctx, "connect", true, &out)
 			}
-			success := scenario == "missing" || scenario == "stale" || scenario == "refresh" || scenario == "existing" || scenario == "other-vpn" || scenario == "metric-upgrade"
+			success := scenario == "missing" || scenario == "stale" || scenario == "refresh" || scenario == "existing" || scenario == "other-vpn" || scenario == "metric-upgrade" || scenario == "route-upgrade"
 			if (err == nil) != success {
 				t.Fatalf("connect error=%v", err)
 			}
@@ -170,13 +187,16 @@ func TestNativeConnectImportsOnlyProvenProfiles(t *testing.T) {
 				return
 			}
 			want := 1
-			if scenario == "existing" || scenario == "metric-upgrade" {
+			if scenario == "existing" || scenario == "metric-upgrade" || scenario == "route-upgrade" {
 				want = 0
+			}
+			if !nativeSplitRoutesMatch(routes) || neverDefault != "yes" || metric != "0" {
+				t.Fatal("owned native split route policy not provisioned")
 			}
 			if imports != want || ups != 1 {
 				t.Fatalf("imports=%d ups=%d", imports, ups)
 			}
-			if scenario == "metric-upgrade" && modifies != 1 {
+			if (scenario == "metric-upgrade" || scenario == "route-upgrade") && modifies != 1 {
 				t.Fatal("legacy owned route metric not upgraded exactly once")
 			}
 			if scenario == "refresh" && deletes != 1 {
@@ -190,5 +210,23 @@ func TestNativeConnectImportsOnlyProvenProfiles(t *testing.T) {
 				t.Fatal("repeat connect mutated existing connection")
 			}
 		})
+	}
+}
+
+func TestNativeSplitRouteSettings(t *testing.T) {
+	for _, tc := range []struct {
+		raw   string
+		valid bool
+	}{
+		{"0.0.0.0/1 10.90.0.1 0, 128.0.0.0/1 10.90.0.1 0", true},
+		{"128.0.0.0/1   10.90.0.1 0,0.0.0.0/1 10.90.0.1 0", true},
+		{"0.0.0.0/0 10.90.0.1 0", false},
+		{"0.0.0.0/1 10.90.0.1 50, 128.0.0.0/1 10.90.0.1 50", false},
+		{"0.0.0.0/1 10.89.0.1 0, 128.0.0.0/1 10.89.0.1 0", false},
+		{"0.0.0.0/1 10.90.0.1 0, 0.0.0.0/1 10.90.0.1 0", false},
+	} {
+		if got := nativeSplitRoutesMatch(tc.raw); got != tc.valid {
+			t.Fatalf("route setting %q accepted=%v", tc.raw, got)
+		}
 	}
 }
