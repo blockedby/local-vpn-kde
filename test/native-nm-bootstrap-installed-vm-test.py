@@ -45,6 +45,7 @@ renamed_original = False
 restore_active = False
 summary = []
 secondary = None
+material_skips = ["secondary rival /1 Internet egress not tested"]
 
 
 def record(case):
@@ -65,7 +66,12 @@ class SecondaryVPN:
         self.unit = "vpnkit-peer-"+suffix
         self.echo = self.unit+"-echo"
         self.identity = None
-        self.tmp = tempfile.TemporaryDirectory(prefix="vpnkit-peer-")
+        self.transport = None
+        # NM's OpenVPN service has a private /tmp. Keep its fixture credentials
+        # in the same user-private home boundary as real imported VPN profiles.
+        fixture_root = Path.home()/".config/vpn-lab"
+        fixture_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.tmp = tempfile.TemporaryDirectory(prefix="vpnkit-peer-", dir=fixture_root)
         self.path = Path(self.tmp.name)
 
     def root(self, *args):
@@ -81,10 +87,10 @@ class SecondaryVPN:
             subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
             if label != "ca":
                 ext = self.path/(label+".ext")
-                ext.write_text("extendedKeyUsage="+("serverAuth" if label == "server" else "clientAuth")+"\n")
+                ext.write_text("basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage="+("serverAuth" if label == "server" else "clientAuth")+"\n")
                 subprocess.run(["openssl", "x509", "-req", "-in", str(self.path/(label+".csr")), "-CA", str(self.path/"ca.crt"), "-CAkey", str(self.path/"ca.key"), "-CAcreateserial", "-out", str(self.path/(label+".crt")), "-days", "1", "-extfile", str(ext)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
         server = self.path/"server.conf"
-        server.write_text("\n".join(["dev lab-server", "dev-type tun", "proto udp", "local 198.19.1.2", "port 33194", "topology subnet", "server 10.93.0.0 255.255.255.0", "dh none", "data-ciphers AES-256-GCM:AES-128-GCM", "keepalive 2 10", "verb 1"]+[key+" "+str(self.path/value) for key, value in (("ca", "ca.crt"), ("cert", "server.crt"), ("key", "server.key"))])+"\n")
+        server.write_text("\n".join(["dev lab-server", "dev-type tun", "disable-dco", "proto udp", "local 198.19.1.2", "port 33194", "topology subnet", "server 10.93.0.0 255.255.255.0", "dh none", "data-ciphers AES-256-GCM:AES-128-GCM", "keepalive 2 10", "verb 1"]+[key+" "+str(self.path/value) for key, value in (("ca", "ca.crt"), ("cert", "server.crt"), ("key", "server.key"))])+"\n")
         self.root("ip", "netns", "add", self.ns)
         self.root("ip", "link", "add", self.host, "type", "veth", "peer", "name", self.peer)
         self.root("ip", "link", "set", self.peer, "netns", self.ns)
@@ -92,6 +98,14 @@ class SecondaryVPN:
         self.root("ip", "link", "set", self.host, "up")
         for args in (("address", "add", "198.19.1.2/30", "dev", self.peer), ("link", "set", self.peer, "up"), ("link", "set", "lo", "up")):
             self.root("ip", "netns", "exec", self.ns, "ip", *args)
+        # Bind NM's VPN transport to this real connected veth. Otherwise NM
+        # pins the remote /32 through eth0 and breaks the peer data channel.
+        self.transport = str(uuid.uuid4())
+        nm("connection", "add", "type", "ethernet", "ifname", self.host,
+           "con-name", "vpnkit-peer-transport-"+suffix, "connection.uuid", self.transport,
+           "connection.autoconnect", "no", "ipv4.method", "manual", "ipv4.addresses", "198.19.1.1/30",
+           "ipv4.never-default", "yes", "ipv6.method", "disabled")
+        nm("--wait", "15", "connection", "up", "uuid", self.transport)
         self.root("systemd-run", "--quiet", "--collect", "--unit", self.unit, "ip", "netns", "exec", self.ns, "openvpn", "--config", str(server))
         client = self.path/("vpnkit-secondary-"+suffix+".ovpn")
         client.write_text("\n".join(["client", "dev tun", "proto udp", "remote 198.19.1.2 33194", "nobind", "remote-cert-tls server", "data-ciphers AES-256-GCM:AES-128-GCM", "route-nopull", "verb 1"]+[key+" "+str(self.path/value) for key, value in (("ca", "ca.crt"), ("cert", "client.crt"), ("key", "client.key"))])+"\n")
@@ -101,7 +115,7 @@ class SecondaryVPN:
         assert len(created) == 1, "secondary import inventory"
         self.identity = created.pop()
         nm("connection", "modify", "uuid", self.identity, "connection.id", "vpnkit-secondary-"+suffix, "connection.autoconnect", "no", "ipv4.never-default", "yes", "ipv6.method", "disabled", "ipv4.route-metric", "50")
-        nm("--wait", "30", "connection", "up", "uuid", self.identity)
+        nm("--wait", "30", "connection", "up", "uuid", self.identity, "ifname", self.host)
         # Echo is in the peer netns, so this cannot succeed via a host local route.
         echo_code = "import socket;s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind(('10.93.0.1',33195));s.listen();\nwhile True:\n c,_=s.accept();c.recv(4096);c.sendall(b'HTTP/1.0 200 OK\\r\\nContent-Length: 19\\r\\n\\r\\nvpnkit-secondary-ok');c.close()"
         self.root("systemd-run", "--quiet", "--collect", "--unit", self.echo, "ip", "netns", "exec", self.ns, "python3", "-c", echo_code)
@@ -110,13 +124,14 @@ class SecondaryVPN:
             check = subprocess.run(["curl", "--silent", "--fail", "--noproxy", "*", "--max-time", "2", "http://10.93.0.1:33195"], capture_output=True)
             if check.returncode == 0 and check.stdout == b"vpnkit-secondary-ok":
                 break
-            assert time.monotonic() < deadline, "secondary tunnel echo failed"
+            if time.monotonic() >= deadline:
+                raise AssertionError("secondary tunnel echo failed")
             time.sleep(.2)
         self.root("ip", "route", "add", "0.0.0.0/1", "via", "10.93.0.1", "dev", self.device(), "metric", "50")
         self.root("ip", "route", "add", "128.0.0.0/1", "via", "10.93.0.1", "dev", self.device(), "metric", "50")
 
     def device(self):
-        return nm("-g", "GENERAL.DEVICES", "connection", "show", "uuid", self.identity).decode().strip()
+        return mapped_device(self.identity)
 
     def stop(self):
         failures = []
@@ -128,6 +143,12 @@ class SecondaryVPN:
                 nm("connection", "delete", "uuid", self.identity)
             except BaseException:
                 failures.append("secondary profile")
+        if self.transport and self.transport in inventory():
+            try:
+                assert name(self.transport) == "vpnkit-peer-transport-"+suffix
+                nm("connection", "delete", "uuid", self.transport)
+            except BaseException:
+                failures.append("secondary transport")
         for args in (("ip", "link", "delete", self.host), ("ip", "netns", "delete", self.ns)):
             subprocess.run(["sudo", "-n", *args], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.tmp.cleanup()
@@ -168,6 +189,15 @@ def profile_digest(identity):
 
 def inventory():
     return set(nm("-g", "UUID", "connection", "show").decode().splitlines())
+
+
+def mapped_device(identity):
+    # GENERAL.DEVICES identifies the VPN transport's underlay, not its TUN.
+    addresses = set(nm("-g", "IP4.ADDRESS", "connection", "show", "uuid", identity).decode().splitlines())
+    links = json.loads(subprocess.check_output(["ip", "-j", "-4", "address", "show"]))
+    matches = [link["ifname"] for link in links if link["ifname"].startswith("tun") and any(str(a.get("local"))+"/"+str(a.get("prefixlen")) in addresses for a in link.get("addr_info", []))]
+    assert len(matches) == 1, "ambiguous VPN TUN mapping"
+    return matches[0]
 
 
 def capability():
@@ -263,7 +293,7 @@ try:
     connected()
     active_ids = set(nm("-g", "UUID", "connection", "show", "--active").decode().splitlines())
     assert {generated, secondary.identity} <= active_ids, "one VPN was disconnected"
-    native_device = nm("-g", "GENERAL.DEVICES", "connection", "show", "uuid", generated).decode().strip()
+    native_device = mapped_device(generated)
     for address in ("8.8.8.8", "200.1.1.1"):
         route = json.loads(subprocess.check_output(["ip", "-j", "route", "get", address]))[0]
         assert route["dev"] == native_device and native_device != rival_device, "native did not win both /1 halves"
@@ -277,7 +307,7 @@ try:
     assert restored_routes == baseline_routes, "previous VPN routes were not restored"
     secondary.stop()
     secondary = None
-    record("real_secondary_split_tunnel_native_overlap_priority_and_restoration")
+    record("real_secondary_nm_vpn_native_overlap_priority_and_restoration")
     # An existing owned UUID with a changed name must never be silently adopted.
     nm("connection", "modify", "uuid", generated, "connection.id", tampered_name)
     tampered = profile_digest(generated)
@@ -336,4 +366,5 @@ finally:
         proc.wait(timeout=5)
     assert not cleanup_errors, "lab cleanup failed: "+", ".join(cleanup_errors)
 print(json.dumps({"installed_native_nm_bootstrap": "passed", "cases": summary,
+                  "material_skips": material_skips,
                   "original_uuid_settings_private_identity_autostart_restored": True}))
