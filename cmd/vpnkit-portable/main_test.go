@@ -154,3 +154,45 @@ func TestDesktopOnboardingRejectsInvalidAccount(t *testing.T) {
 		}
 	}
 }
+
+func TestMissingDependenciesHonorsProvidersAndVersions(t *testing.T) {
+	deps := []string{"zlib", "openvpn", "glibc>=2.38"}
+	for _, tc := range []struct {
+		name, output string
+		code         int
+		queryError   bool
+		want         []string
+		invalid      bool
+	}{
+		{name: "all provided", code: 0},
+		{name: "missing only", output: "openvpn\nglibc>=2.38\n", code: 127, want: []string{"openvpn", "glibc>=2.38"}},
+		{name: "command failure", code: 1, invalid: true},
+		{name: "launch failure", queryError: true, invalid: true},
+		{name: "foreign output", output: "zlib-ng-compat\n", code: 127, invalid: true},
+		{name: "argument injection", output: "--overwrite=*\n", code: 127, invalid: true},
+		{name: "duplicate output", output: "openvpn\nopenvpn\n", code: 127, invalid: true},
+		{name: "unexpected success output", output: "openvpn\n", invalid: true},
+		{name: "empty failure", code: 127, invalid: true},
+		{name: "bounded output", output: strings.Repeat("x", dependencyOutputLimit+1), code: 127, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := missingDependencies(deps, func(args []string) ([]byte, int, error) {
+				if !reflect.DeepEqual(args, append([]string{"-T", "--"}, deps...)) {
+					t.Fatalf("wrong deptest argv: %v", args)
+				}
+				if tc.queryError {
+					return nil, -1, fmt.Errorf("fixture failure")
+				}
+				return []byte(tc.output), tc.code, nil
+			})
+			if (err != nil) != tc.invalid || !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("missing=%v err=%v", got, err)
+			}
+		})
+	}
+	for _, bad := range []string{"--overwrite=*", "-invalid", "glibc;touch /tmp/no", "foo\nbar"} {
+		if _, err := missingDependencies([]string{bad}, func([]string) ([]byte, int, error) { t.Fatal("invalid input queried"); return nil, 0, nil }); err == nil {
+			t.Fatal("invalid dependency accepted")
+		}
+	}
+}

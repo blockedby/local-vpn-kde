@@ -18,7 +18,11 @@ there is no automatic download URL or source build. `./vpnkit-portable --inspect
 shows the embedded revision, checksum and remaining dependencies without root.
 Direct `sudo ./vpnkit-portable --install` uses the same onboarding.
 
-Pacman confirms missing dependencies and package installation. The elevated
+Pacman first tests dependency requirements with `pacman -T`, honoring installed
+providers and version constraints; only unsatisfied requirements are passed to
+the dependency installation transaction. For example, an installed
+`zlib-ng-compat` providing `zlib` is retained. Pacman confirms missing dependencies
+and package installation. The elevated
 installer validates the invoking account, enrolls it for application operations,
 and initializes private state as that user with fresh account groups. Existing
 processes need no logout for the application's polkit membership check. If a

@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"embed"
@@ -18,6 +19,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -108,9 +110,13 @@ func install(m manifest, data []byte) error {
 	}
 	// Keep pacman's interactive confirmation for both transactions. Do not
 	// refresh repositories alone (-Sy), disable signature checks or retry.
+	missing, err := missingDependencies(m.Dependencies, dependencyTest)
+	if err != nil {
+		return err
+	}
 	commands := [][]string{}
-	if len(m.Dependencies) > 0 {
-		commands = append(commands, append([]string{"-S", "--needed", "--"}, m.Dependencies...))
+	if len(missing) > 0 {
+		commands = append(commands, append([]string{"-S", "--needed", "--"}, missing...))
 	}
 	commands = append(commands, []string{"-U", "--", path})
 	for _, args := range commands {
@@ -140,6 +146,78 @@ func install(m manifest, data []byte) error {
 		fmt.Fprintln(os.Stdout, "Package installed; no elevated desktop caller. Desktop enrollment and profile setup are deferred.")
 	}
 	return nil
+}
+
+const dependencyOutputLimit = 64 << 10
+
+var dependencyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9@._+:-]*(?:[<>=]{1,2}[A-Za-z0-9@._+:-]+)?$`)
+
+type dependencyOutput struct{ bytes.Buffer }
+
+func (b *dependencyOutput) Write(data []byte) (int, error) {
+	if len(data) > dependencyOutputLimit-b.Len() {
+		return 0, errors.New("dependency test output exceeded limit")
+	}
+	return b.Buffer.Write(data)
+}
+
+func dependencyTest(args []string) ([]byte, int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/usr/bin/pacman", args...)
+	cmd.Env = []string{"PATH=/usr/bin:/usr/sbin:/bin:/sbin", "LANG=C.UTF-8", "LC_ALL=C", "HOME=/root"}
+	output := &dependencyOutput{}
+	cmd.Stdout = output
+	err := cmd.Run()
+	if err == nil {
+		return output.Bytes(), 0, nil
+	}
+	var status *exec.ExitError
+	if errors.As(err, &status) && status.ExitCode() == 127 {
+		return output.Bytes(), 127, nil
+	}
+	return nil, -1, errors.New("pacman dependency test failed; no packages installed")
+}
+
+// Deptest honors installed providers and version constraints. Never turn
+// arbitrary command output into package installation arguments.
+func missingDependencies(deps []string, query func([]string) ([]byte, int, error)) ([]string, error) {
+	allowed := map[string]bool{}
+	for _, dep := range deps {
+		if !dependencyPattern.MatchString(dep) {
+			return nil, errors.New("invalid manifest dependency")
+		}
+		allowed[dep] = true
+	}
+	if len(deps) == 0 {
+		return nil, nil
+	}
+	output, code, err := query(append([]string{"-T", "--"}, deps...))
+	if err != nil {
+		return nil, err
+	}
+	if len(output) > dependencyOutputLimit {
+		return nil, errors.New("dependency test output exceeded limit")
+	}
+	if code == 0 && len(bytes.TrimSpace(output)) == 0 {
+		return nil, nil
+	}
+	if code != 127 {
+		return nil, errors.New("unexpected pacman dependency test result")
+	}
+	missing := []string{}
+	seen := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if !allowed[line] || seen[line] {
+			return nil, errors.New("unexpected dependency test output")
+		}
+		seen[line] = true
+		missing = append(missing, line)
+	}
+	if len(missing) == 0 {
+		return nil, errors.New("empty unsatisfied dependency result")
+	}
+	return missing, nil
 }
 
 // Commands run with fresh account groups and a fixed user environment. Neither
