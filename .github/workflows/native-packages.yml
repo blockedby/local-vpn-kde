@@ -1,0 +1,53 @@
+name: Manual native package candidates
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full source commit SHA to package (does not mark it stable)
+        required: true
+        type: string
+      version:
+        description: Candidate package version
+        required: true
+        default: 0.2.0-rc1
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: native-candidates-${{ inputs.commit }}
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [arch, debian]
+    steps:
+      - name: Validate inputs
+        env:
+          REVISION: ${{ inputs.commit }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$REVISION" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc[1-9][0-9]*)?$ ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+      - name: Verify checkout
+        env:
+          REVISION: ${{ inputs.commit }}
+        run: test "$(git rev-parse HEAD)" = "$REVISION"
+      - name: Build and validate in disposable container
+        env:
+          DISTRO: ${{ matrix.distro }}
+          VERSION: ${{ inputs.version }}
+        run: bash scripts/release/native-packages.sh "$DISTRO" "$VERSION" "$RUNNER_TEMP/native-assets"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.distro }}-${{ inputs.version }}
+          path: ${{ runner.temp }}/native-assets/
+          if-no-files-found: error
+          retention-days: 7
