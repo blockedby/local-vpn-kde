@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -16,9 +17,11 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 //go:embed payload/*
@@ -88,6 +91,9 @@ func install(m manifest, data []byte) error {
 	if err != nil {
 		return err
 	}
+	if os.Getenv("SUDO_USER") != "" && os.Getenv("SUDO_USER") != caller {
+		return errors.New("installation caller name does not match elevated UID")
+	}
 	// Use a private directory under the root-owned /run, never a user-selected
 	// TMPDIR. Pacman handles dependency checking, locks, ownership and rollback
 	// markers. Package signature policy remains pacman's policy.
@@ -116,13 +122,81 @@ func install(m manifest, data []byte) error {
 		}
 	}
 	if caller != "" {
+		account, lookupErr := user.Lookup(caller)
+		if lookupErr != nil || (os.Getenv("SUDO_USER") != "" && os.Getenv("SUDO_USER") != caller) {
+			return errors.New("package installed, invoking desktop account could not be validated")
+		}
 		cmd := exec.Command("/usr/bin/usermod", "--append", "--groups", "local-vpn-kde-users", "--", caller)
 		cmd.Env = []string{"PATH=/usr/bin:/usr/sbin:/bin:/sbin", "LANG=C.UTF-8"}
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("package installed, user authorization failed: %w", err)
 		}
+		outcome, err := onboardDesktop(account, desktopCommand, os.Lstat)
+		if err != nil {
+			return fmt.Errorf("package installed; desktop setup incomplete: %w", err)
+		}
+		fmt.Fprintln(os.Stdout, outcome)
+	} else {
+		fmt.Fprintln(os.Stdout, "Package installed; no elevated desktop caller. Desktop enrollment and profile setup are deferred.")
 	}
 	return nil
+}
+
+// Commands run with fresh account groups and a fixed user environment. Neither
+// installer nor package hooks start the gateway or activate a connection.
+func desktopCommand(account *user.User, args []string, session bool) error {
+	env := []string{"PATH=/usr/bin:/bin", "LANG=C.UTF-8", "HOME=" + account.HomeDir,
+		"USER=" + account.Username, "LOGNAME=" + account.Username,
+		"XDG_STATE_HOME=" + filepath.Join(account.HomeDir, ".local/state")}
+	if session {
+		runtime := "/run/user/" + account.Uid
+		env = append(env, "XDG_RUNTIME_DIR="+runtime, "DBUS_SESSION_BUS_ADDRESS=unix:path="+runtime+"/bus")
+	}
+	argv := []string{"--user", account.Username, "--", "/usr/bin/env", "-i"}
+	argv = append(argv, env...)
+	argv = append(argv, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/usr/bin/runuser", argv...)
+	cmd.Dir = account.HomeDir
+	cmd.Env = []string{"PATH=/usr/bin:/usr/sbin:/bin:/sbin", "HOME=/root"}
+	// EOF initializes private state without launching an interactive interface.
+	// Do not echo arbitrary backend errors, which can contain private paths.
+	if err := cmd.Run(); err != nil {
+		return errors.New("desktop initialization command failed")
+	}
+	return nil
+}
+
+func onboardDesktop(account *user.User, run func(*user.User, []string, bool) error, stat func(string) (fs.FileInfo, error)) (string, error) {
+	if account == nil || account.Username == "" || account.Uid == "" || account.Uid == "0" || !filepath.IsAbs(account.HomeDir) || filepath.Clean(account.HomeDir) != account.HomeDir || account.HomeDir == "/" {
+		return "", errors.New("invalid desktop account")
+	}
+	if err := run(account, []string{"/usr/bin/local-vpn-kde", "bridge"}, false); err != nil {
+		return "", err
+	}
+	profile := filepath.Join(account.HomeDir, ".local/state/local-vpn-kde/openvpn/client/vpnkit-local.ovpn")
+	info, err := stat(profile)
+	if errors.Is(err, os.ErrNotExist) {
+		return "Installed and enrolled. Open local-vpn-kde as your desktop user and add a server/profile; its NetworkManager profile is prepared on first connect. No VPN was connected.", nil
+	}
+	if err != nil || !info.Mode().IsRegular() {
+		return "", errors.New("existing desktop profile is not a regular readable file")
+	}
+	bus, err := stat("/run/user/" + account.Uid + "/bus")
+	if errors.Is(err, os.ErrNotExist) {
+		return "Installed and enrolled; desktop profile import deferred until a logged-in desktop session. Open local-vpn-kde there; first connect prepares its profile. No VPN was connected.", nil
+	}
+	if err != nil || bus.Mode()&os.ModeSocket == 0 {
+		return "", errors.New("desktop session bus unavailable")
+	}
+	args := []string{"/usr/bin/systemd-run", "--user", "--quiet", "--wait", "--collect", "--pipe",
+		"--setenv=HOME=" + account.HomeDir, "--setenv=XDG_STATE_HOME=" + filepath.Join(account.HomeDir, ".local/state"),
+		"/usr/bin/local-vpn-kde", "networkmanager", "--runtime", "native", "--action", "import", "--yes"}
+	if err := run(account, args, true); err != nil {
+		return "", errors.New("NetworkManager profile import failed in desktop session; open local-vpn-kde diagnostics")
+	}
+	return "Installed and enrolled; desktop NetworkManager profile prepared. No VPN was connected.", nil
 }
 
 // Root elevation authenticates the installation caller once. Never infer an

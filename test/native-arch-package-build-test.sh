@@ -18,6 +18,7 @@ docker run -d --pull never --name "$name" \
 # Copy only these public fixture sources, never checkout directories/state.
 docker cp "$root/test/native-profile-installed-lab/main.go" "$name:/work/profile-main.go"
 docker cp "$root/test/native-profile-installed-test.py" "$name:/work/profile-test.py"
+docker cp "$root/install-native.sh" "$name:/work/install-native.sh"
 docker cp "$root/test/compiled-tui-installed-test.py" "$name:/work/compiled-tui-test.py"
 docker exec "$name" mkdir -p /work/portable-src/cmd/vpnkit-portable /work/portable-src/packaging/portable
 docker cp "$root/cmd/vpnkit-portable/main.go" "$name:/work/portable-src/cmd/vpnkit-portable/main.go"
@@ -46,7 +47,14 @@ python /work/portable-src/packaging/portable/build.py "${packages[0]}" /work/vpn
 /work/vpnkit-portable --inspect > /work/portable-manifest.json
 python -c '\''import json; m=json.load(open("/work/portable-manifest.json")); assert "bun" not in m["dependencies"] and not any(d.startswith("sing-box") for d in m["dependencies"])'\''
 builder_uid=$(id -u builder)
-printf "y\ny\ny\n" | env SUDO_UID="$builder_uid" /work/vpnkit-portable --install
+# Reject missing/mismatched elevated caller before executing an artifact.
+if env -u SUDO_UID -u SUDO_USER bash /work/install-native.sh /work/vpnkit-portable >/dev/null 2>&1; then exit 1; fi
+if env SUDO_UID=99999 SUDO_USER=builder bash /work/install-native.sh /work/vpnkit-portable >/dev/null 2>&1; then exit 1; fi
+(cd /root && printf "y\ny\ny\n" | env SUDO_UID="$builder_uid" SUDO_USER=builder bash /work/install-native.sh /work/vpnkit-portable > /work/native-install.log)
+cat /work/native-install.log
+grep -q "add a server/profile" /work/native-install.log
+[[ $(stat -c "%u:%a" /home/builder/.local/state/local-vpn-kde) == "$builder_uid:700" ]]
+[[ $(stat -c "%u:%a" /home/builder/.local/state/local-vpn-kde/vibe-vpn) == "$builder_uid:700" ]]
 id -nG builder | tr " " "\n" | grep -qx local-vpn-kde-users
 printf "portable_single_download_install=passed\n"
 test -f /usr/lib/systemd/system/local-vpn-kde-network.service
@@ -71,8 +79,8 @@ else
   exit "$result"
 fi
 python -c '\''import json; s=json.load(open("/work/status.json")); assert s["runtime"]=="native" and s["installed"] is True'\''
-# Read-only status must not create state; interactive bridge startup must.
-test ! -e /home/builder/.local/state/local-vpn-kde
+# Installer initialized private state as the desktop user; bridge is idempotent.
+test -d /home/builder/.local/state/local-vpn-kde
 runuser -u builder -- env HOME=/home/builder XDG_STATE_HOME=/home/builder/.local/state \
   /usr/bin/local-vpn-kde bridge </dev/null
 [[ $(stat -c %a /home/builder/.local/state/local-vpn-kde) == 700 ]]
@@ -123,6 +131,8 @@ if [[ -n ${VPNKIT_NATIVE_ARCH_TEST_ARTIFACT_DIR:-} ]]; then
   test ! -e "$artifact_dir/vpnkit-portable"
   docker cp "$name:/work/vpnkit-portable" "$artifact_dir/vpnkit-portable"
   docker cp "$name:/work/vpnkit-portable.sha256" "$artifact_dir/vpnkit-portable.sha256"
+  test ! -e "$artifact_dir/install-native.sh"
+  cp -- "$root/install-native.sh" "$artifact_dir/install-native.sh"
   (cd "$artifact_dir" && sha256sum -- "$package_name" > "$package_name.sha256")
   printf "local_package_artifact=%s/%s\n" "$artifact_dir" "$package_name"
 fi

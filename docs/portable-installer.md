@@ -2,15 +2,40 @@
 
 The local proof of concept delivers the complete native application in one
 Linux executable. It embeds a regular `local-vpn-kde-native` Arch package and a
-SHA-256 manifest. Run `./vpnkit-portable --inspect` without root to inspect the
-package revision, checksum and remaining dependencies, then
-`sudo ./vpnkit-portable --install`. Pacman asks for confirmation before installing
-missing system dependencies and the embedded package. The installer enrolls
-the invoking sudo/pkexec user for this application, so initial configuration
-and subsequent TUI actions do not ask for another password. A direct root
-installation without an invoking user leaves enrollment to the first setup. Keep the Arch system and
-its repository databases current using the normal full-system upgrade workflow;
-the installer deliberately does not perform a database-only refresh or retry.
+SHA-256 manifest. A locally built bundle contains `vpnkit-portable`, its checksum,
+and `install-native.sh`. On Arch Linux x86_64, verify the trusted checksum and run
+one elevated command from your desktop account:
+
+```sh
+sha256sum -c vpnkit-portable.sha256
+sudo bash ./install-native.sh
+```
+
+Alternatively pass the portable artifact explicitly:
+`sudo bash ./install-native.sh /path/to/vpnkit-portable`. This needs neither Go,
+Bun nor Docker on the installing computer. It uses an existing local artifact;
+there is no automatic download URL or source build. `./vpnkit-portable --inspect`
+shows the embedded revision, checksum and remaining dependencies without root.
+Direct `sudo ./vpnkit-portable --install` uses the same onboarding.
+
+Pacman confirms missing dependencies and package installation. The elevated
+installer validates the invoking account, enrolls it for application operations,
+and initializes private state as that user with fresh account groups. Existing
+processes need no logout for the application's polkit membership check. If a
+canonical generated client profile and a running desktop user session exist,
+profile import runs through that session's systemd manager, without activating
+it. A foreign or active profile is subject to the existing ownership protections;
+an actual import failure exits with “package installed; desktop setup incomplete”.
+
+On a fresh install, open `local-vpn-kde` **without sudo**, add your server/profile,
+then connect when ready. If configuration or the desktop session is absent,
+NetworkManager import is explicitly deferred to the normal setup/first-connect
+flow. The installer never creates root-owned desktop state, starts a gateway or
+activates a VPN. Direct root invocation of `install-native.sh` is refused because
+it cannot identify the desktop user; the lower-level portable installer may
+install as root without enrolling anyone. Keep Arch and its repositories current
+through the normal full-system upgrade workflow; the installer does not perform
+a database-only refresh or retry.
 
 This is an installer, not a zero-install VPN daemon. After installation use
 `local-vpn-kde` as the desktop user. It installs root-owned files, systemd units,
@@ -46,7 +71,8 @@ VPNKIT_NATIVE_ARCH_TEST_ARTIFACT_DIR=/tmp/vpnkit-package-artifacts \
 
 The runner uses the curated public source snapshot, builds the package and
 installer in a new container, disconnects that container from the network, then
-checks installer installation, installed JSON status, profile/security fixtures,
+checks the one-sudo script, caller rejection, enrollment, user-owned private state,
+expected fresh-install deferral, installed JSON status, profile/security fixtures,
 compiled UI in a PTY, package recovery, reinstallation and removal. It does not
 start a system manager or test a live KDE/polkit prompt/VPN connection. The
 installed UI is tested after hiding the container's system Bun and sing-box.
@@ -57,6 +83,7 @@ and Go:
 ```sh
 python3 packaging/portable/build.py /path/local-vpn-kde-native-VERSION-x86_64.pkg.tar.zst \
   /path/vpnkit-portable
+cp install-native.sh /path/install-native.sh
 (cd /path && sha256sum -c vpnkit-portable.sha256)
 /path/vpnkit-portable --inspect
 ```

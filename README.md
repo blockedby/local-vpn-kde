@@ -1,8 +1,27 @@
 # Local VPN KDE
 
-A Docker VPN gateway for KDE, with NetworkManager integration and a terminal UI. Choose servers, check ping and website availability, and measure download speed.
+A VPN gateway for KDE, with NetworkManager integration, native and Docker runtimes, and a terminal UI. Choose servers, check ping and website availability, and measure download speed.
 
-## Install
+## Native install (Arch x86_64)
+
+With a trusted locally built bundle containing `vpnkit-portable` and
+`install-native.sh`, verify its checksum and install from your desktop account:
+
+```sh
+sha256sum -c vpnkit-portable.sha256
+sudo bash ./install-native.sh
+local-vpn-kde
+```
+
+The one-sudo installer installs dependencies and the complete native application,
+enrolls your user, and prepares its NetworkManager profile when configuration and
+a desktop session are available. Fresh installs add a server/profile in the app;
+profile import is deferred until setup/first connect. Installation never starts
+or connects the VPN. No Go, Bun or Docker is needed on this target computer.
+See [native bundle and local build instructions](docs/portable-installer.md).
+There is no published download URL assumed by this command.
+
+## Docker install
 
 Linux x86-64 with KDE: Ubuntu 24.04+, Debian 13+, Fedora, or Arch/CachyOS. You need internet access and administrator privileges through sudo or Polkit.
 
