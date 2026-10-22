@@ -20,7 +20,7 @@ const (
 )
 
 // RecoverNativePackageChange clears an inhibitor left by an aborted native
-// package transaction. It never touches pacman's lock; recovery is allowed
+// package transaction. It never removes package-manager locks; recovery is allowed
 // only after the package database has been inspected while holding the
 // exclusive native configuration lock.
 func RecoverNativePackageChange(ctx context.Context) error {
@@ -40,7 +40,7 @@ func RecoverNativePackageChange(ctx context.Context) error {
 	return recoverNativePackageChangeLockedAt(bounded, nativePackageDatabaseAnchor, nativePackageDatabaseOwnerUID, completeNativePackageChangeLocked)
 }
 
-// nativePackageRecoveryContext covers lock acquisition, pacman inspection, and
+// nativePackageRecoveryContext covers lock acquisition, package inspection, and
 // the validated finish as one operation. The at-seam below is intentionally
 // unexported: production has no caller-supplied filesystem anchor or finish.
 func nativePackageRecoveryContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -81,6 +81,9 @@ func recoverNativePackageChangeLockedAt(ctx context.Context, anchor string, expe
 	}
 
 	databaseFD, err := openNativePackageDatabaseAt(anchor, expectedUID)
+	if errors.Is(err, unix.ENOENT) {
+		return recoverDebianPackageChangeAt(ctx, anchor, expectedUID, finish)
+	}
 	if err != nil {
 		return errors.New("cannot safely inspect pacman database")
 	}
@@ -110,6 +113,10 @@ func recoverNativePackageChangeLockedAt(ctx context.Context, anchor string, expe
 // pinned, no-follow descriptors. Every directory in the walk must be owned by
 // the expected root UID and must not be group- or world-writable.
 func openNativePackageDatabaseAt(anchor string, expectedUID uint32) (int, error) {
+	return openPackageDatabaseAt(anchor, expectedUID, "pacman")
+}
+
+func openPackageDatabaseAt(anchor string, expectedUID uint32, name string) (int, error) {
 	if anchor == "" || !filepath.IsAbs(anchor) || filepath.Clean(anchor) != anchor {
 		return -1, errors.New("native pacman database anchor is invalid")
 	}
@@ -123,7 +130,7 @@ func openNativePackageDatabaseAt(anchor string, expectedUID uint32) (int, error)
 		return -1, err
 	}
 
-	for _, part := range []string{"var", "lib", "pacman"} {
+	for _, part := range []string{"var", "lib", name} {
 		next, err := unix.Openat(fd, part, directoryFlags, 0)
 		if err != nil {
 			_ = unix.Close(fd)

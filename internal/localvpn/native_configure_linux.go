@@ -170,7 +170,11 @@ func configureNativeInstallationProtocol(ctx context.Context, input io.Reader, o
 		enroll: func(ctx context.Context) error {
 			deadline, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
-			return nativeConfigurationCommand(deadline, "/usr/bin/usermod", "--append", "--groups", "local-vpn-kde-users", "--", owner.Username)
+			usermod, err := nativeSystemExecutable("usermod")
+			if err != nil {
+				return err
+			}
+			return nativeConfigurationCommand(deadline, usermod, "--append", "--groups", "local-vpn-kde-users", "--", owner.Username)
 		},
 		desktop: func(ctx context.Context) error {
 			return protocol.readyAndWait(ctx, acknowledgement)
