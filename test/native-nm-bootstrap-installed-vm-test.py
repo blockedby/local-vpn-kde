@@ -42,6 +42,7 @@ sequence = 0
 generated = None
 foreign = None
 renamed_original = False
+restore_active = False
 summary = []
 secondary = None
 
@@ -212,6 +213,14 @@ def restore_capability():
 
 try:
     connected()
+    restore_active = True
+    # Apply the supported owned-profile metric migration before the fixture
+    # snapshot. The new coexistence policy deliberately changes old metric 50
+    # to 0; restoring the old priority would undo the feature under test.
+    run("disconnect")
+    run("start")
+    connected()
+    assert nm("-g", "ipv4.route-metric", "connection", "show", "uuid", original_uuid).decode().strip() == "0"
     assert name(original_uuid) == "vpnkit-native", "original ownership mismatch"
     original_settings = profile_digest(original_uuid)
     identities = private_identity()
@@ -311,6 +320,8 @@ finally:
         cleanup_step("original settings", lambda: profile_digest(original_uuid) == original_settings or (_ for _ in ()).throw(AssertionError()))
         cleanup_step("private identity", lambda: private_identity() == identities or (_ for _ in ()).throw(AssertionError()))
         cleanup_step("autostart", lambda: run("autostart/read")["autostart"] == auto or (_ for _ in ()).throw(AssertionError()))
+    elif restore_active:
+        cleanup_step("restore initial active connection", lambda: run("start"))
     proc.stdin.close()
     try:
         proc.wait(timeout=30)
