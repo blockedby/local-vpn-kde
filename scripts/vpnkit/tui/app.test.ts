@@ -1845,3 +1845,23 @@ for (const width of [48, 100, 140]) {
     } finally { await app.close(); }
   });
 }
+
+test("failed reapplication replaces drift instruction with the actual busy failure", async () => {
+  const t = await createTestRenderer({width:100,height:28});
+  const b = new FakeBackend();
+  b.status = {...b.status,runtime:"native",installed:true,gateway_state:"inactive"};
+  const app = new App(t.renderer,b);
+  try {
+    await app.perform("status");
+    b.hold = {action:"backend/start",promise:Promise.resolve({...reply(b.status),ok:false,reason:"native-network-settings-changed"})};
+    await app.perform("backend/start");
+    b.hold = {action:"network/reapply",promise:Promise.resolve({...reply(b.status),ok:false,reason:"native-network-busy"})};
+    t.mockInput.pressKey("f"); await settle(); await t.renderOnce();
+    const frame=t.captureCharFrame();
+    expect(frame).toContain("другая системная служба");
+    expect(frame).not.toContain("настройки VPN поменялись");
+    expect(frame).not.toContain("применить их ещё раз");
+    t.mockInput.pressKey("f"); await settle();
+    expect(b.calls.filter(c=>c.action==="network/reapply")).toHaveLength(1);
+  } finally { await app.close(); }
+});

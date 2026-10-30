@@ -16,10 +16,11 @@ const groups: Record<string, readonly string[]> = {
   profile: ["profiles-failed", "other-vpn-active", "foreign-profile", "previous-profile-active", "profile-import-failed", "profile-invalid", "nm-activation-failed"],
   dns: ["dns-failed"],
   server: ["stale", "ip-https-failed", "hostname-https-failed", "ping-failed"],
-  management: ["unavailable", "backend-unavailable", "diagnostics-unavailable", "recovery_required", "host-smoke-failed", "assets-failed"],
+  management: ["native-network-busy", "unavailable", "backend-unavailable", "diagnostics-unavailable", "recovery_required", "host-smoke-failed", "assets-failed"],
   input: ["invalid-request"],
 };
 const messages: Record<string, string> = {
+ "native-network-busy": "Не удалось восстановить сеть VPN: её использует другая системная служба. Подробности — в диагностике [d].",
   "docker-unavailable": "Docker недоступен. Проверьте его состояние и установку.",
   "underlay-install-failed": "Не удалось установить маршруты обхода VPN. Подробности — в диагностике.",
   "underlay-verify-failed": "Проверка маршрутов обхода VPN не прошла. Подробности — в диагностике.",

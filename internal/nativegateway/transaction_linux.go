@@ -237,7 +237,19 @@ func (c Controller) Start(ctx context.Context, uplink Uplink) error {
 			return errors.New("network journal belongs to a different uplink")
 		}
 		if err := c.reconcile(ctx, &journal, kinds); err != nil {
-			return err
+			if !errors.Is(err, ErrNetworkNeedsCleanup) {
+				return err
+			}
+			repaired, repairErr := c.repairMissingUplinkRoutes(ctx, journal, commands, kinds)
+			if repairErr != nil {
+				return repairErr
+			}
+			if !repaired {
+				return err
+			}
+			if err := c.reconcile(ctx, &journal, kinds); err != nil {
+				return err
+			}
 		}
 		if journal.Version == legacyNetworkJournalVersion {
 			// An intact legacy installation remains usable. Only stamp the
@@ -320,6 +332,47 @@ func (c Controller) Start(ctx context.Context, uplink Uplink) error {
 		}
 	}
 	return nil
+}
+
+// Restore only missing dedicated uplink routes in an otherwise intact,
+// fully applied current-boot plan. Unlike teardown, adding these exact routes
+// does not detach namespaces held by independent observers such as bpftune.
+func (c Controller) repairMissingUplinkRoutes(ctx context.Context, journal NetworkJournal, commands []Command, kinds []EffectKind) (bool, error) {
+	if int(journal.EffectCount) != len(kinds) {
+		return false, nil
+	}
+	for _, record := range journal.Effects[:journal.EffectCount] {
+		if record.Phase != EffectApplied {
+			return false, nil
+		}
+	}
+	expect := expectation(journal.Uplink, journal.InitialIPv4Forwarding, kinds)
+	inspection, err := c.Inspector.Inspect(ctx, expect)
+	if err != nil {
+		return false, err
+	}
+	missing := []int{}
+	for i, kind := range kinds {
+		observed := inspection.Effects[i]
+		if observed.State == ObservationAbsent && (kind == EffectConnectedRoute || kind == EffectDefaultUplinkRoute) {
+			missing = append(missing, i)
+			continue
+		}
+		if observed.State != ObservationExact || journal.Effects[i].Identity != identityFor(kind, observed.Identity) {
+			return false, nil
+		}
+	}
+	if len(missing) == 0 {
+		return false, nil
+	}
+	for _, i := range missing {
+		// The original durable applied record remains valid across a crash:
+		// the next start can again prove either exact state or route absence.
+		if err := c.Runner.Run(ctx, cloneCommand(commands[i])); err != nil {
+			return false, fmt.Errorf("restore dedicated %s: %w", effectName(kinds[i]), err)
+		}
+	}
+	return true, nil
 }
 
 func (c Controller) Stop(ctx context.Context) error {

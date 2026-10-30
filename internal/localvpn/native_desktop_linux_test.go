@@ -332,7 +332,7 @@ func TestNativeStartFailureDoesNotReachProfileImportOrActivation(t *testing.T) {
 
 func TestNativeNetworkReapplyPreservesConnectionState(t *testing.T) {
 	for _, connected := range []bool{false, true} {
-		for _, failed := range []string{"", "connection-state", "disconnect", "stop", "start", "reapply", "connect"} {
+		for _, failed := range []string{"", "connection-state", "disconnect", "start", "reapply", "connect"} {
 			t.Run(fmt.Sprintf("connected=%v/failure=%s", connected, failed), func(t *testing.T) {
 				events := []string{}
 				service := &fakeNativeDesktopService{events: &events}
@@ -357,7 +357,7 @@ func TestNativeNetworkReapplyPreservesConnectionState(t *testing.T) {
 				if connected {
 					want = append(want, "nm-disconnect")
 				}
-				want = append(want, "service-stop", "service-start", "nm-reapply")
+				want = append(want, "service-start", "nm-reapply")
 				if connected {
 					want = append(want, "nm-connect")
 				}

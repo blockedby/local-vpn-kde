@@ -346,8 +346,8 @@ func commandPosition(commands []Command, wanted Command) int {
 	return -1
 }
 
-func TestControllerMissingRouteRequiresVerifiedCleanup(t *testing.T) {
-	for _, scenario := range []string{"missing-route", "conflicting-route", "replaced-namespace"} {
+func TestControllerRestoresOnlyMissingRoutesWithIntactOwnership(t *testing.T) {
+	for _, scenario := range []string{"missing-route", "both-routes", "conflicting-route", "replaced-namespace", "later-conflict"} {
 		t.Run(scenario, func(t *testing.T) {
 			network := newFakeNetwork(t, false)
 			store := &fakeJournalStore{}
@@ -358,35 +358,36 @@ func TestControllerMissingRouteRequiresVerifiedCleanup(t *testing.T) {
 				t.Fatal(err)
 			}
 			for i, kind := range network.kinds {
-				if kind == EffectConnectedRoute {
+				if kind == EffectConnectedRoute || scenario == "both-routes" && kind == EffectDefaultUplinkRoute {
 					network.present[i] = false
 					if scenario == "conflicting-route" {
 						network.conflict = i
 					}
 				}
 			}
+			if scenario == "later-conflict" {
+				network.conflict = len(network.kinds) - 1
+			}
 			if scenario == "replaced-namespace" {
 				network.ns.Inode++
 			}
 			before := len(runner.commands)
 			err := controller.Start(ctx, validUplink())
-			if err == nil || errors.Is(err, ErrNetworkNeedsCleanup) != (scenario == "missing-route") {
-				t.Fatalf("incorrect recovery classification: %v", err)
-			}
-			if len(runner.commands) != before {
-				t.Fatal("failed start mutated network")
-			}
-			if scenario != "missing-route" {
+			if scenario != "missing-route" && scenario != "both-routes" {
+				if err == nil || len(runner.commands) != before {
+					t.Fatalf("unsafe repair: %v", err)
+				}
 				if err := controller.Stop(ctx); err == nil || len(runner.commands) != before {
 					t.Fatal("unsafe cleanup accepted")
 				}
 				return
 			}
-			if err := controller.Stop(ctx); err != nil {
-				t.Fatal(err)
+			want := 1
+			if scenario == "both-routes" {
+				want = 2
 			}
-			if err := controller.Start(ctx, validUplink()); err != nil {
-				t.Fatal(err)
+			if err != nil || len(runner.commands)-before != want {
+				t.Fatalf("repair=%v mutations=%d", err, len(runner.commands)-before)
 			}
 			if ready, err := controller.Status(ctx); err != nil || !ready {
 				t.Fatalf("recovered ready=%v error=%v", ready, err)

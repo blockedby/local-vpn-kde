@@ -363,9 +363,6 @@ func reapplyNativeDesktopNetwork(ctx context.Context, output io.Writer, d native
 	if err := nativeDesktopPhase(output, "network-reapply"); err != nil {
 		return err
 	}
-	if err := d.service.Stop(ctx); err != nil {
-		return err
-	}
 	if err := d.service.Start(ctx); err != nil {
 		return err
 	}
