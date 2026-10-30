@@ -126,7 +126,7 @@ test("native runtime shows the supported lifecycle preview and native service pr
     let frame = t.captureCharFrame();
     expect(frame).toContain("NATIVE PREVIEW");
     expect(frame).toContain("Native-служба");
-    expect(frame).toContain("Запустить native-службу");
+    expect(frame).toContain("Запустить сервис");
     expect(frame).not.toContain("Docker");
     t.mockInput.pressKey("s");
     await settle();
@@ -137,7 +137,7 @@ test("native runtime shows the supported lifecycle preview and native service pr
     t.mockInput.pressKey("z");
     await t.renderOnce();
     frame = t.captureCharFrame();
-    expect(frame).toContain("остановить native-службу и отключить VPN?");
+    expect(frame).toContain("остановить сервис и отключить VPN?");
     expect(frame).not.toContain("Docker");
   } finally {
     await app.close();
@@ -1756,7 +1756,7 @@ test("failed native status polls retain native server screen without stale readi
       expect(frame).toContain("Статус недоступен");
       expect(frame).toContain("NATIVE");
       expect(frame).toContain("Служба управления недоступна");
-      expect(frame).toContain("native-службу");
+      expect(frame).toContain("Запустить сервис");
       expect(frame).not.toContain("Docker");
       expect(frame).not.toContain("VPN подключён");
     }
@@ -1795,7 +1795,7 @@ test("held native and Docker lifecycle actions use their own runtime labels", as
         await t.renderOnce();
         const frame = t.captureCharFrame();
         const verb = action === "stop" ? "Останавливаем" : "Запускаем";
-        expect(frame).toContain(`${verb} ${runtime === "native" ? "native-службу" : "Docker"}`);
+        expect(frame).toContain(`${verb} ${runtime === "native" ? "сервис" : "Docker"}`);
         if (runtime === "native") expect(frame).not.toContain("Docker");
         finish(reply(b.status));
         await work;
@@ -1806,3 +1806,42 @@ test("held native and Docker lifecycle actions use their own runtime labels", as
     }
   }
 });
+
+for (const width of [48, 100, 140]) {
+  test(`native network repair is offered inline and f runs once at ${width} columns`, async () => {
+    const t = await createTestRenderer({ width, height: 28 });
+    const b = new FakeBackend();
+    b.status = { ...b.status, runtime: "native", installed: true, gateway_state: "inactive", last_attempt: "private-attempt" };
+    const app = new App(t.renderer, b);
+    try {
+      await app.perform("status");
+      b.hold = { action: "backend/start", promise: Promise.resolve({ ...reply(b.status), ok: false, reason: "native-network-settings-changed" }) };
+      await app.perform("backend/start");
+      await t.renderOnce();
+      const frame = t.captureCharFrame();
+      expect(frame).toContain("Сетевые настройки VPN поменялись,");
+      expect(frame).toContain("нажмите [f]");
+      expect(frame).toContain("ещё раз.");
+      expect(frame).not.toContain("Действие не выполнено");
+      expect(frame).not.toContain("[f] Действия");
+      expect(frame).not.toContain("private-attempt");
+      expect(frame).toContain("Запустить сервис");
+      expect(b.calls.filter(c => c.action === "network/reapply")).toHaveLength(0);
+      let resolve!: (r: Reply) => void;
+      b.hold = { action: "network/reapply", promise: new Promise(r => resolve = r) };
+      t.mockInput.pressKey("f"); await settle();
+      t.mockInput.pressKey("f"); await settle();
+      expect(b.calls.filter(c => c.action === "network/reapply")).toHaveLength(1);
+      expect(b.calls.some(c => c.action === "start" || c.action === "disconnect")).toBe(false);
+      resolve(reply(b.status)); await settle(); await t.renderOnce();
+      expect(t.captureCharFrame()).toContain("Сетевые настройки VPN применены.");
+      t.mockInput.pressKey("f"); await settle();
+      expect(b.calls.filter(c => c.action === "network/reapply")).toHaveLength(1);
+      b.hold = { action: "backend/start", promise: Promise.resolve({ ...reply(b.status), ok: false, reason: "native-network-settings-changed" }) };
+      await app.perform("backend/start");
+      await app.perform("disconnect");
+      t.mockInput.pressKey("f"); await settle();
+      expect(b.calls.filter(c => c.action === "network/reapply")).toHaveLength(1);
+    } finally { await app.close(); }
+  });
+}

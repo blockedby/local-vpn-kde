@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -503,6 +504,12 @@ func (s NativeService) Start(parent context.Context) error {
 		return err
 	}
 	if _, err := s.call(ctx, "systemctl", "start", nativegateway.GatewayUnit); err != nil {
+		if ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			data, queryErr := s.call(ctx, "systemctl", "show", "--property=ExecMainStatus", "--value", nativegateway.NetworkUnit)
+			if queryErr == nil && strings.TrimSpace(string(data)) == strconv.Itoa(NativeNetworkChangedExitCode) {
+				return ErrNativeNetworkChanged
+			}
+		}
 		return nativeServiceCommandError(ctx, err, "native gateway start failed")
 	}
 	status, err := s.statusWithContext(ctx)

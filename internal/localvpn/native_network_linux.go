@@ -92,6 +92,8 @@ func RunNativeNetwork(ctx context.Context, action string, output io.Writer) erro
 		},
 		func(ctx context.Context) error {
 			return (nativeMutationCommands{}).Run(ctx, nativegateway.Command{Program: "ip", Args: []string{"netns", "exec", nativegateway.Namespace, nativegateway.LibexecDir + "/local-vpn-kde.bin", "native-namespace-init"}})
+		}, func(ctx context.Context) error {
+			return stopNativeNetwork(ctx, controller, reads, nativeNamespacePresent)
 		})
 }
 
@@ -128,13 +130,31 @@ func stopNativeNetwork(ctx context.Context, controller nativeNetworkLifecycleCon
 	return controller.Stop(ctx)
 }
 
-func startNativeNetwork(ctx context.Context, controller nativeNetworkLifecycleController, existed bool, discoverUplink func(context.Context) (nativegateway.Uplink, error), initializeNamespace func(context.Context) error) error {
+func startNativeNetwork(ctx context.Context, controller nativeNetworkLifecycleController, existed bool, discoverUplink func(context.Context) (nativegateway.Uplink, error), initializeNamespace func(context.Context) error, cleanupNetwork func(context.Context) error) error {
 	uplink, err := discoverUplink(ctx)
 	if err != nil {
 		return err
 	}
 	if err = controller.Start(ctx, uplink); err != nil {
-		return err
+		if !existed || !errors.Is(err, nativegateway.ErrNetworkNeedsCleanup) {
+			return err
+		}
+		// A link flap can remove dedicated routes while leaving the durable
+		// journal intact. Rebuild only after proving no namespace users and
+		// letting Stop validate every remaining resource's ownership.
+		if cleanupErr := cleanupNetwork(ctx); cleanupErr != nil {
+			return errors.Join(err, cleanupErr)
+		}
+		existed = false
+		// Cleanup may take time; refresh DHCP/underlay information before
+		// constructing the new plan.
+		uplink, err = discoverUplink(ctx)
+		if err != nil {
+			return err
+		}
+		if err = controller.Start(ctx, uplink); err != nil {
+			return err
+		}
 	}
 	// Root sets namespace-only sysctls before the capability-restricted
 	// gateway starts; initialization independently proves namespace identity.

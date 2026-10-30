@@ -29,6 +29,7 @@ const names: Partial<Record<Action, string>> = {
   "autostart/read": "Читаем настройки автозапуска",
   "autostart/set": "Сохраняем автозапуск",
   "backend/start": "Запускаем Docker",
+  "network/reapply": "Применяем сетевые настройки VPN",
   start: "Подключаем VPN",
   disconnect: "Отключаем VPN",
   stop: "Останавливаем Docker",
@@ -62,6 +63,7 @@ const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "
 const nativeSupportedActions: readonly Action[] = [
   "status",
   "backend/start",
+  "network/reapply",
   "start",
   "disconnect",
   "stop",
@@ -412,7 +414,7 @@ export class App {
     return runtime === "native" ? "native-служба" : "Docker";
   }
   private serviceObject(runtime: Status["runtime"] = this.status?.runtime) {
-    return runtime === "native" ? "native-службу" : "Docker";
+    return runtime === "native" ? "сервис" : "Docker";
   }
   private nativePreview() {
     return this.nativeInstalled()
@@ -451,8 +453,9 @@ export class App {
   }
   private actionLabel(action: Action) {
     if (this.nativeMode()) {
-      if (action === "backend/start") return "Запускаем native-службу";
-      if (action === "stop") return "Останавливаем native-службу";
+      if (action === "backend/start") return "Запускаем сервис";
+      if (action === "network/reapply") return "Применяем сетевые настройки VPN";
+      if (action === "stop") return "Останавливаем сервис";
       if (this.nativeInstalled() && action === "subscription") return "Настраиваем native-пакет";
     }
     return names[action] ?? "Операция";
@@ -576,10 +579,11 @@ export class App {
     if (this.screen === "recovery") {
       if (this.backendOffline) return [{ key: "u", label: this.reconnecting ? "Восстанавливаем связь…" : "Восстановить связь", run: () => void this.reconnectBackend() }];
       return (this.recovery?.actions ?? ["status", "diagnostics"]).map(choice => ({
-        key: { status: "u", diagnostics: "d", servers: "v", retry: "r" }[choice],
-        label: { status: "Проверить состояние", diagnostics: "Открыть диагностику", servers: "Выбрать другой сервер", retry: "Повторить действие" }[choice],
+        key: { status: "u", diagnostics: "d", servers: "v", retry: "r", reapply: "f" }[choice],
+        label: { status: "Проверить состояние", diagnostics: "Открыть диагностику", servers: "Выбрать другой сервер", retry: "Повторить действие", reapply: "Применить сетевые настройки VPN" }[choice],
         run: () => {
-          if (choice === "servers") this.open("servers");
+          if (choice === "reapply") void this.perform("network/reapply");
+          else if (choice === "servers") this.open("servers");
           else if (choice === "diagnostics") this.open("diagnostics");
           else if (choice === "status") void this.perform("status");
           else if (this.recovery) {
@@ -670,7 +674,7 @@ export class App {
           run: () => {
             if (this.nativeMode()) void this.perform("toggle-mode");
             else if (this.ready()) void this.perform("toggle-mode");
-            else this.notify(`Смена режима доступна после запуска ${this.serviceObject()}.`);
+            else this.notify(`Смена режима доступна после запуска ${this.nativeMode() ? "сервиса" : "Docker"}.`);
           },
         },
         ...(["healthy", "unhealthy", "running", "stopped", "starting"].includes(
@@ -679,7 +683,7 @@ export class App {
           ? [
               {
                 key: "z",
-                label: `Остановить ${this.serviceObject()} и VPN`,
+                label: this.nativeMode() ? "Остановить сервис" : "Остановить Docker и VPN",
                 run: () => this.confirm("stop"),
               },
             ]
@@ -799,7 +803,11 @@ export class App {
     }
     if (this.closing) return;
     if (key.name === "j") { this.open("tasks"); return; }
-    if (key.name === "f" && this.recovery) { this.open("recovery"); return; }
+    if (key.name === "f" && this.recovery) {
+      if (this.recovery.actions.includes("reapply")) void this.perform("network/reapply");
+      else this.open("recovery");
+      return;
+    }
     if (key.name === "k") {
       this.cancel();
       return;
@@ -1073,7 +1081,7 @@ export class App {
         this.notice = nativeSubscriptionSetup
           ? "Не удалось настроить native-пакет. Проверьте подтверждение администратора и повторите."
           : reply.reason === "autostart-unavailable" ? "Не удалось настроить автозапуск. Проверьте пользовательскую службу systemd." : this.recovery?.message ?? failure(reply.reason, reply.code, this.status?.runtime);
-        this.noticeAttempt = [
+        this.noticeAttempt = reply.reason === "native-network-settings-changed" ? "" : [
           "start",
           "backend/start",
           "stop",
@@ -1090,7 +1098,9 @@ export class App {
         action !== "subscription/read" &&
         !insideBatch
       ) {
+        if (this.recovery?.actions.includes("reapply") && ["network/reapply", "backend/start", "start", "disconnect", "stop"].includes(action)) this.recovery = undefined;
         const done: Partial<Record<Action, string>> = {
+          "network/reapply": "Сетевые настройки VPN применены.",
           "profiles/list":"", "profiles/open":"Профиль открыт. Активный сервер не изменён.", "profiles/add":"Профиль добавлен.", "profiles/remove":"Профиль удалён. Активное подключение не изменено.",
           "autostart/read": "",
           "autostart/set": this.nativeMode() || this.autostart?.runtime === "native"
@@ -1431,7 +1441,7 @@ export class App {
         : this.nativePreviewOnly()
           ? this.nativePreview()
           : !this.ready()
-            ? `Подписку можно настроить до запуска ${this.serviceObject()}.`
+            ? `Подписку можно настроить до запуска ${this.nativeMode() ? "сервиса" : "Docker"}.`
             : this.status.subscription !== "configured"
               ? "Добавьте подписку, затем откройте серверы."
               : "";
@@ -1558,7 +1568,7 @@ export class App {
       cell(`${frames[this.frame % 10]} ${names[task.action] ?? "Ping → сайт"} · ${task.phase || "выполняется"} · [j] задачи`, width).trimEnd()).join("\n");
     this.notification.content = this.closing
       ? "Завершаем текущую операцию перед выходом…"
-      : this.notice + (this.error && this.recovery ? "\n[f] Действия" : "") +
+      : this.notice + (this.error && this.recovery && !this.recovery.actions.includes("reapply") ? "\n[f] Действия" : "") +
         (this.error && this.noticeAttempt
           ? `\nПопытка: ${this.noticeAttempt}`
           : "");

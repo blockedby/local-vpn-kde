@@ -205,7 +205,7 @@ func RunNativeDesktop(ctx context.Context, base string, action string, yes bool,
 	}
 	switch action {
 	case "status":
-	case "backend-start", "start", "disconnect", "stop", "toggle-mode":
+	case "backend-start", "start", "disconnect", "stop", "toggle-mode", "reapply-network":
 		if !yes {
 			return errors.New("native desktop mutation requires explicit authorization (--yes)")
 		}
@@ -231,6 +231,8 @@ func RunNativeDesktop(ctx context.Context, base string, action string, yes bool,
 	switch action {
 	case "status":
 		return runNativeDesktopStatus(ctx, base, output, dependencies, baseMissing)
+	case "reapply-network":
+		return reapplyNativeDesktopNetwork(ctx, output, dependencies)
 	case "toggle-mode":
 		return runNativeDesktopPolicy(ctx, output, dependencies)
 	case "backend-start":
@@ -246,13 +248,8 @@ func RunNativeDesktop(ctx context.Context, base string, action string, yes bool,
 		if statusErr != nil {
 			return fmt.Errorf("native gateway readiness capture failed: %w", statusErr)
 		}
-		// A recovered gateway has new OpenVPN state. NM may still label
-		// the old owned tunnel active, so invalidate it before recovery.
 		if !before.Ready {
-			if err = nativeDesktopPhase(output, "networkmanager-disconnect-stale"); err != nil {
-				return err
-			}
-			if err = dependencies.nm.Run(ctx, "disconnect", true, io.Discard); err != nil {
+			if err = dependencies.nm.Run(ctx, "check", true, io.Discard); err != nil {
 				return err
 			}
 		}
@@ -261,6 +258,16 @@ func RunNativeDesktop(ctx context.Context, base string, action string, yes bool,
 		}
 		if err = dependencies.service.Start(ctx); err != nil {
 			return err
+		}
+		// Only invalidate the old tunnel after service startup succeeded.
+		// A startup failure must preserve connection intent for explicit repair.
+		if !before.Ready {
+			if err = nativeDesktopPhase(output, "networkmanager-disconnect-stale"); err != nil {
+				return err
+			}
+			if err = dependencies.nm.Run(ctx, "disconnect", true, io.Discard); err != nil {
+				return err
+			}
 		}
 		if err = nativeDesktopPhase(output, "networkmanager-connect"); err != nil {
 			return err
@@ -334,4 +341,39 @@ func runNativeDesktopPolicy(ctx context.Context, output io.Writer, d nativeDeskt
 		return errors.Join(operationErr, errors.New("native gateway unavailable after policy change"))
 	}
 	return errors.Join(operationErr, d.nm.Run(cleanup, "connect", true, io.Discard))
+}
+
+// Reapplication is an explicit user action. Capture the actual owned connection
+// under the desktop lock; never use the TUI's possibly stale connection state.
+func reapplyNativeDesktopNetwork(ctx context.Context, output io.Writer, d nativeDesktopDependencies) error {
+	capture := &nativeDesktopLimitWriter{remain: nativeDesktopStatusLimit}
+	if err := d.nm.Run(ctx, "connection-state", true, capture); err != nil {
+		return err
+	}
+	_, active, err := parseNativeDesktopNMStatus(capture.buffer.Bytes())
+	if err != nil {
+		return err
+	}
+	connected := active == "yes"
+	if connected {
+		if err := d.nm.Run(ctx, "disconnect", true, io.Discard); err != nil {
+			return err
+		}
+	}
+	if err := nativeDesktopPhase(output, "network-reapply"); err != nil {
+		return err
+	}
+	if err := d.service.Stop(ctx); err != nil {
+		return err
+	}
+	if err := d.service.Start(ctx); err != nil {
+		return err
+	}
+	if err := d.nm.Run(ctx, "reapply", true, io.Discard); err != nil {
+		return err
+	}
+	if connected {
+		return d.nm.Run(ctx, "connect", true, io.Discard)
+	}
+	return nil
 }

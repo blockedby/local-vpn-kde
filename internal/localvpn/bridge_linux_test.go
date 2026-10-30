@@ -646,3 +646,31 @@ printf '%%s\n' '{"schema":"vibe-vpn.server-browser.v2","status":"ok","server":{"
 		})
 	}
 }
+
+func TestBridgeNetworkReapplyRequiresNativeRuntimeAndNoValue(t *testing.T) {
+	for _, scenario := range []struct {
+		runtime, value string
+		allowed        bool
+	}{
+		{"native", "", true}, {"docker", "", false}, {"native", "unexpected", false},
+	} {
+		t.Run(scenario.runtime+scenario.value, func(t *testing.T) {
+			b, err := NewBridge(BridgeOptions{Base: t.TempDir(), Runtime: scenario.runtime, Mock: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			input, _ := json.Marshal(map[string]string{"id": "repair", "action": "network/reapply", "value": scenario.value})
+			var output bytes.Buffer
+			if err := b.Serve(context.Background(), bytes.NewReader(append(input, '\n')), &output); err != nil {
+				t.Fatal(err)
+			}
+			var reply map[string]any
+			if err := json.Unmarshal(output.Bytes(), &reply); err != nil {
+				t.Fatal(err)
+			}
+			if reply["ok"] != scenario.allowed {
+				t.Fatalf("reply=%s", output.Bytes())
+			}
+		})
+	}
+}

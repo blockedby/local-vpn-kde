@@ -13,7 +13,7 @@ import (
 )
 
 func TestNativeConnectImportsOnlyProvenProfiles(t *testing.T) {
-	for _, scenario := range []string{"missing", "stale", "refresh", "existing", "foreign", "tampered", "other-vpn", "denied", "route-conflict", "activation-failed", "metric-upgrade", "route-upgrade"} {
+	for _, scenario := range []string{"missing", "stale", "refresh", "existing", "foreign", "tampered", "other-vpn", "denied", "route-conflict", "activation-failed", "metric-upgrade", "route-upgrade", "reapply-disconnected", "connection-state-active"} {
 		t.Run(scenario, func(t *testing.T) {
 			n := NetworkManager{Base: t.TempDir(), Native: true}
 			if err := os.MkdirAll(filepath.Dir(n.profilePath()), 0700); err != nil {
@@ -31,7 +31,7 @@ func TestNativeConnectImportsOnlyProvenProfiles(t *testing.T) {
 			metric := "0"
 			routes := nativeSplitRoutes()
 			neverDefault := "yes"
-			if scenario == "metric-upgrade" || scenario == "route-upgrade" {
+			if scenario == "metric-upgrade" || scenario == "route-upgrade" || scenario == "reapply-disconnected" {
 				routes = ""
 				neverDefault = "no"
 			}
@@ -48,15 +48,18 @@ func TestNativeConnectImportsOnlyProvenProfiles(t *testing.T) {
 				if err = n.writeCapability(nmCapability{UUID: old, Fingerprint: fp}); err != nil {
 					t.Fatal(err)
 				}
-			case "refresh", "existing", "tampered", "metric-upgrade", "route-upgrade":
+			case "refresh", "existing", "tampered", "metric-upgrade", "route-upgrade", "reapply-disconnected", "connection-state-active":
 				saved := fp
-				if scenario == "refresh" {
+				if scenario == "refresh" || scenario == "connection-state-active" {
 					saved = strings.Repeat("0", 64)
 				}
 				if err = n.writeCapability(nmCapability{UUID: old, Fingerprint: saved}); err != nil {
 					t.Fatal(err)
 				}
 				names[old] = "vpnkit-native"
+				if scenario == "connection-state-active" {
+					active = old
+				}
 			case "foreign":
 				names[old] = "vpnkit-native"
 			}
@@ -161,7 +164,26 @@ func TestNativeConnectImportsOnlyProvenProfiles(t *testing.T) {
 					t.Fatalf("cold lifecycle events=%v", events)
 				}
 			} else {
-				err = n.Run(ctx, "connect", true, &out)
+				action := "connect"
+				if scenario == "reapply-disconnected" {
+					action = "reapply"
+				}
+				if scenario == "connection-state-active" {
+					action = "connection-state"
+				}
+				err = n.Run(ctx, action, true, &out)
+			}
+			if scenario == "connection-state-active" {
+				if err != nil || !strings.Contains(out.String(), "active=yes") || ups+downs+imports+modifies+deletes != 0 {
+					t.Fatalf("active connection state: err=%v output=%s", err, &out)
+				}
+				return
+			}
+			if scenario == "reapply-disconnected" {
+				if err != nil || ups != 0 || downs != 0 || imports != 0 || modifies != 1 || !nativeSplitRoutesMatch(routes) || neverDefault != "yes" || metric != "0" {
+					t.Fatalf("disconnected repair: err=%v up=%d down=%d imports=%d modifies=%d routes=%q", err, ups, downs, imports, modifies, routes)
+				}
+				return
 			}
 			success := scenario == "missing" || scenario == "stale" || scenario == "refresh" || scenario == "existing" || scenario == "other-vpn" || scenario == "metric-upgrade" || scenario == "route-upgrade"
 			if (err == nil) != success {
@@ -187,7 +209,7 @@ func TestNativeConnectImportsOnlyProvenProfiles(t *testing.T) {
 				return
 			}
 			want := 1
-			if scenario == "existing" || scenario == "metric-upgrade" || scenario == "route-upgrade" {
+			if scenario == "existing" || scenario == "metric-upgrade" || scenario == "route-upgrade" || scenario == "reapply-disconnected" {
 				want = 0
 			}
 			if !nativeSplitRoutesMatch(routes) || neverDefault != "yes" || metric != "0" {

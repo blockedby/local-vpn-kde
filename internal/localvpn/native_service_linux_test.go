@@ -445,3 +445,25 @@ func TestNativeServiceBoundsTimeoutAndDoesNotExposeCommandOutput(t *testing.T) {
 		t.Fatalf("oversized status error = %v", err)
 	}
 }
+
+func TestNativeServiceClassifiesOnlyNetworkDriftExitStatus(t *testing.T) {
+	for _, status := range []string{"21\n", "20\n", "0\n", "garbage", ""} {
+		t.Run(strings.TrimSpace(status), func(t *testing.T) {
+			service, _ := newNativeServiceTestFixture(t, nativeServiceReadyTestStates())
+			original := service.command
+			service.command = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+				if args[0] == "start" {
+					return []byte("untrusted private error"), errors.New("failed")
+				}
+				if len(args) == 4 && args[1] == "--property=ExecMainStatus" && args[3] == nativegateway.NetworkUnit {
+					return []byte(status), nil
+				}
+				return original(ctx, name, args...)
+			}
+			err := service.Start(context.Background())
+			if errors.Is(err, ErrNativeNetworkChanged) != (status == "21\n") || err == nil || strings.Contains(err.Error(), "private") {
+				t.Fatalf("classification=%v", err)
+			}
+		})
+	}
+}

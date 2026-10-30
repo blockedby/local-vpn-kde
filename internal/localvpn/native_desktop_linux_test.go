@@ -65,7 +65,7 @@ func (f *fakeNativeDesktopNM) Run(ctx context.Context, action string, yes bool, 
 	if err := f.errors[action]; err != nil {
 		return err
 	}
-	if action == "status" {
+	if action == "status" || action == "connection-state" {
 		_, _ = io.WriteString(output, f.status)
 	}
 	return nil
@@ -86,7 +86,7 @@ func TestRunNativeDesktopLifecycleOrdering(t *testing.T) {
 		want   []string
 	}{
 		{"backend-start", []string{"service-start"}},
-		{"start", []string{"service-status", "nm-disconnect", "service-start", "nm-connect"}},
+		{"start", []string{"service-status", "nm-check", "service-start", "nm-disconnect", "nm-connect"}},
 		{"disconnect", []string{"nm-disconnect"}},
 		{"stop", []string{"nm-disconnect", "service-stop"}},
 	}
@@ -129,7 +129,7 @@ func TestRunNativeDesktopStartRollbackIgnoresCancellationAndIsBounded(t *testing
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want cancellation", err)
 	}
-	want := []string{"service-status", "nm-disconnect", "service-start", "nm-connect", "service-stop"}
+	want := []string{"service-status", "nm-check", "service-start", "nm-disconnect", "nm-connect", "service-stop"}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %#v, want %#v", events, want)
 	}
@@ -287,7 +287,7 @@ func TestNativePolicyReconnectsOnlyPreviouslyActiveOwnedProfile(t *testing.T) {
 	}
 }
 
-func TestRunNativeDesktopRecoveryDisconnectsStaleTunnelBeforeGatewayStart(t *testing.T) {
+func TestRunNativeDesktopRecoveryDisconnectsStaleTunnelAfterGatewayReady(t *testing.T) {
 	events := []string{}
 	service := &fakeNativeDesktopService{events: &events, status: GatewayStatus{Gateway: "active", Ready: false}}
 	nm := &fakeNativeDesktopNM{events: &events, status: "configured=yes\nactive=yes\n"}
@@ -295,7 +295,7 @@ func TestRunNativeDesktopRecoveryDisconnectsStaleTunnelBeforeGatewayStart(t *tes
 	if err := RunNativeDesktop(context.Background(), t.TempDir(), "start", true, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"service-status", "nm-disconnect", "service-start", "nm-connect"}
+	want := []string{"service-status", "nm-check", "service-start", "nm-disconnect", "nm-connect"}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events=%v want=%v", events, want)
 	}
@@ -305,12 +305,12 @@ func TestRunNativeDesktopRecoveryRefusesForeignProfileBeforeGatewayStart(t *test
 	events := []string{}
 	service := &fakeNativeDesktopService{events: &events}
 	refused := errors.New("foreign owned-profile capability")
-	nm := &fakeNativeDesktopNM{events: &events, errors: map[string]error{"disconnect": refused}}
+	nm := &fakeNativeDesktopNM{events: &events, errors: map[string]error{"check": refused}}
 	installNativeDesktopFakes(t, service, nm)
 	if err := RunNativeDesktop(context.Background(), t.TempDir(), "start", true, io.Discard); !errors.Is(err, refused) {
 		t.Fatalf("error=%v", err)
 	}
-	if !reflect.DeepEqual(events, []string{"service-status", "nm-disconnect"}) {
+	if !reflect.DeepEqual(events, []string{"service-status", "nm-check"}) {
 		t.Fatalf("events=%v", events)
 	}
 }
@@ -324,8 +324,65 @@ func TestNativeStartFailureDoesNotReachProfileImportOrActivation(t *testing.T) {
 	if err := RunNativeDesktop(context.Background(), t.TempDir(), "start", true, io.Discard); !errors.Is(err, startup) {
 		t.Fatalf("error=%v", err)
 	}
-	want := []string{"service-status", "nm-disconnect", "service-start"}
+	want := []string{"service-status", "nm-check", "service-start"}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events=%v", events)
+	}
+}
+
+func TestNativeNetworkReapplyPreservesConnectionState(t *testing.T) {
+	for _, connected := range []bool{false, true} {
+		for _, failed := range []string{"", "connection-state", "disconnect", "stop", "start", "reapply", "connect"} {
+			t.Run(fmt.Sprintf("connected=%v/failure=%s", connected, failed), func(t *testing.T) {
+				events := []string{}
+				service := &fakeNativeDesktopService{events: &events}
+				active := "no"
+				if connected {
+					active = "yes"
+				}
+				nm := &fakeNativeDesktopNM{events: &events, status: "configured=yes\nactive=" + active + "\n", errors: map[string]error{}}
+				fault := errors.New("injected failure")
+				switch failed {
+				case "stop":
+					service.stopErr = fault
+				case "start":
+					service.startErr = fault
+				case "":
+				default:
+					nm.errors[failed] = fault
+				}
+				installNativeDesktopFakes(t, service, nm)
+				err := RunNativeDesktop(context.Background(), t.TempDir(), "reapply-network", true, io.Discard)
+				want := []string{"nm-connection-state"}
+				if connected {
+					want = append(want, "nm-disconnect")
+				}
+				want = append(want, "service-stop", "service-start", "nm-reapply")
+				if connected {
+					want = append(want, "nm-connect")
+				}
+				failureReached := false
+				for i, event := range want {
+					if event == "nm-"+failed || event == "service-"+failed {
+						want = want[:i+1]
+						failureReached = true
+						break
+					}
+				}
+				if (err != nil) != failureReached || !reflect.DeepEqual(events, want) {
+					t.Fatalf("err=%v events=%v want=%v", err, events, want)
+				}
+			})
+		}
+	}
+}
+
+func TestNativeNetworkReapplyRequiresAuthorization(t *testing.T) {
+	events := []string{}
+	service := &fakeNativeDesktopService{events: &events}
+	nm := &fakeNativeDesktopNM{events: &events}
+	installNativeDesktopFakes(t, service, nm)
+	if err := RunNativeDesktop(context.Background(), t.TempDir(), "reapply-network", false, io.Discard); err == nil || len(events) != 0 {
+		t.Fatalf("unauthorized reapply: err=%v events=%v", err, events)
 	}
 }

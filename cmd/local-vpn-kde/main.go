@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/blockedby/local-vpn-kde/internal/localvpn"
+	"github.com/blockedby/local-vpn-kde/internal/nativegateway"
 )
 
 func env(name, fallback string) string {
@@ -365,6 +366,10 @@ func run(args []string) error {
 }
 func main() {
 	if err := run(os.Args[1:]); err != nil {
+		if len(os.Args) > 1 && os.Args[1] == "native-network" && errors.Is(err, nativegateway.ErrNetworkNeedsCleanup) {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(localvpn.NativeNetworkChangedExitCode)
+		}
 		if errors.Is(err, localvpn.ErrOtherVPNActive) {
 			fmt.Fprintln(os.Stderr, "native-other-vpn-active")
 			os.Exit(20)

@@ -6,10 +6,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/netip"
 	"strconv"
 	"strings"
 )
+
+// NativeNetworkChangedExitCode is the fixed systemd network-service failure
+// discriminator. Arbitrary stderr never determines whether repair is offered.
+const NativeNetworkChangedExitCode = 21
+
+var ErrNativeNetworkChanged = errors.New("native-network-settings-changed")
 
 func (n NetworkManager) routeMetric() string {
 	if n.Native {
@@ -97,12 +104,15 @@ func nativeFullTunnelRoutes(ctx context.Context, device string) error {
 		halves[r.Dst] = true
 	}
 	if !halves["0.0.0.0/1"] || !halves["128.0.0.0/1"] {
-		return errors.New("native full-tunnel split routes are missing")
+		return fmt.Errorf("%w: native full-tunnel split routes are missing", ErrNativeNetworkChanged)
 	}
 	for _, address := range []string{"1.1.1.1", "208.67.222.222"} {
 		data, err = hostCommand(ctx, "ip", "-4", "route", "get", address)
-		if err != nil || route4Device(data, address, device) != nil {
-			return errors.New("native full-tunnel route priority conflicts with existing routing")
+		if err != nil {
+			return errors.New("native full-tunnel route priority could not be read")
+		}
+		if route4Device(data, address, device) != nil {
+			return fmt.Errorf("%w: native full-tunnel route priority conflicts with existing routing", ErrNativeNetworkChanged)
 		}
 	}
 	return nil
