@@ -156,6 +156,35 @@ func runLab() (runErr error) {
 		return fmt.Errorf("UDP after idempotent start: %w", err)
 	}
 
+	// A physical link flap drops dedicated routes but leaves the namespace,
+	// veth and durable journal behind. Exercise the desktop recovery sequence.
+	if _, err := commandOutput(commandDeadline, nil, "ip", "route", "del", "192.0.2.0/24", "dev", uplinkName, "table", strconv.Itoa(nativegateway.RoutingTable), "protocol", strconv.Itoa(nativegateway.RouteProtocol)); err != nil {
+		return fmt.Errorf("simulate missing connected route: %w", err)
+	}
+	if err := callController("stale start", func(ctx context.Context) error {
+		return controller.Start(ctx, uplink)
+	}); !errors.Is(err, nativegateway.ErrNetworkNeedsCleanup) {
+		return fmt.Errorf("missing route did not request verified cleanup: %v", err)
+	}
+	if err := callController("stale cleanup", controller.Stop); err != nil {
+		return err
+	}
+	if err := callController("recovered start", func(ctx context.Context) error {
+		return controller.Start(ctx, uplink)
+	}); err != nil {
+		return err
+	}
+	if err := verifyControllerStatus("after missing-route recovery", controller, true); err != nil {
+		return err
+	}
+	if err := verifyDedicatedRoute(); err != nil {
+		return err
+	}
+	if err := verifyLoopbackUDP(); err != nil {
+		return err
+	}
+	fmt.Println("missing_connected_route_recovery=pass")
+
 	// Preserve the original fail-closed proof, then restore the exact route
 	// owned by the journal before Stop so cleanup can safely prove ownership.
 	if _, err := commandOutput(commandDeadline, nil, "ip", "route", "del", "default", "via", uplinkGateway, "dev", uplinkName, "table", strconv.Itoa(nativegateway.RoutingTable), "protocol", strconv.Itoa(nativegateway.RouteProtocol)); err != nil {

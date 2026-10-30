@@ -345,3 +345,52 @@ func commandPosition(commands []Command, wanted Command) int {
 	}
 	return -1
 }
+
+func TestControllerMissingRouteRequiresVerifiedCleanup(t *testing.T) {
+	for _, scenario := range []string{"missing-route", "conflicting-route", "replaced-namespace"} {
+		t.Run(scenario, func(t *testing.T) {
+			network := newFakeNetwork(t, false)
+			store := &fakeJournalStore{}
+			runner := &fakeRunner{network: network}
+			controller := controllerFor(network, store, runner)
+			ctx := context.Background()
+			if err := controller.Start(ctx, validUplink()); err != nil {
+				t.Fatal(err)
+			}
+			for i, kind := range network.kinds {
+				if kind == EffectConnectedRoute {
+					network.present[i] = false
+					if scenario == "conflicting-route" {
+						network.conflict = i
+					}
+				}
+			}
+			if scenario == "replaced-namespace" {
+				network.ns.Inode++
+			}
+			before := len(runner.commands)
+			err := controller.Start(ctx, validUplink())
+			if err == nil || errors.Is(err, ErrNetworkNeedsCleanup) != (scenario == "missing-route") {
+				t.Fatalf("incorrect recovery classification: %v", err)
+			}
+			if len(runner.commands) != before {
+				t.Fatal("failed start mutated network")
+			}
+			if scenario != "missing-route" {
+				if err := controller.Stop(ctx); err == nil || len(runner.commands) != before {
+					t.Fatal("unsafe cleanup accepted")
+				}
+				return
+			}
+			if err := controller.Stop(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := controller.Start(ctx, validUplink()); err != nil {
+				t.Fatal(err)
+			}
+			if ready, err := controller.Status(ctx); err != nil || !ready {
+				t.Fatalf("recovered ready=%v error=%v", ready, err)
+			}
+		})
+	}
+}

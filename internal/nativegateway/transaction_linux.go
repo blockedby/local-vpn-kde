@@ -139,6 +139,11 @@ type NetworkInspection struct {
 	Effects [MaxNetworkEffects]EffectObservation
 }
 
+// ErrNetworkNeedsCleanup identifies missing owned state or an interrupted stop.
+// Callers may retry only after a process-free namespace proof and successful Stop.
+// It never authorizes deleting the journal or bypassing immutable identity checks.
+var ErrNetworkNeedsCleanup = errors.New("native network requires verified cleanup")
+
 type Controller struct {
 	Runner    Runner
 	Journal   JournalStore
@@ -275,7 +280,7 @@ func (c Controller) Start(ctx context.Context, uplink Uplink) error {
 	}
 	for i := 0; i < start; i++ {
 		if journal.Effects[i].Phase != EffectApplied {
-			return errors.New("incomplete journal must be stopped before restarting")
+			return fmt.Errorf("incomplete journal must be stopped before restarting: %w", ErrNetworkNeedsCleanup)
 		}
 	}
 	for i := start; i < len(commands); i++ {
@@ -425,7 +430,7 @@ func (c Controller) reconcile(ctx context.Context, journal *NetworkJournal, kind
 				if record.Phase == EffectIntent {
 					continue
 				}
-				return fmt.Errorf("applied %s is absent", effectName(record.Kind))
+				return fmt.Errorf("applied %s is absent: %w", effectName(record.Kind), ErrNetworkNeedsCleanup)
 			}
 			observedIdentity := identityFor(record.Kind, observation.Identity)
 			if !identityEmpty(record.Identity) && record.Identity != observedIdentity {
