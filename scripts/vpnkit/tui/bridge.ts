@@ -9,6 +9,7 @@ export type Action =
   | "subscription"
   | "subscription/read"
   | "backend/start"
+  | "network/reapply"
   | "disconnect"
   | "start"
   | "stop"

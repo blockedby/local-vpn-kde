@@ -1,7 +1,7 @@
 import type { Action, Status } from "./bridge";
 import { failure } from "./model";
 
-export type RecoveryAction = "status" | "diagnostics" | "servers" | "retry";
+export type RecoveryAction = "status" | "diagnostics" | "servers" | "retry" | "reapply";
 export interface Recovery {
   stage: string;
   message: string;
@@ -32,6 +32,9 @@ const messages: Record<string, string> = {
 };
 
 export function recoveryFor(action: Action, reason: string, runtime?: Status["runtime"]): Recovery {
+  if (runtime === "native" && reason === "native-network-settings-changed") {
+    return { stage: "routes", message: "Сетевые настройки VPN поменялись, нажмите [f] чтобы применить их ещё раз.", actions: ["reapply"] };
+  }
   let stage = Object.entries(groups).find(([, reasons]) => reasons.includes(reason))?.[0] ?? "unknown";
   if (runtime === "native" && stage === "docker") stage = "management";
   const measurement = ["servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch"].includes(action);

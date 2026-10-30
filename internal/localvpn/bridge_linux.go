@@ -89,7 +89,7 @@ func (g *bridgeGate) acquire(ctx context.Context, exclusive bool) (func(), error
 	}
 }
 
-var actions = map[string][]string{"backend/start": {"backend", "start"}, "disconnect": {"disconnect"}, "start": {"start"}, "stop": {"stop"}, "retest/select": {"retest", "select"}, "toggle-mode": {"toggle", "mode"}, "diagnostics": {"diagnostics"}}
+var actions = map[string][]string{"network/reapply": {"reapply-network"}, "backend/start": {"backend", "start"}, "disconnect": {"disconnect"}, "start": {"start"}, "stop": {"stop"}, "retest/select": {"retest", "select"}, "toggle-mode": {"toggle", "mode"}, "diagnostics": {"diagnostics"}}
 var serverID = regexp.MustCompile(`^srv_[A-Za-z0-9_-]{27}$`)
 
 func NewBridge(o BridgeOptions) (*Bridge, error) {
@@ -355,9 +355,14 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 			return reply, nil
 		}
 	}
+	if request.Action == "network/reapply" && (b.options.Runtime != "native" || value != "") {
+		invalid()
+		reply["status"] = b.Status()
+		return reply, nil
+	}
 	if b.options.Runtime == "native" {
 		switch request.Action {
-		case "status", "backend/start", "start", "disconnect", "stop", "autostart/read", "autostart/set":
+		case "status", "backend/start", "network/reapply", "start", "disconnect", "stop", "autostart/read", "autostart/set":
 		case "profiles/list", "profiles/add", "profiles/open", "profiles/remove", "subscription", "subscription/read", "servers/list", "servers/refresh", "servers/current", "servers/select", "servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch", "toggle-mode", "diagnostics":
 			if b.options.Repo != InstalledAssetRoot {
 				reply["ok"], reply["reason"], reply["status"] = false, "unsupported-native-action", b.Status()

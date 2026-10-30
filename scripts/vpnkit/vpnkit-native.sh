@@ -21,7 +21,7 @@ case "${1:-}" in
   backend)
     [[ $# -eq 2 && "$2" == start ]] || exit 2
     action=backend-start ;;
-  start|disconnect|stop)
+  start|disconnect|stop|reapply-network)
     [[ $# -eq 1 ]] || exit 2
     action="$1" ;;
   *)

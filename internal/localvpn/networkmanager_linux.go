@@ -634,13 +634,16 @@ func (n NetworkManager) importProfile(ctx context.Context, cap nmCapability, own
 
 func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output io.Writer) (resultErr error) {
 	switch action {
-	case "plan", "status", "verify":
-	case "import", "connect", "disconnect", "remove":
+	case "plan", "status", "verify", "check", "connection-state":
+	case "import", "connect", "disconnect", "remove", "reapply":
 		if !yes {
 			return errors.New("mutation requires --yes")
 		}
 	default:
 		return errors.New("invalid NetworkManager action")
+	}
+	if action == "reapply" && !n.Native {
+		return errors.New("network reapplication requires native runtime")
 	}
 	if n.Timeout == 0 {
 		n.Timeout = 30 * time.Second
@@ -663,7 +666,7 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 		return lockErr
 	}
 	defer unix.Close(lock)
-	checkSource := action != "import" && !(n.Native && (action == "connect" || action == "disconnect"))
+	checkSource := action != "import" && !(n.Native && (action == "connect" || action == "disconnect" || action == "reapply" || action == "check" || action == "connection-state"))
 	cap, ownership, err := n.assess(ctx, checkSource)
 	if err != nil {
 		return err
@@ -676,6 +679,27 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 		if err != nil {
 			return err
 		}
+	}
+	if action == "check" || action == "connection-state" {
+		if !n.Native || (ownership != "owned" && ownership != "missing" && ownership != "stale") {
+			return errors.New("refusing unowned or changed NetworkManager profile")
+		}
+		if action == "connection-state" {
+			configured, active := "no", "no"
+			if ownership == "owned" {
+				configured = "yes"
+				up, err := n.active(ctx, cap.UUID)
+				if err != nil {
+					return err
+				}
+				if up {
+					active = "yes"
+				}
+			}
+			_, err := fmt.Fprintf(output, "configured=%s\nactive=%s\n", configured, active)
+			return err
+		}
+		return nil
 	}
 	if action == "plan" || action == "status" {
 		configured, active, device := "no", "no", "none"
@@ -720,7 +744,7 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 		fmt.Fprintf(output, "networkmanager_import=%s\nconnection=%s\n", result, n.connectionName())
 		return nil
 	}
-	if n.Native && action == "connect" {
+	if n.Native && (action == "connect" || action == "reapply") {
 		// Never import over a name collision or a changed live connection. The
 		// existing import transaction proves ownership, validates the generated
 		// source, and replaces an outdated owned profile only while inactive.
@@ -743,6 +767,8 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 		return errors.New("refusing unowned or changed NetworkManager profile")
 	}
 	switch action {
+	case "reapply":
+		return n.preferNativeRoutes(ctx, cap.UUID)
 	case "verify":
 		device, e := n.activeDevice(ctx, cap.UUID)
 		if e != nil {

@@ -47,3 +47,13 @@ test("native failures retain typed recovery and batch speed retry scope", () => 
   expect(speed.stage).toBe("server");
   expect(speed.actions).toContain("retry");
 });
+
+test("only native network drift offers explicit network reapplication", () => {
+  const drift = recoveryFor("backend/start", "native-network-settings-changed", "native");
+  expect(drift.message).toBe("Сетевые настройки VPN поменялись, нажмите [f] чтобы применить их ещё раз.");
+  expect(drift.actions).toEqual(["reapply"]);
+  for (const reason of ["failed", "foreign-profile", "profile-invalid", "backend-unavailable"]) {
+    expect(recoveryFor("start", reason, "native").actions).not.toContain("reapply");
+  }
+  expect(recoveryFor("start", "native-network-settings-changed", "docker").actions).not.toContain("reapply");
+});
