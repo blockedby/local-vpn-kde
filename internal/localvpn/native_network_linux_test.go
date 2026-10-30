@@ -149,6 +149,9 @@ func TestNativeNetworkStartRecoversMissingOwnedState(t *testing.T) {
 				}
 				return nil
 			})
+			if (scenario == "holder" || scenario == "conflict") && errors.Is(err, nativegateway.ErrNetworkNeedsCleanup) {
+				t.Fatal("cleanup failure was masked as retryable network drift")
+			}
 			if (err == nil) != (scenario == "recover") {
 				t.Fatalf("unexpected result: %v", err)
 			}

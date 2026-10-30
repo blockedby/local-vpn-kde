@@ -52,8 +52,16 @@ test("only native network drift offers explicit network reapplication", () => {
   const drift = recoveryFor("backend/start", "native-network-settings-changed", "native");
   expect(drift.message).toBe("Сетевые настройки VPN поменялись, нажмите [f] чтобы применить их ещё раз.");
   expect(drift.actions).toEqual(["reapply"]);
-  for (const reason of ["failed", "foreign-profile", "profile-invalid", "backend-unavailable"]) {
+  for (const reason of ["failed", "native-network-busy", "foreign-profile", "profile-invalid", "backend-unavailable"]) {
     expect(recoveryFor("start", reason, "native").actions).not.toContain("reapply");
   }
   expect(recoveryFor("start", "native-network-settings-changed", "docker").actions).not.toContain("reapply");
+});
+
+test("busy namespace reports its real failure without another reapply offer", () => {
+ const r = recoveryFor("network/reapply", "native-network-busy", "native");
+ expect(r.message).toContain("другая системная служба");
+ expect(r.message).not.toContain("поменялись");
+ expect(r.actions).not.toContain("reapply");
+ expect(r.actions).toContain("diagnostics");
 });

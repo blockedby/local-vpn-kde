@@ -366,6 +366,10 @@ func run(args []string) error {
 }
 func main() {
 	if err := run(os.Args[1:]); err != nil {
+		if len(os.Args) > 1 && os.Args[1] == "native-network" && errors.Is(err, localvpn.ErrNativeNetworkBusy) {
+			fmt.Fprintln(os.Stderr, "native namespace is held by another process; cleanup was not performed")
+			os.Exit(localvpn.NativeNetworkBusyExitCode)
+		}
 		if len(os.Args) > 1 && os.Args[1] == "native-network" && errors.Is(err, nativegateway.ErrNetworkNeedsCleanup) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(localvpn.NativeNetworkChangedExitCode)

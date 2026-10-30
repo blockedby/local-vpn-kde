@@ -15,6 +15,7 @@ import (
 )
 
 var diagnosticReasons = []struct{ message, reason string }{
+	{"native-network-busy", "native-network-busy"},
 	{"native-network-settings-changed", "native-network-settings-changed"},
 	{"Docker is unavailable", "docker-unavailable"},
 	{"refusing unowned or changed NetworkManager profile", "profile-invalid"},

@@ -503,11 +503,17 @@ func (s NativeService) Start(parent context.Context) error {
 	if err := s.mutationPreflight(ctx); err != nil {
 		return err
 	}
+	beforeInvocation, _ := s.networkInvocation(ctx)
 	if _, err := s.call(ctx, "systemctl", "start", nativegateway.GatewayUnit); err != nil {
-		if ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		if afterInvocation, invocationErr := s.networkInvocation(ctx); invocationErr == nil && beforeInvocation != "" && afterInvocation != "not-started" && afterInvocation != beforeInvocation && ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			data, queryErr := s.call(ctx, "systemctl", "show", "--property=ExecMainStatus", "--value", nativegateway.NetworkUnit)
-			if queryErr == nil && strings.TrimSpace(string(data)) == strconv.Itoa(NativeNetworkChangedExitCode) {
-				return ErrNativeNetworkChanged
+			if queryErr == nil {
+				switch strings.TrimSpace(string(data)) {
+				case strconv.Itoa(NativeNetworkChangedExitCode):
+					return ErrNativeNetworkChanged
+				case strconv.Itoa(NativeNetworkBusyExitCode):
+					return ErrNativeNetworkBusy
+				}
 			}
 		}
 		return nativeServiceCommandError(ctx, err, "native gateway start failed")
@@ -520,6 +526,28 @@ func (s NativeService) Start(parent context.Context) error {
 		return errors.New("native gateway did not become ready")
 	}
 	return nil
+}
+
+// A prior failed invocation must not mask a new authorization, cancellation,
+// start-limit, or gateway error with a stale network exit status.
+func (s NativeService) networkInvocation(ctx context.Context) (string, error) {
+	data, err := s.call(ctx, "systemctl", "show", "--property=InvocationID", "--value", nativegateway.NetworkUnit)
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(string(data))
+	if id == "" {
+		return "not-started", nil
+	}
+	if len(id) != 32 {
+		return "", errors.New("invalid network invocation identity")
+	}
+	for _, ch := range id {
+		if !(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'f') {
+			return "", errors.New("invalid network invocation identity")
+		}
+	}
+	return id, nil
 }
 
 // Stop preserves systemd dependency order: the gateway is stopped before its

@@ -17,6 +17,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/blockedby/local-vpn-kde/internal/nativegateway"
@@ -161,18 +162,37 @@ func runLab() (runErr error) {
 	if _, err := commandOutput(commandDeadline, nil, "ip", "route", "del", "192.0.2.0/24", "dev", uplinkName, "table", strconv.Itoa(nativegateway.RoutingTable), "protocol", strconv.Itoa(nativegateway.RouteProtocol)); err != nil {
 		return fmt.Errorf("simulate missing connected route: %w", err)
 	}
-	if err := callController("stale start", func(ctx context.Context) error {
-		return controller.Start(ctx, uplink)
-	}); !errors.Is(err, nativegateway.ErrNetworkNeedsCleanup) {
-		return fmt.Errorf("missing route did not request verified cleanup: %v", err)
-	}
-	if err := callController("stale cleanup", controller.Stop); err != nil {
+	// Keep an unrelated observer in the namespace, like host bpftune.
+	observer := exec.Command("ip", "netns", "exec", nativegateway.Namespace, "sleep", "60")
+	if err := observer.Start(); err != nil {
 		return err
 	}
+	defer func() { _ = observer.Process.Kill(); _ = observer.Wait() }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		pids, err := commandOutput(commandDeadline, nil, "ip", "netns", "pids", nativegateway.Namespace)
+		if err != nil {
+			return err
+		}
+		if strings.Contains("\n"+string(pids), "\n"+strconv.Itoa(observer.Process.Pid)+"\n") {
+			break
+		}
+		if time.Now().After(deadline) {
+			return errors.New("namespace observer did not enter")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := commandOutput(commandDeadline, nil, "ip", "route", "del", "default", "via", uplinkGateway, "dev", uplinkName, "table", strconv.Itoa(nativegateway.RoutingTable), "protocol", strconv.Itoa(nativegateway.RouteProtocol)); err != nil {
+		return err
+	}
+	repairBefore := mutations.count
 	if err := callController("recovered start", func(ctx context.Context) error {
 		return controller.Start(ctx, uplink)
 	}); err != nil {
 		return err
+	}
+	if mutations.count-repairBefore != 2 {
+		return errors.New("route repair mutated more than the two missing routes")
 	}
 	if err := verifyControllerStatus("after missing-route recovery", controller, true); err != nil {
 		return err
@@ -183,6 +203,11 @@ func runLab() (runErr error) {
 	if err := verifyLoopbackUDP(); err != nil {
 		return err
 	}
+	if err := observer.Process.Signal(syscall.Signal(0)); err != nil {
+		return errors.New("repair killed namespace observer")
+	}
+	_ = observer.Process.Kill()
+	_ = observer.Wait()
 	fmt.Println("missing_connected_route_recovery=pass")
 
 	// Preserve the original fail-closed proof, then restore the exact route

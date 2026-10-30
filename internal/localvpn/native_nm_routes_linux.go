@@ -15,6 +15,9 @@ import (
 // NativeNetworkChangedExitCode is the fixed systemd network-service failure
 // discriminator. Arbitrary stderr never determines whether repair is offered.
 const NativeNetworkChangedExitCode = 21
+const NativeNetworkBusyExitCode = 22
+
+var ErrNativeNetworkBusy = errors.New("native-network-busy")
 
 var ErrNativeNetworkChanged = errors.New("native-network-settings-changed")
 

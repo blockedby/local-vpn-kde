@@ -122,7 +122,7 @@ func TestNativeServiceStartWaitsForNotifyReadiness(t *testing.T) {
 		if strings.Contains(joined, "docker") || strings.Contains(joined, "enable") || strings.Contains(joined, "daemon-reload") {
 			t.Fatalf("unexpected lifecycle command: %#v", call)
 		}
-		if call.args[0] == "show" && !strings.Contains(joined, "--property="+nativeServiceShowProperties) {
+		if call.args[0] == "show" && !strings.Contains(joined, "--property="+nativeServiceShowProperties) && !strings.Contains(joined, "--property=InvocationID") {
 			t.Fatalf("show did not request exact properties: %#v", call)
 		}
 	}
@@ -447,21 +447,32 @@ func TestNativeServiceBoundsTimeoutAndDoesNotExposeCommandOutput(t *testing.T) {
 }
 
 func TestNativeServiceClassifiesOnlyNetworkDriftExitStatus(t *testing.T) {
-	for _, status := range []string{"21\n", "20\n", "0\n", "garbage", ""} {
+	for _, status := range []string{"21\n", "22\n", "20\n", "0\n", "garbage", "", "stale-21"} {
 		t.Run(strings.TrimSpace(status), func(t *testing.T) {
 			service, _ := newNativeServiceTestFixture(t, nativeServiceReadyTestStates())
 			original := service.command
+			started := false
 			service.command = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 				if args[0] == "start" {
+					started = true
 					return []byte("untrusted private error"), errors.New("failed")
 				}
+				if len(args) == 4 && args[1] == "--property=InvocationID" {
+					if started && status != "stale-21" {
+						return []byte(strings.Repeat("b", 32)), nil
+					}
+					return []byte(strings.Repeat("a", 32)), nil
+				}
 				if len(args) == 4 && args[1] == "--property=ExecMainStatus" && args[3] == nativegateway.NetworkUnit {
+					if status == "stale-21" {
+						return []byte("21\n"), nil
+					}
 					return []byte(status), nil
 				}
 				return original(ctx, name, args...)
 			}
 			err := service.Start(context.Background())
-			if errors.Is(err, ErrNativeNetworkChanged) != (status == "21\n") || err == nil || strings.Contains(err.Error(), "private") {
+			if errors.Is(err, ErrNativeNetworkBusy) != (status == "22\n") || errors.Is(err, ErrNativeNetworkChanged) != (status == "21\n") || err == nil || strings.Contains(err.Error(), "private") {
 				t.Fatalf("classification=%v", err)
 			}
 		})

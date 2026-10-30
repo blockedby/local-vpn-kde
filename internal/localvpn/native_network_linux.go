@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -124,7 +125,7 @@ func stopNativeNetwork(ctx context.Context, controller nativeNetworkLifecycleCon
 			return err
 		}
 		if strings.TrimSpace(string(pids)) != "" {
-			return errors.New("native namespace still has running processes; stop the gateway first")
+			return ErrNativeNetworkBusy
 		}
 	}
 	return controller.Stop(ctx)
@@ -143,7 +144,7 @@ func startNativeNetwork(ctx context.Context, controller nativeNetworkLifecycleCo
 		// journal intact. Rebuild only after proving no namespace users and
 		// letting Stop validate every remaining resource's ownership.
 		if cleanupErr := cleanupNetwork(ctx); cleanupErr != nil {
-			return errors.Join(err, cleanupErr)
+			return fmt.Errorf("native network recovery blocked: %w", cleanupErr)
 		}
 		existed = false
 		// Cleanup may take time; refresh DHCP/underlay information before
