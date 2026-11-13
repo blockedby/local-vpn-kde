@@ -27,7 +27,7 @@ test("renderer-free state navigates while a mutation is held and confirms discon
   } finally { await state.close(); }
 });
 
-test("renderer-free requests queue after status and assign request IDs", async () => {
+test("renderer-free mutations are refused during status and never replayed", async () => {
   const backend = new FakeBackend();
   const ids: string[] = [];
   const request = backend.request.bind(backend);
@@ -42,8 +42,8 @@ test("renderer-free requests queue after status and assign request IDs", async (
     await state.perform("start");
     expect(backend.calls.map(call => call.action)).toEqual(["status"]);
     finish(reply()); await status;
-    expect(backend.calls.map(call => call.action)).toEqual(["status", "start"]);
-    expect(ids).toEqual(["ui-1", "ui-2"]);
+    expect(backend.calls.map(call => call.action)).toEqual(["status"]);
+    expect(ids).toEqual(["ui-1"]);
   } finally { await state.close(); }
 });
 
@@ -102,5 +102,38 @@ test("action definitions expose identity, availability and the same keyboard pat
     key(state, "v");
     expect(state.screen).toBe("servers");
     expect(state.actions().map(action => action.id)).toContain("servers:p");
+  } finally { await state.close(); }
+});
+
+test("polling overlaps measurements, avoids duplicate polls and resumes after exclusive work", async () => {
+  const backend = new FakeBackend();
+  const original = backend.request.bind(backend);
+  let finishBatch!: (reply: Reply) => void, finishStatus!: (reply: Reply) => void, finishExclusive!: (reply: Reply) => void;
+  const batch = new Promise<Reply>(resolve => { finishBatch = resolve; });
+  const status = new Promise<Reply>(resolve => { finishStatus = resolve; });
+  const exclusive = new Promise<Reply>(resolve => { finishExclusive = resolve; });
+  let holdStatus = false;
+  backend.request = (action, value) => {
+    if (action === "servers/check-batch") { backend.calls.push({ action, value }); return batch; }
+    if (action === "diagnostics") { backend.calls.push({ action, value }); return exclusive; }
+    if (action === "status" && holdStatus) { backend.calls.push({ action, value }); return status; }
+    return original(action, value);
+  };
+  const state = new AppState(backend);
+  try {
+    await state.perform("status");
+    const work = state.perform("servers/check-batch", "{}", true);
+    holdStatus = true;
+    state.pollStatus(); state.pollStatus();
+    expect(backend.calls.filter(call => call.action === "status")).toHaveLength(2);
+    finishStatus(reply()); await settle();
+    finishBatch(reply()); await work;
+    holdStatus = false;
+    const busy = state.perform("diagnostics");
+    state.poll = setInterval(() => {}, 60000);
+    state.pollStatus();
+    expect(backend.calls.filter(call => call.action === "status")).toHaveLength(2);
+    finishExclusive(reply()); await busy; await settle();
+    expect(backend.calls.filter(call => call.action === "status")).toHaveLength(3);
   } finally { await state.close(); }
 });

@@ -274,11 +274,12 @@ export class AppState {
   start() {
     this.animationEnabled = true;
     this.syncAnimation();
-    this.poll = setInterval(() => {
-      if (!this.busy && !this.batch && !this.closing && !this.backendOffline && !this.reconnecting)
-        void this.perform("status");
-    }, 5000);
+    this.poll = setInterval(() => this.pollStatus(), 5000);
     void this.perform("status").then(() => { if (this.screen === "servers" && !this.closing) this.open("servers"); });
+  }
+  pollStatus() {
+    if (!this.closing && !this.backendOffline && !this.reconnecting && ![...this.tasks.values()].some(task => task.action === "status" || !compatible("status", task.action)))
+      void this.perform("status");
   }
   ready() {
     return (this.status?.gateway_state ?? this.status?.vpn_state) === "healthy";
@@ -388,7 +389,7 @@ export class AppState {
     return `Фактическое состояние службы: ${this.enabledServiceLabel(this.serviceState.enabled)}; текущее состояние: ${this.activeServiceLabel(this.serviceState.active)}`;
   }
   async loadPendingSubscription() {
-    if (this.closing || this.disposed || this.nativePreviewOnly() || [...this.tasks.values()].some(task => !compatible("subscription/read", task.action))) return;
+    if (this.closing || this.disposed || this.nativePreviewOnly() || (!this.status && [...this.tasks.values()].some(task => task.action === "status")) || [...this.tasks.values()].some(task => !compatible("subscription/read", task.action))) return;
     const revision = this.pendingSubscriptionRevision;
     this.pendingSubscriptionRevision = undefined;
     if (revision !== undefined && revision === this.editorRevision &&

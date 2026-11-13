@@ -250,9 +250,7 @@ export function defineMenuActions(state: AppState, items: MenuItem[]): ActionDef
           reason = state.nativeUnavailable(request);
         else if (((!!state.batch || state.homeTesting) && !["servers/select", "status", "subscription/read"].includes(request)) ||
           [...state.tasks.values()].some(task => !compatible(request, task.action))) {
-          // A single action may be queued behind a status read.
-          if (!(state.busy === "status" && !state.queued && !state.batch && !state.homeTesting))
-            reason = "Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k].";
+          reason = "Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k].";
         }
       }
     }

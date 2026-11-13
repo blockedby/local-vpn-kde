@@ -452,7 +452,7 @@ test("combined batch uses the configured URL without running the speed benchmark
     await app.close();
   }
 });
-test("actions during polling are serialized once", async () => {
+test("connection changes during polling are refused and never replayed", async () => {
   const t = await createTestRenderer({ width: 80, height: 24 });
   const b = new FakeBackend();
   let finish!: (r: Reply) => void;
@@ -464,7 +464,7 @@ test("actions during polling are serialized once", async () => {
     t.mockInput.pressKey("s");
     finish(reply());
     await task;
-    expect(b.calls.map((c) => c.action)).toEqual(["status", "backend/start", "servers/list"]);
+    expect(b.calls.map((c) => c.action)).toEqual(["status"]);
   } finally {
     finish(reply());
     await settle();

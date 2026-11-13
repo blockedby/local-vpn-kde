@@ -1,6 +1,6 @@
 import type { Action, Reply } from "./bridge";
 import type { AppState } from "./app-state";
-import { compatible } from "./request-policy";
+import { compatible, requestClasses } from "./request-policy";
 import { recoveryFor } from "./recovery";
 import { failure } from "./model";
 
@@ -85,13 +85,9 @@ export async function perform(
     }
     if (!state.canPerform(action)) return;
     const measurementActive = !!state.batch || state.homeTesting;
-    const allowedDuringMeasurement = ["servers/select", "status", "subscription/read"].includes(action);
+    const allowedDuringMeasurement = requestClasses[action] === "read" || action === "servers/select";
     if ((measurementActive && !insideBatch && !allowedDuringMeasurement) ||
         [...state.tasks.values()].some(task => !compatible(action, task.action))) {
-      if (state.busy === "status" && action !== "status" && !state.queued && !measurementActive) {
-        state.queued = { action, value };
-        return;
-      }
       if (action !== "status") state.notify("Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k].");
       return;
     }
@@ -232,6 +228,7 @@ export async function perform(
       );
     } finally {
       state.tasks.delete(requestID);
+      if (state.poll && requestClasses[action] === "exclusive" && !state.closing && !state.backendOffline && !state.reconnecting && ![...state.tasks.values()].some(task => task.action === "status")) void state.perform("status");
       if (action === "servers/speed" && value) { state.liveSpeeds.delete(value); if (reply?.ok) state.measurementTimes.set(value, Date.now()); }
       state.paint();
       if (state.closing && !state.batch && !state.homeTesting && !state.tasks.size) await state.finishClose();

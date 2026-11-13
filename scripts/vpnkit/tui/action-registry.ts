@@ -71,9 +71,8 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
   if (state.recovery) {
     const reapply = state.recovery.actions.includes("reapply");
     const conflict = [...state.tasks.values()].some(task => !compatible("network/reapply", task.action));
-    const queued = state.busy === "status" && !state.queued && !state.batch && !state.homeTesting;
     const reason = !reapply ? undefined : state.backendOffline || state.reconnecting ? "Служба управления недоступна. [f] Восстановить связь"
-      : (state.batch || state.homeTesting || conflict) && !queued ? "Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k]." : undefined;
+      : (state.batch || state.homeTesting || conflict) ? "Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k]." : undefined;
     add("global:recovery", ["f"], reapply ? "Применить сетевые настройки VPN" : "Действия", "global", () => {
       if (state.recovery?.actions.includes("reapply")) void state.perform("network/reapply"); else state.open("recovery");
     }, reason, "notice");
