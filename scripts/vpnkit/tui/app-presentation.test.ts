@@ -1336,3 +1336,115 @@ test("presentation: only assigned workers spin while remaining servers wait in t
   expect(lines.find(s=>s.includes("Node 5"))).toContain("подготовка");
  } finally { finish(reply()); await settle(); await app.close(); }
 });
+
+test("presentation: quit cancels and drains in-flight work without destroying the renderer prematurely", async () => {
+  const t = await createTestRenderer({ width: 80, height: 24 });
+  const b = new FakeBackend();
+  let finish!: (r: Reply) => void;
+  b.hold = { action: "start", promise: new Promise((r) => (finish = r)) };
+  const app = new App(t.renderer, b);
+  await app.perform("status");
+  const task = app.perform("start");
+  await app.close();
+  await app.close();
+  await t.renderOnce();
+  expect(t.captureCharFrame()).toContain("Завершаем текущую операцию");
+  finish(reply());
+  await task;
+});
+
+test("presentation: disconnect confirmation defaults to No and requires an explicit Yes", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  b.status.networkmanager_active = "yes";
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("x");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Точно хотите отключить VPN?");
+
+    t.mockInput.pressEnter();
+    await settle();
+
+    t.mockInput.pressKey("x");
+    t.mockInput.pressEscape();
+    await Bun.sleep(60);
+
+    t.mockInput.pressKey("x");
+    t.mockInput.pressArrow("down");
+    t.mockInput.pressEnter();
+    await settle();
+
+    t.mockInput.pressKey("x");
+    t.mockInput.pressEnter();
+    await settle();
+
+  } finally {
+    await app.close();
+  }
+});
+
+test("presentation: home speed test skips download after failed ping and allows navigation", async () => {
+  const t = await createTestRenderer({ width: 60, height: 24 });
+  const b = new FakeBackend();
+  b.rows = rows.map((s, i) => ({ ...s, selected: i === 0 }));
+  let finish!: (r: Reply) => void;
+  b.hold = { action: "servers/ping", promise: new Promise(r => { finish = r; }) };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("t"); await settle();
+    t.resize(60, 14); await t.renderOnce();
+    const narrow = t.captureCharFrame();
+    expect(narrow).toContain("[m] Режим:");
+    expect(narrow).toContain("[z] Остановить Docker");
+    expect(narrow).not.toContain("Ping · выполняется");
+    expect(narrow).toContain("ping");
+    t.mockInput.pressKey("d"); await t.renderOnce();
+    expect(t.captureCharFrame()).not.toContain("СКОРОСТЬ СЕРВЕРА");
+    finish({ ...reply(), ok: false, reason: "failed" }); await settle();
+
+    t.mockInput.pressEscape(); await Bun.sleep(60); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("— Мбит/с");
+    expect(t.captureCharFrame()).toContain("q выход");
+  } finally { finish(reply()); await settle(); await app.close(); }
+});
+
+test("presentation: held native and Docker lifecycle actions use their own runtime labels", async () => {
+  for (const runtime of ["native", "docker"] as const) {
+    const t = await createTestRenderer({ width: 120, height: 30 });
+    const b = new FakeBackend();
+    b.status = { ...initial, runtime, installed: runtime === "native" };
+    const app = new App(t.renderer, b);
+    try {
+      await app.perform("status");
+      for (const action of ["backend/start", "stop"] as const) {
+        let finish!: (r: Reply) => void;
+        b.hold = { action, promise: new Promise(resolve => { finish = resolve; }) };
+        const work = app.perform(action);
+        await t.renderOnce();
+        const frame = t.captureCharFrame();
+        const verb = action === "stop" ? "Останавливаем" : "Запускаем";
+        expect(frame).toContain(`${verb} ${runtime === "native" ? "сервис" : "Docker"}`);
+        if (runtime === "native") expect(frame).not.toContain("Docker");
+        finish(reply(b.status));
+        await work;
+        b.hold = undefined;
+      }
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test("presentation: unknown routing mode is not presented as strict", async () => {
+  const t = await createTestRenderer({ width: 100, height: 30 });
+  const b = new FakeBackend(); b.status.routing_mode = "unknown";
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status"); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Режим: неизвестно");
+    expect((app as any).items().find((item: { key: string }) => item.key === "m").label).toContain("неизвестно");
+  } finally { await app.close(); }
+});

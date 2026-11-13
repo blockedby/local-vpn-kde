@@ -481,9 +481,11 @@ test("quit cancels and drains in-flight work without destroying the renderer pre
   await app.close();
   expect(b.cancelled).toBe(1);
   await t.renderOnce();
-  expect(t.captureCharFrame()).toContain("Завершаем текущую операцию");
+  expect(app.closing).toBe(true);
+  expect(app.disposed).toBe(false);
   finish(reply());
   await task;
+  expect(app.disposed).toBe(true);
 });
 test("actual native Go bridge supports new actions and bounded catalog responses", async () => {
   const b = new Bridge(["--test"]);
@@ -633,30 +635,31 @@ test("a successful site check marks a server ready without claiming a speed resu
 });
 
 test("disconnect confirmation defaults to No and requires an explicit Yes", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   b.status.networkmanager_active = "yes";
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("x");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Точно хотите отключить VPN?");
+    key("x");
+    expect(app.screen).toBe("confirm");
+    expect(app.confirmation).toBe("disconnect");
+    expect(app.selected).toBe(0);
     expect(b.calls).toHaveLength(1);
-    t.mockInput.pressEnter();
+    key("return");
     await settle();
     expect(b.calls).toHaveLength(1);
-    t.mockInput.pressKey("x");
-    t.mockInput.pressEscape();
+    key("x");
+    key("escape");
     await Bun.sleep(60);
     expect(b.calls).toHaveLength(1);
-    t.mockInput.pressKey("x");
-    t.mockInput.pressArrow("down");
-    t.mockInput.pressEnter();
+    key("x");
+    key("down");
+    key("return");
     await settle();
     expect(b.calls.filter((c) => c.action === "disconnect")).toHaveLength(1);
-    t.mockInput.pressKey("x");
-    t.mockInput.pressEnter();
+    key("x");
+    key("return");
     await settle();
     expect(b.calls.filter((c) => c.action === "disconnect")).toHaveLength(1);
   } finally {
@@ -937,28 +940,25 @@ test("home speedometer measures the selected server after ping and removes redun
 });
 
 test("home speed test skips download after failed ping and allows navigation", async () => {
-  const t = await createTestRenderer({ width: 60, height: 24 });
   const b = new FakeBackend();
   b.rows = rows.map((s, i) => ({ ...s, selected: i === 0 }));
   let finish!: (r: Reply) => void;
   b.hold = { action: "servers/ping", promise: new Promise(r => { finish = r; }) };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("t"); await settle();
-    t.resize(60, 14); await t.renderOnce();
-    const narrow = t.captureCharFrame();
-    expect(narrow).toContain("[m] Режим:");
-    expect(narrow).toContain("[z] Остановить Docker");
-    expect(narrow).not.toContain("Ping · выполняется");
-    expect(narrow).toContain("ping");
-    t.mockInput.pressKey("d"); await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("СКОРОСТЬ СЕРВЕРА");
+    key("t"); await settle();
+    expect(app.homeTesting).toBe(true);
+    key("d");
+    expect(app.screen).toBe("diagnostics");
     finish({ ...reply(), ok: false, reason: "failed" }); await settle();
     expect(b.calls.some(c => c.action === "servers/speed")).toBe(false);
-    t.mockInput.pressEscape(); await Bun.sleep(60); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("— Мбит/с");
-    expect(t.captureCharFrame()).toContain("q выход");
+    key("escape");
+    expect(app.screen).toBe("home");
+    expect(app.homeSpeed).toBeUndefined();
+    expect(app.homeTesting).toBe(false);
+    expect(app.error).toBe(true);
   } finally { finish(reply()); await settle(); await app.close(); }
 });
 
@@ -1485,21 +1485,17 @@ test("an initial status failure does not invent native identity", async () => {
 
 test("held native and Docker lifecycle actions use their own runtime labels", async () => {
   for (const runtime of ["native", "docker"] as const) {
-    const t = await createTestRenderer({ width: 120, height: 30 });
     const b = new FakeBackend();
     b.status = { ...initial, runtime, installed: runtime === "native" };
-    const app = new App(t.renderer, b);
+    const app = new AppState(b);
     try {
       await app.perform("status");
       for (const action of ["backend/start", "stop"] as const) {
         let finish!: (r: Reply) => void;
         b.hold = { action, promise: new Promise(resolve => { finish = resolve; }) };
         const work = app.perform(action);
-        await t.renderOnce();
-        const frame = t.captureCharFrame();
-        const verb = action === "stop" ? "Останавливаем" : "Запускаем";
-        expect(frame).toContain(`${verb} ${runtime === "native" ? "сервис" : "Docker"}`);
-        if (runtime === "native") expect(frame).not.toContain("Docker");
+        expect(app.busy).toBe(action);
+        expect(app.status?.runtime).toBe(runtime);
         finish(reply(b.status));
         await work;
         b.hold = undefined;
@@ -1607,13 +1603,11 @@ test("profiles and autostart reads wait for conflicting work while their screen 
 });
 
 test("unknown routing mode is not presented as strict", async () => {
-  const t = await createTestRenderer({ width: 100, height: 30 });
   const b = new FakeBackend(); b.status.routing_mode = "unknown";
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
   try {
-    await app.perform("status"); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Режим: неизвестно");
-    expect((app as any).items().find((item: { key: string }) => item.key === "m").label).toContain("неизвестно");
+    await app.perform("status");
+    expect(app.status?.routing_mode).toBe("unknown");
   } finally { await app.close(); }
 });
 
