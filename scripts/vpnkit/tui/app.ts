@@ -8,7 +8,8 @@ import { MeasurementView } from "./measurement-view";
 import { HeaderView } from "./header-view";
 import { SummaryView } from "./summary-view";
 import { ProgressView } from "./progress-view";
-import { NoticeFooterView } from "./notice-footer-view";
+import { NoticeView } from "./notice-view";
+import { FooterView } from "./footer-view";
 import { EditorView } from "./editor-view";
 import { AppState } from "./app-state";
 export { cell } from "./formatting";
@@ -22,7 +23,8 @@ export class App extends AppState {
   private tableView: ServerTableView;
   private editorView: EditorView;
   private progressView: ProgressView;
-  private noticeFooterView: NoticeFooterView;
+  private noticeView: NoticeView;
+  private footerView: FooterView;
 
   private measurementView: MeasurementView;
   private readonly rendererClosed: Promise<void>;
@@ -69,7 +71,8 @@ export class App extends AppState {
     });
     this.editorView = new EditorView(renderer, this.content, value => this.edit(value));
     this.progressView = new ProgressView(renderer, this.root);
-    this.noticeFooterView = new NoticeFooterView(renderer, this.root);
+    this.noticeView = new NoticeView(renderer, this.root);
+    this.footerView = new FooterView(renderer, this.root);
     renderer.keyInput.on("keypress", this.onKey);
     renderer.on("resize", this.paint);
     this.paint();
@@ -109,7 +112,8 @@ export class App extends AppState {
     this.paintMeasurement();
     this.paintTable();
     this.paintProgress();
-    this.noticeFooterView.update(this, editor);
+    this.noticeView.update(this);
+    this.footerView.update(this, editor);
   }
   override onClosing() { this.editorView.blur(); }
   override onBeforeDispose() {
