@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import { App } from "./app";
-import type { Action, Reply } from "./bridge";
+import type { Action, CheckProgress, Reply } from "./bridge";
 import { FakeBackend, settle, reply, rows } from "./app-test-fixtures";
 
 test("legacy status without runtime keeps Docker lifecycle wording", async () => {
@@ -648,4 +648,115 @@ test("presentation: deferred subscription load does not replace text typed while
     await t.renderOnce();
     expect(t.captureCharFrame()).toContain("https://example.invalid/new");
   } finally { finish(reply()); await settle(); await app.close(); }
+});
+
+test("presentation: speed batch requests all IDs and configured URL once, merges mixed outcomes", async () => {
+ const t = await createTestRenderer({width:110,height:30}); const b = new FakeBackend();
+ b.hold = {action:"servers/speed-batch", promise:Promise.resolve({...reply(),catalog:{status:"ok",servers:[
+ {...rows[0]!,ping_status:"ready",latency_ms:20,availability:"failed",status:"ready",download_mbps:44},
+ {...rows[1]!,ping_status:"ready",latency_ms:30,availability:"ready",status:"failed"},
+ ]}})};
+ const app = new App(t.renderer,b);
+ try { await app.perform("status"); t.mockInput.pressKey("v"); await settle();
+ (app as any).target="https://example.invalid/custom";
+ t.mockInput.pressKey("t"); await settle(); await t.renderOnce();
+ expect(t.captureCharFrame()).toContain("2/2 · ошибок 2");
+ expect(t.captureCharFrame()).toContain("44.0");
+ } finally {await app.close();}
+});
+
+test("presentation: speed batch shows parallel preparation and speed stage, cancellation sends no subsequent request", async () => {
+ const t = await createTestRenderer({width:120,height:30}); const b = new FakeBackend(); let finish!:(r:Reply)=>void;
+ b.hold={action:"servers/speed-batch",promise:new Promise(r=>finish=r)}; const app = new App(t.renderer,b);
+ try {await app.perform("status");t.mockInput.pressKey("v");await settle();t.mockInput.pressKey("t");await settle();
+ const event=(i:number,stage:CheckProgress["stage"]):CheckProgress=>({event:"server-check",server_id:rows[i]!.server_id,stage,ping_status:stage==="start"?"untested":"ready",latency_ms:20,availability:"untested"});
+ b.onCheckProgress?.(event(0,"start"));b.onCheckProgress?.(event(1,"start"));await t.renderOnce();
+ expect(t.captureCharFrame().split("подготовка").length-1).toBe(2);
+ b.onCheckProgress?.(event(0,"speed"));await t.renderOnce();expect(t.captureCharFrame()).toContain("замер");expect(t.captureCharFrame()).toContain("подготовка");
+ b.onCheckProgress?.({...event(0,"complete"),availability:"ready",status:"ready",download_mbps:31});
+ t.mockInput.pressKey("k");finish({...reply(),ok:false,reason:"cancelled"});await settle();await t.renderOnce();
+ expect(t.captureCharFrame()).toContain("31.0");expect(t.captureCharFrame()).toContain("1/2");
+ }finally{finish(reply());await settle();await app.close();}
+});
+
+test("presentation: home speedometer measures the selected server after ping and removes redundant labels", async () => {
+  const t = await createTestRenderer({ width: 90, height: 35 });
+  const b = new FakeBackend();
+  b.rows = rows.map((s, i) => ({ ...s, selected: i === 1 }));
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("t"); await settle(); await t.renderOnce();
+    const frame = t.captureCharFrame();
+    expect(frame).toContain("50.0 Мбит/с");
+    expect(frame).not.toContain("Подписка: есть");
+    expect(frame).not.toContain("Проверки и выбор серверов");
+    t.resize(60, 24); await t.renderOnce();
+    expect(t.captureCharFrame()).not.toContain("СКОРОСТЬ СЕРВЕРА");
+    expect(t.captureCharFrame()).toContain("Тест скорости · 24ms, 50.0 Мбит/с");
+    t.resize(90, 35); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("СКОРОСТЬ СЕРВЕРА");
+
+  } finally { await app.close(); }
+});
+
+test("presentation: switching completes during a held home speed test; late result belongs to original server", async () => {
+  const t = await createTestRenderer({ width: 90, height: 35 });
+  const b = new FakeBackend();
+  b.rows = rows.map((row, i) => ({ ...row, selected: i === 0 }));
+  let finish!: (r: Reply) => void;
+  b.hold = { action: "servers/speed", promise: new Promise(r => finish = r) };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("t");
+    await settle();
+    t.mockInput.pressKey("v");
+    await settle();
+    await app.perform("servers/select", rows[1]!.server_id);
+    await t.renderOnce();
+    expect(t.captureCharFrame().split("\n").find(line => line.includes("Amsterdam") && line.includes("●"))).toBeDefined();
+    finish({ ...reply(), catalog: { status: "ok", server: { ...rows[0]!, selected: true, status: "ready", download_mbps: 77 } } });
+    await settle();
+    await t.renderOnce();
+    const frame = t.captureCharFrame();
+    expect(frame.split("\n").find(line => line.includes("Tokyo") && line.includes("77.0") && !line.includes("●"))).toBeDefined();
+    expect(frame.split("\n").find(line => line.includes("Amsterdam") && line.includes("●"))).toBeDefined();
+  } finally { finish(reply()); await settle(); await app.close(); }
+});
+
+test("presentation: measurement cancellation is scoped and never cancels concurrent server selection", async () => {
+  const t = await createTestRenderer({ width: 90, height: 35 });
+  const b = new FakeBackend();
+  let finishCheck!: (r: Reply) => void, finishSelect!: (r: Reply) => void;
+  const check = new Promise<Reply>(r => finishCheck = r);
+  const select = new Promise<Reply>(r => finishSelect = r);
+  const tasks = new Map<Action, string | undefined>();
+  const cancelled: (string | undefined)[] = [];
+  const original = b.request.bind(b);
+  b.request = async (action: Action, value?: string, id?: string) => {
+    tasks.set(action, id);
+    if (action === "servers/check-batch") return check;
+    if (action === "servers/select") return select;
+    return original(action, value);
+  };
+  b.cancel = (id?: string) => { cancelled.push(id); };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v"); await settle();
+    t.mockInput.pressKey("p"); await settle();
+    const switching = app.perform("servers/select", rows[1]!.server_id);
+    await settle();
+    t.mockInput.pressKey("k"); await settle();
+    t.mockInput.pressKey("1"); await settle();
+    finishCheck({ ...reply(), ok: false, reason: "cancelled" });
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Применяем сервер");
+    finishSelect(reply()); await switching;
+    t.mockInput.pressKey("v"); await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame().split("\n").find(line => line.includes("Amsterdam") && line.includes("●"))).toBeDefined();
+  } finally { finishCheck(reply()); finishSelect(reply()); await settle(); await app.close(); }
 });

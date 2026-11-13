@@ -881,35 +881,39 @@ test("only assigned workers spin while remaining servers wait in the queue", asy
 });
 
 test("speed batch requests all IDs and configured URL once, merges mixed outcomes", async () => {
- const t = await createTestRenderer({width:110,height:30}); const b = new FakeBackend();
+ const b = new FakeBackend();
  b.hold = {action:"servers/speed-batch", promise:Promise.resolve({...reply(),catalog:{status:"ok",servers:[
  {...rows[0]!,ping_status:"ready",latency_ms:20,availability:"failed",status:"ready",download_mbps:44},
  {...rows[1]!,ping_status:"ready",latency_ms:30,availability:"ready",status:"failed"},
  ]}})};
- const app = new App(t.renderer,b);
- try { await app.perform("status"); t.mockInput.pressKey("v"); await settle();
- (app as any).target="https://example.invalid/custom";
- t.mockInput.pressKey("t"); await settle(); await t.renderOnce();
+ const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
+ try { await app.perform("status"); key("v"); await settle();
+ app.target="https://example.invalid/custom";
+ key("t"); await settle();
  expect(b.calls.filter(c=>c.action==="servers/speed-batch").map(c=>JSON.parse(c.value!))).toEqual([{ids:[rows[1]!.server_id,rows[0]!.server_id],url:"https://example.invalid/custom"}]);
  expect(b.calls.some(c=>c.action==="servers/ping"||c.action==="servers/speed")).toBe(false);
- expect(t.captureCharFrame()).toContain("2/2 · ошибок 2");
- expect(t.captureCharFrame()).toContain("44.0");
+ expect(app.servers.find(s=>s.server_id===rows[0]!.server_id)).toMatchObject({ availability:"failed", status:"ready", download_mbps:44 });
+ expect(app.servers.find(s=>s.server_id===rows[1]!.server_id)).toMatchObject({ availability:"ready", status:"failed" });
  } finally {await app.close();}
 });
 
 test("speed batch shows parallel preparation and speed stage, cancellation sends no subsequent request", async () => {
- const t = await createTestRenderer({width:120,height:30}); const b = new FakeBackend(); let finish!:(r:Reply)=>void;
- b.hold={action:"servers/speed-batch",promise:new Promise(r=>finish=r)}; const app = new App(t.renderer,b);
- try {await app.perform("status");t.mockInput.pressKey("v");await settle();t.mockInput.pressKey("t");await settle();
+ const b = new FakeBackend(); let finish!:(r:Reply)=>void;
+ b.hold={action:"servers/speed-batch",promise:new Promise(r=>finish=r)}; const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
+ try {await app.perform("status");key("v");await settle();key("t");await settle();
  const event=(i:number,stage:CheckProgress["stage"]):CheckProgress=>({event:"server-check",server_id:rows[i]!.server_id,stage,ping_status:stage==="start"?"untested":"ready",latency_ms:20,availability:"untested"});
- b.onCheckProgress?.(event(0,"start"));b.onCheckProgress?.(event(1,"start"));await t.renderOnce();
- expect(t.captureCharFrame().split("подготовка").length-1).toBe(2);
- b.onCheckProgress?.(event(0,"speed"));await t.renderOnce();expect(t.captureCharFrame()).toContain("замер");expect(t.captureCharFrame()).toContain("подготовка");
+ b.onCheckProgress?.(event(0,"start"));b.onCheckProgress?.(event(1,"start"));
+ expect(app.batch?.running.size).toBe(2);
+ expect([...app.batch!.stages.values()]).toEqual(["start", "start"]);
+ b.onCheckProgress?.(event(0,"speed"));expect(app.batch?.stages.get(rows[0]!.server_id)).toBe("speed");expect(app.batch?.stages.get(rows[1]!.server_id)).toBe("start");
  b.onCheckProgress?.({...event(0,"complete"),availability:"ready",status:"ready",download_mbps:31});
- t.mockInput.pressKey("k");finish({...reply(),ok:false,reason:"cancelled"});await settle();await t.renderOnce();
+ expect(app.batch).toMatchObject({ done: 1, total: 2 });
+ key("k");finish({...reply(),ok:false,reason:"cancelled"});await settle();
  expect(b.cancelled).toBe(1);expect(b.calls.filter(c=>c.action==="servers/speed-batch")).toHaveLength(1);
  expect(b.calls.some(c=>c.action==="servers/ping"||c.action==="servers/speed")).toBe(false);
- expect(t.captureCharFrame()).toContain("31.0");expect(t.captureCharFrame()).toContain("1/2");
+ expect(app.servers.find(s=>s.server_id===rows[0]!.server_id)?.download_mbps).toBe(31);
  }finally{finish(reply());await settle();await app.close();}
 });
 
@@ -933,24 +937,19 @@ test("held speed batch blocks every other measurement even after navigating home
 });
 
 test("home speedometer measures the selected server after ping and removes redundant labels", async () => {
-  const t = await createTestRenderer({ width: 90, height: 35 });
+
   const b = new FakeBackend();
   b.rows = rows.map((s, i) => ({ ...s, selected: i === 1 }));
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("t"); await settle(); await t.renderOnce();
+    key("t"); await settle();
     expect(b.calls.filter(c => c.action.startsWith("servers/")).map(c => c.action)).toEqual(["servers/list", "servers/ping", "servers/speed"]);
     expect(b.calls.find(c => c.action === "servers/speed")?.value).toBe(rows[1]!.server_id);
-    const frame = t.captureCharFrame();
-    expect(frame).toContain("50.0 Мбит/с");
-    expect(frame).not.toContain("Подписка: есть");
-    expect(frame).not.toContain("Проверки и выбор серверов");
-    t.resize(60, 24); await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("СКОРОСТЬ СЕРВЕРА");
-    expect(t.captureCharFrame()).toContain("Тест скорости · 24ms, 50.0 Мбит/с");
-    t.resize(90, 35); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("СКОРОСТЬ СЕРВЕРА");
+    expect(app.homeSpeed).toBe(50);
+    expect(app.homePing).toBe(24);
+    expect(app.homeSpeedServer?.id).toBe(rows[1]!.server_id);
 
   } finally { await app.close(); }
 });
@@ -982,34 +981,34 @@ test("home speed test skips download after failed ping and allows navigation", a
 });
 
 test("switching completes during a held home speed test; late result belongs to original server", async () => {
-  const t = await createTestRenderer({ width: 90, height: 35 });
+
   const b = new FakeBackend();
   b.rows = rows.map((row, i) => ({ ...row, selected: i === 0 }));
   let finish!: (r: Reply) => void;
   b.hold = { action: "servers/speed", promise: new Promise(r => finish = r) };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("t");
+    key("t");
     await settle();
     expect(b.calls.some(c => c.action === "servers/speed")).toBe(true);
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
     await app.perform("servers/select", rows[1]!.server_id);
-    await t.renderOnce();
-    expect(t.captureCharFrame().split("\n").find(line => line.includes("Amsterdam") && line.includes("●"))).toBeDefined();
+
+    expect(app.servers.find(s => s.server_id === rows[1]!.server_id)?.selected).toBe(true);
     finish({ ...reply(), catalog: { status: "ok", server: { ...rows[0]!, selected: true, status: "ready", download_mbps: 77 } } });
     await settle();
-    await t.renderOnce();
-    const frame = t.captureCharFrame();
-    expect(frame.split("\n").find(line => line.includes("Tokyo") && line.includes("77.0") && !line.includes("●"))).toBeDefined();
-    expect(frame.split("\n").find(line => line.includes("Amsterdam") && line.includes("●"))).toBeDefined();
+
+    expect(app.servers.find(s => s.server_id === rows[0]!.server_id)).toMatchObject({ selected: false, download_mbps: 77 });
+    expect(app.servers.find(s => s.server_id === rows[1]!.server_id)?.selected).toBe(true);
     expect(b.cancelled).toBe(0);
   } finally { finish(reply()); await settle(); await app.close(); }
 });
 
 test("measurement cancellation is scoped and never cancels concurrent server selection", async () => {
-  const t = await createTestRenderer({ width: 90, height: 35 });
+
   const b = new FakeBackend();
   let finishCheck!: (r: Reply) => void, finishSelect!: (r: Reply) => void;
   const check = new Promise<Reply>(r => finishCheck = r);
@@ -1024,26 +1023,27 @@ test("measurement cancellation is scoped and never cancels concurrent server sel
     return original(action, value);
   };
   b.cancel = (id?: string) => { cancelled.push(id); };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v"); await settle();
-    t.mockInput.pressKey("p"); await settle();
+    key("v"); await settle();
+    key("p"); await settle();
     const switching = app.perform("servers/select", rows[1]!.server_id);
     await settle();
     expect(tasks.get("servers/select")).toBeDefined();
-    t.mockInput.pressKey("k"); await settle();
-    t.mockInput.pressKey("1"); await settle();
+    key("k"); await settle();
+    key("1"); await settle();
     expect(cancelled).toEqual([tasks.get("servers/check-batch")]);
     expect(cancelled).not.toContain(tasks.get("servers/select"));
     finishCheck({ ...reply(), ok: false, reason: "cancelled" });
     await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Применяем сервер");
+
+    expect(app.tasks.has(tasks.get("servers/select")!)).toBe(true);
     finishSelect(reply()); await switching;
-    t.mockInput.pressKey("v"); await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame().split("\n").find(line => line.includes("Amsterdam") && line.includes("●"))).toBeDefined();
+    key("v"); await settle();
+
+    expect(app.servers.find(s => s.server_id === rows[1]!.server_id)?.selected).toBe(true);
   } finally { finishCheck(reply()); finishSelect(reply()); await settle(); await app.close(); }
 });
 
