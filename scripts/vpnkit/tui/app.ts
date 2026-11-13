@@ -16,6 +16,7 @@ import { observeRendererClose } from "./renderer-lifecycle";
 import { cell, safeText } from "./formatting";
 import { compatible } from "./request-policy";
 import { ServerTableView } from "./server-table-view";
+import { MenuView } from "./menu-view";
 import { frames } from "./animation-frames";
 export { cell } from "./formatting";
 
@@ -191,9 +192,7 @@ export class App {
   private facts: TextRenderable;
   private content: BoxRenderable;
   private summary: TextRenderable;
-  private controls: BoxRenderable;
-  private controlRows: BoxRenderable[] = [];
-  private controlLabels: TextRenderable[] = [];
+  private menuView: MenuView;
   private tableView: ServerTableView;
   private input: InputRenderable;
   private editorHint: TextRenderable;
@@ -253,28 +252,12 @@ export class App {
     this.root.add(this.content);
     this.summary = text(this.content, "", p.muted, 2);
     this.summary.minHeight = 0;
-    this.controls = new BoxRenderable(renderer, {
-      flexDirection: "column",
-      flexShrink: 0,
+    this.menuView = new MenuView(renderer, this.content, (index) => {
+      this.serverMenu = true;
+      this.selected = index;
+      this.items()[index]?.run();
+      this.paint();
     });
-    this.content.add(this.controls);
-    for (let i = 0; i < 8; i++) {
-      const row = new BoxRenderable(renderer, {
-        height: 1,
-        flexShrink: 0,
-        onMouseDown: (e) => {
-          if (e.button === 0) {
-            this.serverMenu = true;
-            this.selected = i;
-            this.items()[i]?.run();
-            this.paint();
-          }
-        },
-      });
-      this.controls.add(row);
-      this.controlRows.push(row);
-      this.controlLabels.push(text(row));
-    }
     this.measurementInfo = text(this.content, "", p.muted, 2);
     this.gauge = text(this.content, "", p.accent, 14);
     this.gauge.marginTop = 1;
@@ -1464,18 +1447,8 @@ export class App {
     this.editorHint.content =
       "Enter сохранить · Esc назад · Ctrl+U очистить\nЗначение видно только здесь; в журнал не попадает.";
     const items = this.items();
-    this.controls.visible = !editor;
-    this.controlRows.forEach((row, i) => {
-      row.visible = i < items.length;
-      row.backgroundColor =
-        i === this.selected &&
-        (this.screen !== "servers" || this.serverMenu || !this.servers.length)
-          ? p.edge
-          : p.base;
-      this.controlLabels[i].content = items[i]
-        ? cell(`[${items[i].key}] ${items[i].label}`, width).trimEnd()
-        : "";
-    });
+    this.menuView.update(items, editor, this.selected,
+      this.screen !== "servers" || this.serverMenu || !this.servers.length);
     this.summary.height = this.screen === "diagnostics" ? 6 : 2;
     if (this.screen === "tasks") this.summary.content = this.tasks.size ? "Текущие задачи" : "Нет выполняющихся задач";
     if (this.screen === "cancel-confirm") this.summary.content = "Точно отменить эту операцию?";
