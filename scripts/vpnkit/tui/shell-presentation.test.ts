@@ -13,13 +13,13 @@ async function fixture(width: number, height: number) {
   return { terminal, backend, app };
 }
 
-test("shell: table has twenty rows at 80x24, footer uses available shortcuts", async () => {
+test("shell: table reserves notice space at 80x24, footer uses available shortcuts", async () => {
   const { terminal: t, app } = await fixture(80, 24);
   try {
     const lines = t.captureCharFrame().split("\n");
     expect(lines[0]).toContain("отключён"); expect(lines[1]).toContain("Серверы");
     expect(lines[2]).toContain("Ping мс");
-    expect(lines.slice(3, -1).filter(line => /Node \d\d/.test(line))).toHaveLength(20);
+    expect(lines.slice(3, -1).filter(line => /Node \d\d/.test(line))).toHaveLength(18);
     expect(lines[23]).toContain("Enter выбрать"); expect(lines[23]).toContain("? помощь");
     expect(lines[23]).not.toContain("k отменить");
   } finally { await app.close(); }
@@ -279,7 +279,7 @@ test("shell: long task overlays scroll and outside clicks cannot activate worksp
     expect(app.screen).toBe("tasks"); expect(app.serverID).toBe(before);
     for (let i = 0; i < 11; i++) app.onKey({ name: "down", preventDefault() {} });
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("[12] Отменить:");
+    expect(t.captureCharFrame()).toContain("› 12  Выполняется");
     app.tasks.clear(); app.open("profiles"); app.open("profile-remove");
     expect(app.items()[app.selected]?.key).toBe("n");
   } finally { app.tasks.clear(); await app.close(); }
@@ -306,11 +306,11 @@ test("shell: activity shows running, queued and finished work and cancellation p
     backend.hold = { action: "servers/speed-batch", promise: new Promise(resolve => { finish = resolve; }) };
     const batch = app.runBatch("speed"); await Bun.sleep(10);
     app.onKey({ name: "p", preventDefault() {} }); await t.renderOnce();
-    expect(t.captureCharFrame().split("\n")[1]).toContain("1 жд [j]");
+    expect(t.captureCharFrame().split("\n")[1]).toContain("в очереди 1 [j]");
     app.onKey({ name: "j", preventDefault() {} }); await t.renderOnce();
     let frame = t.captureCharFrame();
-    expect(frame).toContain("Скорость и сайт всех серверов");
-    expect(frame).toContain("В очереди · 0 с: Ping и сайт всех серверов");
+    expect(frame).toContain("Выполняется       Скорость и сайт");
+    expect(frame).toContain("В очереди         Ping и сайт");
     expect(frame).toContain("Завершено");
     app.onKey({ name: "1", preventDefault() {} }); await t.renderOnce();
     frame = t.captureCharFrame(); expect(frame).toContain("Отмена запрошена");

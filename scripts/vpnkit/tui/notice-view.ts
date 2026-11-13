@@ -10,8 +10,8 @@ export class NoticeView {
   update(state: AppState) {
     const message = state.closing ? "Завершаем текущую операцию перед выходом…" : state.notice.replace(/\s*\n\s*/g, " ");
     const lines = wrapText(message, Math.max(1, this.renderer.terminalWidth - 2));
-    this.notification.content = lines.join("\n");
+    this.notification.content = (this.renderer.terminalWidth < 60 ? lines : lines.slice(0, 2)).join("\n");
     this.notification.fg = state.error ? p.red : p.muted;
-    this.notification.visible = !!message; this.notification.height = lines.length;
+    this.notification.visible = true; this.notification.height = this.renderer.terminalWidth < 60 ? lines.length : 2;
   }
 }

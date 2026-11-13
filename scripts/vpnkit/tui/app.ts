@@ -37,12 +37,12 @@ export class App extends AppState {
     this.root = new BoxRenderable(renderer, { width: "100%", height: "100%", paddingX: 1, flexDirection: "column", backgroundColor: p.base });
     renderer.root.add(this.root);
     this.headerView = new HeaderView(renderer, this.root);
-    this.tabView = new TabView(renderer, this.root, tab => { if (!isOverlay(this.screen) && !this.helpOpen) this.open(tab); });
+    this.tabView = new TabView(renderer, this.root, tab => { if (!isOverlay(this.screen) && !this.helpOpen && !this.paletteOpen && !this.filterEditing) this.open(tab); });
     this.content = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, minHeight: 0, overflow: "hidden" }); this.root.add(this.content);
     this.tooSmall = new TextRenderable(renderer, { content: "Увеличьте терминал минимум до 60 × 16.", height: 1, fg: p.amber, visible: false }); this.content.add(this.tooSmall);
     this.summaryView = new SummaryView(renderer, this.content);
     this.menuView = new MenuView(renderer, this.content, index => {
-      if (isOverlay(this.screen) || this.helpOpen) return;
+      if (isOverlay(this.screen) || this.helpOpen || this.paletteOpen) return;
       this.selected = index;
       const item = this.items()[index];
       const action = item && this.actions().find(candidate => candidate.keys.includes(item.key));
@@ -55,7 +55,7 @@ export class App extends AppState {
     const tableArea = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, minWidth: 0, overflow: "hidden" });
     serverArea.add(tableArea);
     this.detailsView = new DetailsView(renderer, serverArea);
-    this.tableView = new ServerTableView(renderer, tableArea, index => { if (isOverlay(this.screen) || this.helpOpen) return; const server = this.visibleServers()[index]; if (server) { this.serverID = server.server_id; this.syncServerViewport(); this.paint(); } });
+    this.tableView = new ServerTableView(renderer, tableArea, index => { if (isOverlay(this.screen) || this.helpOpen || this.filterEditing || this.paletteOpen) return; const server = this.visibleServers()[index]; if (server) { this.serverID = server.server_id; if (this.filter) this.filterAnchor = this.serverID; this.syncServerViewport(); this.paint(); } }, value => this.editFilter(value), column => { if (!isOverlay(this.screen) && !this.helpOpen && !this.filterEditing && !this.paletteOpen) this.setSort(column); });
     this.editorView = new EditorView(renderer, this.content, value => this.edit(value));
     this.noticeView = new NoticeView(renderer, this.root);
     this.footerView = new FooterView(renderer, this.root);
@@ -71,11 +71,12 @@ export class App extends AppState {
     const tableVisible = (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0;
     const wide = this.renderer.width >= DETAILS_THRESHOLD && tableVisible;
     this.detailsView.update(this, wide);
-    this.tableView.update({ width: this.renderer.terminalWidth - 2 - (wide ? DETAILS_WIDTH : 0), visible: this.renderer.width >= 60 && this.renderer.height >= 16 && (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0, servers: this.visibleServers(), rowCount: this.rowCount(), serverID: this.serverID, batch: this.batch, frame: this.frame, liveSpeeds: this.liveSpeeds, sort: this.sort });
+    this.tableView.update({ width: this.renderer.terminalWidth - 2 - (wide ? DETAILS_WIDTH : 0), visible: this.renderer.width >= 60 && this.renderer.height >= 16 && (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0, servers: this.visibleServers(), rowCount: this.rowCount(), serverID: this.serverID, batch: this.batch, frame: this.frame, liveSpeeds: this.liveSpeeds, sort: this.sort, sortDescending: this.sortDescending, filter: this.filter, filterEditing: this.filterEditing, shown: this.filteredServers().length, total: this.servers.length });
     this.headerView.update(this, this.demo);
     if (this.screen === "details") this.overlayView.update(this);
   }
   override paintProgress() { super.paintProgress(); this.tabView.update(this); this.headerView.update(this, this.demo); if (this.screen === "tasks") this.overlayView.update(this); }
+  override paintPalette() { super.paintPalette(); this.overlayView.updatePalette(this); }
   override paint() {
     if (this.disposed) return;
     super.paint();

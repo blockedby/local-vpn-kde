@@ -235,7 +235,7 @@ export async function perform(
       if (cancelRequested && ["servers/refresh", "subscription", "profiles/add", "profiles/open", "profiles/remove"].includes(action)) state.catalogRevision++;
       state.tasks.delete(requestID);
       if (completed && action !== "status") {
-        state.history.unshift({ action, started: completed.started, ended: Date.now(), phase: state.batch && completed.measurement ? `${state.batch.done}/${state.batch.total}` : completed.phase, outcome: reply?.reason === "cancelled" ? "Отменено" : reply?.ok ? "Завершено" : `Ошибка: ${reply ? failure(reply.reason, reply.code, state.status?.runtime) : "связь потеряна"}` });
+        state.history.unshift({ action, started: completed.started, ended: Date.now(), phase: state.batch && completed.measurement ? `${state.batch.done}/${state.batch.total}` : completed.phase, count: completed.measurement ? state.batch?.total : undefined, outcome: reply?.reason === "cancelled" ? "Отменено" : reply?.ok ? "Завершено" : `Ошибка: ${reply ? failure(reply.reason, reply.code, state.status?.runtime) : "связь потеряна"}` });
         state.history.length = Math.min(20, state.history.length);
       }
       if (state.poll && !cancelRequested && requestClasses[action] === "exclusive" && !state.closing && !state.backendOffline && !state.reconnecting && ![...state.tasks.values()].some(task => task.action === "status")) void state.perform("status");

@@ -285,6 +285,7 @@ export class DemoBackend implements Backend {
     "Frankfurt",
     "Tokyo",
     "New York",
+    "Москва",
   ].map((display_name, i) => ({
     server_id: `srv_${String(i).padStart(27, "0")}`,
     display_name,

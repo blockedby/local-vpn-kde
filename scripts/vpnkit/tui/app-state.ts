@@ -59,7 +59,7 @@ export interface AppKeyEvent {
   preventDefault(): void;
 }
 
-export type StateRegion = "all" | "measurement" | "table" | "progress" | "editor";
+export type StateRegion = "all" | "measurement" | "table" | "progress" | "editor" | "palette";
 
 /** Renderer-independent application and request lifecycle. */
 export class AppState {
@@ -133,11 +133,11 @@ export class AppState {
     return [...this.tasks.values()].find(task => task.measurement)?.action;
   }
   queue: { id: string; action: Action; value?: string; kind?: "batch" | "home"; batchKind?: Batch; signature: string; catalogRevision: number; wasReady: boolean; started: number }[] = [];
-  history: { action: Action; started: number; ended: number; outcome: string; phase: string }[] = [];
+  history: { action: Action; started: number; ended: number; outcome: string; phase: string; count?: number }[] = [];
   catalogRevision = 0;
   catalogSignature() { return this.servers.map(server => server.server_id).sort().join("|") + `:${this.profiles?.active ?? ""}:${this.catalogStale}`; }
   enqueue(action: Action, value?: string, kind?: "batch" | "home", batchKind?: Batch) {
-    if (this.queue.some(entry => entry.action === action && entry.value === value && entry.kind === kind)) { this.notify("Эта операция уже в очереди."); return; }
+    if (this.queue.some(entry => entry.action === action && (kind === "batch" || entry.value === value) && entry.kind === kind)) { this.notify("Эта операция уже в очереди."); return; }
     this.queue.push({ id: `queue-${++this.nextTask}`, action, value, kind, batchKind, signature: this.catalogSignature(), catalogRevision: this.catalogRevision, wasReady: this.ready(), started: Date.now() });
     this.notify("Операция поставлена в очередь [j].");
   }
@@ -159,7 +159,7 @@ export class AppState {
         this.notify("Задача снята с очереди: состояние или каталог изменились.", true);
         continue;
       }
-      if (entry.kind === "batch") void this.runBatch(entry.batchKind!);
+      if (entry.kind === "batch") void this.runBatch(entry.batchKind!, entry.value ? JSON.parse(entry.value) : undefined);
       else if (entry.kind === "home") void this.testHomeSpeed(entry.value);
       else void this.perform(entry.action, entry.value);
       return;
@@ -201,6 +201,40 @@ export class AppState {
   catalogLoaded = false;
   catalogStale = false;
   sort: ServerSort = "name";
+  sortDescending = false;
+  filter = "";
+  filterEditing = false;
+  filterAnchor?: string;
+  paletteOpen = false;
+  paletteQuery = "";
+  paletteIndex = 0;
+  paletteActions() {
+    const screen = this.screen, tab = this.tab;
+    const open = this.paletteOpen; this.paletteOpen = false;
+    const result: { action: ActionDefinition; screen: Screen }[] = [];
+    const seen = new Set<string>();
+    for (const target of [tab, "servers", "profiles", "diagnostics", "settings", "autostart"] as Screen[]) {
+      this.screen = target;
+      for (const action of actionRegistry(this)) {
+        if (seen.has(action.id) || /^(help:|editor:|filter:)/.test(action.id) || action.id === "global:palette") continue;
+        const labels: Record<string, string> = { "global:back": "Вернуться или закрыть уведомление", "global:quit-control": "Выйти из приложения", "global:quit": "Выйти из приложения", "global:tab": "Следующая вкладка", "global:shift+tab": "Предыдущая вкладка", "menu:previous": "Предыдущий пункт", "menu:next": "Следующий пункт", "menu:select": "Выбрать пункт меню", "servers:up": "Предыдущий сервер", "servers:down": "Следующий сервер", "servers:pageup": "Предыдущая страница серверов", "servers:pagedown": "Следующая страница серверов", "servers:home": "Первый сервер", "servers:end": "Последний сервер" };
+        seen.add(action.id); result.push({ action: { ...action, label: labels[action.id] ?? action.label }, screen: target });
+      }
+    }
+    this.screen = screen; this.tab = tab; this.paletteOpen = open;
+    return result;
+  }
+  filteredPaletteActions() {
+    const query = this.paletteQuery.trim().toLocaleLowerCase("ru");
+    return this.paletteActions().filter(({action}) => `${action.label} ${action.keys.join(" ")}`.toLocaleLowerCase("ru").includes(query));
+  }
+  runPaletteAction() {
+    const entry = this.filteredPaletteActions()[this.paletteIndex];
+    if (!entry?.action.available) return;
+    this.paletteOpen = false;
+    if (entry.action.scope !== "global" && this.screen !== entry.screen) this.open(entry.screen, false);
+    entry.action.run(); this.paint();
+  }
   target = "https://www.youtube.com/";
   editorRevision = 0;
   navigationRevision = 0;
@@ -293,6 +327,7 @@ export class AppState {
   paint() { this.syncAnimation(); this.changed("all"); }
   paintMeasurement() { this.changed("measurement"); }
   paintTable() { this.changed("table"); }
+  paintPalette() { this.changed("palette"); }
   paintProgress() { this.changed("progress"); }
   onClosing() {}
   onBeforeDispose() {}
@@ -452,6 +487,7 @@ export class AppState {
       return;
     }
     if (this.screen === "subscription") this.draft = this.editorValue;
+    this.filterEditing = false;
     this.screen = screen;
     if (["servers", "profiles", "diagnostics", "settings"].includes(screen)) this.tab = screen as typeof this.tab;
     this.helpOpen = false;
@@ -487,7 +523,7 @@ export class AppState {
   }
   confirmFastest() {
     if (!this.ready() || this.catalogStale) { this.notify("Сначала запустите сервис и обновите список серверов.", true); return; }
-    const candidates = this.servers.filter(server => this.measurementTimes.has(server.server_id) && server.status === "ready" && server.availability !== "failed" && server.download_mbps !== undefined && Number.isFinite(server.download_mbps) && server.download_mbps >= 0)
+    const candidates = this.filteredServers().filter(server => this.measurementTimes.has(server.server_id) && server.status === "ready" && server.availability !== "failed" && server.download_mbps !== undefined && Number.isFinite(server.download_mbps) && server.download_mbps >= 0)
       .sort((a, b) => b.download_mbps! - a.download_mbps! || a.server_id.localeCompare(b.server_id));
     const server = candidates[0];
     if (!server) { this.notify("Нет подходящих замеров этой сессии. Запустите тест скорости [t]."); return; }
@@ -512,12 +548,26 @@ export class AppState {
   groupedActions() { return groupedActions(this); }
   onKey = (key: AppKeyEvent) => dispatchKey(this, key);
   sortedServers() {
-    return sortedServers(this.servers, this.sort, this.frozenOrder);
+    return sortedServers(this.filteredServers(), this.sort, this.frozenOrder, this.sortDescending);
+  }
+  filteredServers() {
+    const query = this.filter.trim().toLocaleLowerCase("ru");
+    return query ? this.servers.filter(server => server.display_name.toLocaleLowerCase("ru").includes(query)) : this.servers;
+  }
+  editFilter(value: string) {
+    this.filter = safeText(value);
+    const list = this.sortedServers();
+    if (!list.some(server => server.server_id === this.serverID)) this.serverID = list[0]?.server_id;
+    this.syncServerViewport(); this.paintTable();
+  }
+  setSort(sort: ServerSort) {
+    if (this.sort === sort) this.sortDescending = !this.sortDescending;
+    else { this.sort = sort; this.sortDescending = sort === "speed" || sort === "availability"; }
+    this.syncServerViewport(); this.paint();
   }
   profilePageSize() { return Math.max(1, Math.min(9, this.viewport().height - 8 - wrapText(this.notice, Math.max(1, this.viewport().width - 2)).length)); }
   rowCount() {
-    const message = this.closing ? "Завершаем текущую операцию перед выходом…" : this.notice;
-    return Math.max(1, Math.min(100, this.viewport().height - 4 - wrapText(message, Math.max(1, this.viewport().width - 2)).length));
+    return Math.max(1, Math.min(100, this.viewport().height - 6 - (this.filter || this.filterEditing ? 1 : 0)));
   }
   syncServerViewport() {
     this.viewStart = serverViewport(this.sortedServers(), this.serverID, this.viewStart, this.rowCount()).start;

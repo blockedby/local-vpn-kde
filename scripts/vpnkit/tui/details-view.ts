@@ -25,12 +25,12 @@ export class DetailsView {
   private box: BoxRenderable;
   private text: TextRenderable;
   constructor(renderer: CliRenderer, parent: BoxRenderable) {
-    this.box = new BoxRenderable(renderer, { width: DETAILS_WIDTH, height: "100%", flexShrink: 0, border: true, borderStyle: "rounded", borderColor: p.edge, title: " Сервер ", paddingX: 1, overflow: "hidden" });
+    this.box = new BoxRenderable(renderer, { width: DETAILS_WIDTH, height: 10, flexShrink: 0, border: true, borderStyle: "rounded", borderColor: p.edge, title: " Сервер ", paddingX: 1, overflow: "hidden" });
     this.text = new TextRenderable(renderer, { content: "", fg: p.text, width: "100%", height: "100%" });
     this.box.add(this.text); parent.add(this.box);
   }
   update(state: AppState, visible: boolean) {
     this.box.visible = visible;
-    if (visible) this.text.content = detailsLines(state).join("\n");
+    if (visible) { const lines = detailsLines(state); this.box.height = lines.length + 2; this.text.content = lines.join("\n"); }
   }
 }

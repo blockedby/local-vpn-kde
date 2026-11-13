@@ -1,6 +1,7 @@
 import type { Batch, AppState } from "./app-state";
 import { failure } from "./model";
 import { compatible, queueable } from "./request-policy";
+import { sortedServers } from "./catalog-order";
 
 export async function testHomeSpeed(state: AppState, sourceID?: string) {
     if ([...state.tasks.values()].some(task => !compatible("servers/speed", task.action)) || state.batch || state.homeTesting) {
@@ -55,7 +56,9 @@ export async function testHomeSpeed(state: AppState, sourceID?: string) {
 
 export async function runBatch(state: AppState, kind: Batch, retry?: { ids: string[]; target: string }) {
     if (state.batch || state.homeTesting || [...state.tasks.values()].some(task => !compatible(kind === "speed" ? "servers/speed-batch" : "servers/check-batch", task.action))) {
-      state.enqueue(kind === "speed" ? "servers/speed-batch" : "servers/check-batch", undefined, "batch", kind);
+      const snapshot = retry ?? (state.filter.trim() ? { ids: state.sortedServers().map(server => server.server_id), target: state.target } : undefined);
+      if (snapshot && !snapshot.ids.length) { state.notify("Нет показанных серверов для проверки.", true); return; }
+      state.enqueue(kind === "speed" ? "servers/speed-batch" : "servers/check-batch", snapshot ? JSON.stringify(snapshot) : undefined, "batch", kind);
       return;
     }
     if (state.nativePreviewOnly()) {
@@ -109,10 +112,11 @@ export async function runBatch(state: AppState, kind: Batch, retry?: { ids: stri
       await state.loadPendingScreenRead(); state.drainQueue();
       return;
     }
-    state.frozenOrder = ids;
+    state.frozenOrder = sortedServers(state.servers, state.sort, undefined, state.sortDescending).map(server => server.server_id);
     state.batch.total = ids.length;
     const target = state.batch.target!;
     let stoppedReason: string | undefined;
+    if (!ids.length) { state.batch = undefined; state.frozenOrder = undefined; state.notify("Нет показанных серверов для проверки.", true); await state.loadPendingScreenRead(); state.drainQueue(); return; }
     if (!state.cancelled && !state.closing && ids.length) {
       state.batch.ids = ids;
       const result = await state.perform(kind === "speed" ? "servers/speed-batch" : "servers/check-batch", JSON.stringify({ ids, url: target }), true);

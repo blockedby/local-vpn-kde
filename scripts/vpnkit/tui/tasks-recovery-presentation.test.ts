@@ -47,8 +47,8 @@ test("presentation: task chooser cancels only the chosen measurement and confirm
     const a = f.app.perform("servers/check-batch", "{}", true);
     const b = f.app.perform("servers/select", rows[1].server_id);
     await f.key("k");
-    expect(await f.frame()).toContain("Текущие задачи");
-    expect(await f.frame()).toContain("Отменить: Применяем сервер");
+    expect(await f.frame()).toContain("Состояние Операция Этап Время");
+    expect(await f.frame()).toContain("Выполняется       Применяем сервер");
     await f.key("1");
     await f.key("2");
     expect(await f.frame()).toContain("Точно отменить");
@@ -57,10 +57,10 @@ test("presentation: task chooser cancels only the chosen measurement and confirm
     f.t.mockInput.pressEscape(); await settle();
     await f.key("j"); await f.key("2"); await f.key("y");
     f.b.held.get("servers/select")!.resolve(reply()); await b;
-    expect(await f.frame()).not.toContain("Отменить: Применяем сервер");
+    expect(await f.frame()).not.toContain("Выполняется       Применяем сервер");
     expect(await f.frame()).toContain("Ping");
     f.b.held.get("servers/check-batch")!.resolve(reply()); await a;
-    expect(await f.frame()).toContain("Нет выполняющихся задач");
+    expect([...f.app.tasks.values()].filter(task => task.action !== "status")).toHaveLength(0);
   } finally { await f.close(); }
 });
 

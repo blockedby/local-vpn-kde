@@ -478,7 +478,7 @@ test("presentation: server table is sorted by name, keeps columns aligned and ex
       expect(frame).toContain(text);
     t.mockInput.pressKey("o");
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("ping ↑");
+    expect(t.captureCharFrame()).toContain("Ping мс↑");
     t.resize(90, 18); await t.renderOnce();
     const compact = t.captureCharFrame();
     expect(compact).not.toContain("Docker:");
@@ -486,7 +486,7 @@ test("presentation: server table is sorted by name, keeps columns aligned and ex
     expect(compact).not.toContain("Сайт: https:");
     expect(compact).toContain("Amsterdam");
     t.resize(100, 30); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("ping ↑");
+    expect(t.captureCharFrame()).toContain("Ping мс↑");
     t.mockInput.pressArrow("down");
     t.mockInput.pressEnter();
     await t.renderOnce();

@@ -2,6 +2,7 @@ import type { Action } from "./bridge";
 import type { AppState } from "./app-state";
 import { frames } from "./animation-frames";
 import { compatible, queueable } from "./request-policy";
+import { cell } from "./formatting";
 
 export interface MenuItem { key: string; label: string; run: () => void }
 export type ActionScope = AppState["screen"] | "global" | "server-table" | "menu" | "editor" | "confirmation";
@@ -27,13 +28,18 @@ export function menuItems(state: AppState): MenuItem[] {
     }
     if (state.screen === "tasks") {
       const running = [...state.tasks].filter(([, task]) => task.action !== "status");
+      const columns = (status: string, action: string, progress: string, seconds: number) => {
+        const width = Math.min(58, Math.max(42, state.viewport().width - 12));
+        return `${cell(status, 17)} ${cell(action, Math.max(10, width - 35))} ${cell(progress, 9)} ${seconds} с`;
+      };
+      const taskLabel = (action: Action, count?: number) => count !== undefined && (action === "servers/speed-batch" || action === "servers/check-batch") ? `${action === "servers/speed-batch" ? "Скорость" : "Ping"} и сайт (${count})` : state.actionLabel(action);
       const entries = [
-        ...running.map(([id, task]) => ({ id, action: task.action, label: task.action === "servers/select" && !task.cancelRequested ? `Отменить: ${state.actionLabel(task.action)} · ${Math.floor((Date.now() - task.started) / 1000)} с · ${task.phase || "выполняется"}` : `${task.cancelRequested ? "Отмена запрошена" : "Отменить:"} ${state.batch && task.measurement ? `${state.batch.done}/${state.batch.total} · ` : ""}${Math.floor((Date.now() - task.started) / 1000)} с · ${state.actionLabel(task.action)}${task.phase ? ` · ${task.phase}` : ""}`, direct: task.measurement || queueable.has(task.action) })),
-        ...state.queue.map(entry => ({ id: entry.id, action: entry.action, label: `В очереди · ${Math.floor((Date.now() - entry.started) / 1000)} с: ${state.actionLabel(entry.action)}`, direct: true })),
+        ...running.map(([id, task]) => ({ id, action: task.action, label: columns(task.cancelRequested ? "Отмена запрошена" : "Выполняется", taskLabel(task.action, task.measurement ? state.batch?.total : undefined), state.batch && task.measurement ? `${state.batch.done}/${state.batch.total}` : task.phase || "—", Math.floor((Date.now() - task.started) / 1000)), direct: task.measurement || queueable.has(task.action) })),
+        ...state.queue.map(entry => ({ id: entry.id, action: entry.action, label: columns("В очереди", taskLabel(entry.action, entry.kind === "batch" ? (entry.value ? (JSON.parse(entry.value) as {ids: string[]}).ids.length : state.servers.length) : undefined), "—", Math.floor((Date.now() - entry.started) / 1000)), direct: true })),
       ];
       return [
         ...entries.map((entry, i) => ({ key: String(i + 1), label: entry.label, run: () => { if (entry.direct) state.cancelTask(entry.id); else { state.cancelTaskID = entry.id; state.open("cancel-confirm"); } } })),
-        ...state.history.map((entry, i) => ({ key: String(entries.length + i + 1), label: `${Math.floor((entry.ended - entry.started) / 1000)} с · ${entry.outcome}: ${state.actionLabel(entry.action)}${entry.phase ? ` · ${entry.phase}` : ""}`, run: () => {} })),
+        ...state.history.map((entry, i) => ({ key: String(entries.length + i + 1), label: columns(entry.outcome, taskLabel(entry.action, entry.count), entry.phase || "—", Math.floor((Date.now() - entry.ended) / 1000)), run: () => {} })),
       ];
     }
     if (state.screen === "recovery") {
@@ -204,7 +210,7 @@ export function menuItems(state: AppState): MenuItem[] {
         },
         {
           key: "t",
-          label: "Скорость + сайт · замер до 3 с",
+          label: state.filter ? `Скорость показанных (${state.filteredServers().length}) + сайт` : "Скорость + сайт · замер до 3 с",
           run: () => void state.runBatch("speed"),
         },
         { key: "e", label: "Адрес сайта", run: () => state.open("target") },

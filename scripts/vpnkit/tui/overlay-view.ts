@@ -1,4 +1,4 @@
-import { BoxRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
+import { BoxRenderable, InputRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
 import { isOverlay, type AppState } from "./app-state";
 import { SummaryView } from "./summary-view";
 import { MenuView } from "./menu-view";
@@ -15,6 +15,9 @@ export class OverlayView {
   private backdrop: BoxRenderable;
   private box: BoxRenderable;
   private text: TextRenderable;
+  private paletteBox: BoxRenderable;
+  private paletteInput: InputRenderable;
+  private paletteRows: TextRenderable[] = [];
   constructor(private renderer: CliRenderer, root: BoxRenderable) {
     this.dialog = new BoxRenderable(renderer, { position: "absolute", top: 2, left: 2, width: 54, height: 8, zIndex: 50, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, overflow: "hidden", flexDirection: "column", visible: false });
     root.add(this.dialog);
@@ -36,11 +39,38 @@ export class OverlayView {
     this.box = new BoxRenderable(renderer, { position: "absolute", top: 2, left: 2, width: 54, height: 10, zIndex: 100, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, title: " Помощь · ↑↓ прокрутка · Esc закрыть ", overflow: "hidden", visible: false });
     this.text = new TextRenderable(renderer, { content: "", fg: p.text, width: "100%", height: "100%" });
     this.box.add(this.text); root.add(this.box);
+    this.paletteBox = new BoxRenderable(renderer, { position: "absolute", top: 2, left: 2, width: 54, height: 12, zIndex: 110, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, title: " Команды · ↑↓ выбор · Esc закрыть ", overflow: "hidden", visible: false });
+    this.paletteInput = new InputRenderable(renderer, { width: "100%", maxLength: 256, placeholder: "Название или клавиша", backgroundColor: p.panel, textColor: p.text, focusedBackgroundColor: p.edge });
+    this.paletteBox.add(this.paletteInput);
+    this.paletteInput.on("input", () => { if (!this.current?.paletteOpen) return; this.current.paletteQuery = this.paletteInput.value; this.current.paletteIndex = 0; this.current.paintPalette(); });
+    for (let i = 0; i < 24; i++) { const row = new TextRenderable(renderer, { content: "", height: 1, flexShrink: 0 }); this.paletteBox.add(row); this.paletteRows.push(row); }
+    root.add(this.paletteBox);
   }
   private current?: AppState;
   private listOffset = 0;
+  updatePalette(state: AppState) {
+    this.current = state;
+    this.paletteBox.visible = state.paletteOpen;
+    if (!state.paletteOpen) { this.paletteInput.blur(); return; }
+    const width = Math.min(76, this.renderer.terminalWidth - 4), height = Math.min(18, this.renderer.terminalHeight - 4);
+    this.paletteBox.width = width; this.paletteBox.height = height;
+    this.paletteBox.left = Math.floor((this.renderer.terminalWidth - width) / 2); this.paletteBox.top = Math.floor((this.renderer.terminalHeight - height) / 2);
+    if (this.paletteInput.value !== state.paletteQuery) this.paletteInput.value = state.paletteQuery;
+    this.paletteInput.focus();
+    const entries = state.filteredPaletteActions(), count = height - 3;
+    const offset = Math.max(0, state.paletteIndex - count + 1);
+    this.paletteRows.forEach((row, i) => {
+      const entry = entries[offset + i]; row.visible = i < count && !!entry;
+      if (!entry) return;
+      const action = entry.action;
+      const server = ["servers:select", "servers:single-speed", "servers:details"].includes(action.id) ? state.servers.find(s => s.server_id === state.serverID)?.display_name : undefined;
+      row.content = cell(`${offset + i === state.paletteIndex ? "›" : " "} ${action.label}${server ? ` · ${server}` : ""}  [${action.key}]${action.available ? "" : ` · ${action.unavailableReason ?? "недоступно"}`}`, width - 2).trimEnd();
+      row.fg = action.available ? (offset + i === state.paletteIndex ? p.accent : p.text) : p.muted;
+    });
+  }
   update(state: AppState) {
     this.current = state;
+    this.updatePalette(state);
     const modal = isOverlay(state.screen) && this.renderer.terminalWidth >= 60 && this.renderer.terminalHeight >= 16;
     const editor = ["subscription", "target", "profile-name", "profile-source"].includes(state.screen);
     this.dialog.visible = modal;
@@ -62,7 +92,7 @@ export class OverlayView {
       const items = state.items();
       const availableRows = Math.max(1, height - 2 - summaryHeight);
       this.listOffset = Math.max(0, Math.min(Math.max(0, items.length - availableRows), state.selected - availableRows + 1));
-      this.dialogMenu.update(items.slice(this.listOffset, this.listOffset + availableRows), editor, state.selected - this.listOffset, true);
+      this.dialogMenu.update(items.slice(this.listOffset, this.listOffset + availableRows), editor, state.selected - this.listOffset, true, state.screen === "tasks");
     }
     this.box.visible = state.helpOpen;
     this.backdrop.visible = state.helpOpen;

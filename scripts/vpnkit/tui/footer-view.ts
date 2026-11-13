@@ -9,6 +9,8 @@ export class FooterView {
   }
   update(state: AppState, editor: boolean) {
     if (state.helpOpen) { this.footer.content = "↑↓ прокрутка · Esc / ? закрыть"; return; }
+    if (state.filterEditing) { this.footer.content = "Enter применить · Esc очистить"; return; }
+    if (state.screen === "tasks") { this.footer.content = "↑↓ выбор · Enter отменить · Esc назад · ? помощь"; return; }
     const actions = state.groupedActions().flatMap(group => group.actions).filter(action => action.available);
     if (isOverlay(state.screen) && !editor) {
       const choices = actions.filter(action => !["global:help", "global:back", "global:quit-control", "menu:previous", "menu:next"].includes(action.id));
@@ -19,9 +21,9 @@ export class FooterView {
       this.footer.content = hints.join(" · "); return;
     }
     const priorities = editor ? ["editor:submit", "global:back", "global:quit-control"] : state.screen === "servers"
-      ? ["global:recovery", "servers:select", "global:cancel", "servers:details", "servers:p", "servers:t", "servers:r", "home:connect", "home:start-service", "home:x", "servers:sort"]
+      ? ["global:recovery", "servers:select", "servers:filter", "global:cancel", "servers:details", "servers:p", "servers:t", "servers:r", "home:connect", "home:start-service", "home:x", "servers:sort"]
       : ["global:recovery", "menu:select", "diagnostics:u", "home:connect", "home:start-service", "home:x", "global:cancel", "global:back", "global:tasks"];
-    const short: Record<string,string> = { "global:recovery": "восстановить", "servers:select": "выбрать", "servers:p": "ping", "servers:t": "скорость", "servers:r": "обновить", "servers:details": "подробно", "home:connect": "подключить", "home:start-service": "запустить", "home:x": "отключить", "global:cancel": "отменить", "servers:sort": "сортировка", "menu:select": "выбрать", "diagnostics:u": "обновить", "global:back": "назад", "global:tasks": "задачи", "editor:submit": "сохранить", "global:quit-control": "выход" };
+    const short: Record<string,string> = { "global:recovery": "восстановить", "servers:select": "выбрать", "servers:filter": "фильтр", "servers:p": state.filter ? `ping ${state.filteredServers().length}` : "ping", "servers:t": state.filter ? `скорость ${state.filteredServers().length}` : "скорость", "servers:r": "обновить", "servers:details": "подробно", "home:connect": "подключить", "home:start-service": "запустить", "home:x": "отключить", "global:cancel": "отменить", "servers:sort": "сортировка", "menu:select": "выбрать", "diagnostics:u": "обновить", "global:back": "назад", "global:tasks": "задачи", "editor:submit": "сохранить", "global:quit-control": "выход" };
     const hints = priorities.flatMap(id => { const a = actions.find(a => a.id === id); return a ? [`${a.keyHints[0]} ${short[id] ?? a.label.toLowerCase()}`] : []; });
     const help = actions.find(a => a.id === "global:help");
     const suffix = help ? "? помощь" : "";

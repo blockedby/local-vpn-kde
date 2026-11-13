@@ -38,7 +38,7 @@ export class SummaryView {
     const gatewayNames: Record<string, string> = { healthy: "готов", absent: "не запущен", inactive: "не запущен", stopped: "остановлен", starting: "запускается", unhealthy: "ошибка", running: "проверяется" };
     this.summary.height = state.screen === "diagnostics" ? 6 : 2;
     if (state.screen === "details") this.summary.content = detailsLines(state).join("\n");
-    if (state.screen === "tasks") this.summary.content = state.tasks.size || state.queue.length ? "Текущие задачи" : "Нет выполняющихся задач";
+    if (state.screen === "tasks") this.summary.content = state.tasks.size || state.queue.length || state.history.length ? "Состояние        Операция               Этап      Время" : "Нет выполняющихся задач";
     if (state.screen === "cancel-confirm") this.summary.content = "Точно отменить эту операцию?";
     if (state.screen === "retry-confirm") this.summary.content = "Точно повторить изменение VPN?";
     if (state.screen === "recovery") {
@@ -50,7 +50,7 @@ export class SummaryView {
       if (state.confirmation === "fastest" && state.fastestCandidate) {
         const candidate = state.fastestCandidate;
         const age = Math.max(0, Math.floor((Date.now() - candidate.measuredAt) / 1000));
-        this.summary.content = `${candidate.name} · ${candidate.speed.toFixed(1)} Мбит/с · ${age} с назад\nПереключение прервёт текущие соединения. Выбрать сервер?`;
+        this.summary.content = `${candidate.name} · ${candidate.speed.toFixed(1)} Мбит/с · ${age} с назад${state.filter ? " · среди показанных" : ""}\nПереключение прервёт текущие соединения. Выбрать сервер?`;
       } else if (state.confirmation === "subscription") {
         this.summary.height = 4;
         this.summary.content =
@@ -102,8 +102,8 @@ export class SummaryView {
         "Адрес для проверки доступности\nHTTPS-запрос через каждый сервер; это не тест скорости.";
     if (state.screen === "diagnostics")
       this.summary.content = state.nativeMode()
-        ? `OpenVPN / KDE: ${state.status?.networkmanager_active === "yes" ? "активен" : state.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nNative-служба: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${state.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${state.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${state.status?.last_attempt ?? "—"}\nПроверки сайта и скорости — на экране серверов.`
-        : `OpenVPN / KDE: ${state.status?.networkmanager_active === "yes" ? "активен" : state.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nDocker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${state.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${state.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${state.status?.last_attempt ?? "—"}\nПроверка сайта и скорости — на экране серверов.`;
+        ? `OpenVPN / KDE: ${state.status?.networkmanager_active === "yes" ? "активен" : state.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nNative-служба: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${state.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${state.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${state.status?.last_attempt ?? "—"}`
+        : `OpenVPN / KDE: ${state.status?.networkmanager_active === "yes" ? "активен" : state.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nDocker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${state.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${state.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${state.status?.last_attempt ?? "—"}`;
     if (state.screen === "servers")
       this.summary.content = state.nativePreviewOnly()
         ? !state.ready()
