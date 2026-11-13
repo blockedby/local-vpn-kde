@@ -74,9 +74,16 @@ test("palette filters actions, ignores text hotkeys, and preserves confirmations
   const { state, backend } = fixture(); state.status!.networkmanager_active = "yes";
   state.onKey(key(":")); expect(state.paletteOpen).toBe(true);
   expect(new Set(state.paletteActions().map(v => v.action.id)).size).toBe(state.paletteActions().length);
+  const ids = new Set(state.paletteActions().map(v => v.action.id));
+  state.paletteOpen = false;
+  for (const screen of ["servers", "profiles", "diagnostics", "settings", "autostart", "tasks", "details"] as const) {
+    state.screen = screen;
+    for (const action of state.actions()) if (!/^(help:|editor:|filter:)/.test(action.id) && action.id !== "global:palette") expect(ids.has(action.id)).toBe(true);
+  }
+  state.screen = "servers"; state.paletteOpen = true;
   state.onKey(key("q")); expect(state.paletteOpen).toBe(true); expect(state.closing).toBe(false);
   state.paletteQuery = "отключить vpn"; state.paletteIndex = 0; state.onKey(key("return"));
-  expect(state.screen).toBe("confirm"); expect(backend.calls.some(call => call.action === "disconnect")).toBe(false);
+  expect(String(state.screen)).toBe("confirm"); expect(backend.calls.some(call => call.action === "disconnect")).toBe(false);
   state.open("servers", false); state.onKey(key(":")); state.paletteQuery = "отменить";
   const index = state.filteredPaletteActions().findIndex(v => !v.action.available); expect(index).toBeGreaterThanOrEqual(0);
   state.paletteIndex = index; state.onKey(key("return")); expect(state.paletteOpen).toBe(true);

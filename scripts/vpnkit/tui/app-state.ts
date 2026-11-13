@@ -213,7 +213,7 @@ export class AppState {
     const open = this.paletteOpen; this.paletteOpen = false;
     const result: { action: ActionDefinition; screen: Screen }[] = [];
     const seen = new Set<string>();
-    for (const target of [tab, "servers", "profiles", "diagnostics", "settings", "autostart"] as Screen[]) {
+    for (const target of [tab, "servers", "profiles", "diagnostics", "settings", "autostart", "tasks", "details", ...(this.recovery || this.backendOffline ? ["recovery" as const] : [])] as Screen[]) {
       this.screen = target;
       for (const action of actionRegistry(this)) {
         if (seen.has(action.id) || /^(help:|editor:|filter:)/.test(action.id) || action.id === "global:palette") continue;

@@ -309,6 +309,7 @@ test("shell: activity shows running, queued and finished work and cancellation p
     expect(t.captureCharFrame().split("\n")[1]).toContain("в очереди 1 [j]");
     app.onKey({ name: "j", preventDefault() {} }); await t.renderOnce();
     let frame = t.captureCharFrame();
+    expect(frame).toContain("Выполняются"); expect(frame).toContain("В очереди"); expect(frame).toContain("Завершены");
     expect(frame).toContain("Выполняется       Скорость и сайт");
     expect(frame).toContain("В очереди         Ping и сайт");
     expect(frame).toContain("Завершено");
