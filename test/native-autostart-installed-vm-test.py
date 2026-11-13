@@ -104,6 +104,39 @@ import json,os,pathlib,re,subprocess,tempfile
 def run(args):
  p=subprocess.run(args,capture_output=True,text=True,timeout=30)
  return p.returncode,p.stdout
+# Probe the same DNS server and public rule-source name from both the native
+# namespace and the physical uplink concurrently, before collecting journals.
+# Only response categories leave the guest; DNS packets/addresses do not.
+dns_probe=r"""
+import json,os,socket,struct,sys
+result='error'
+try:
+ qid=os.urandom(2);name='raw.githubusercontent.com'
+ query=qid+struct.pack('!HHHHH',0x100,1,0,0,0)+b''.join(bytes([len(x)])+x.encode() for x in name.split('.'))+b'\0'+struct.pack('!HH',1,1)
+ s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(3)
+ if sys.argv[1]=='uplink':s.setsockopt(socket.SOL_SOCKET,socket.SO_BINDTODEVICE,b'eth0\0')
+ s.sendto(query,('8.8.8.8',53));data,_=s.recvfrom(4096)
+ if len(data)>=12 and data[:2]==qid:
+  flags,questions,answers=struct.unpack('!HHH',data[2:8])
+  result='answered' if (flags&15)==0 and answers else 'dns-error-or-empty'
+ else:result='invalid-response'
+except socket.timeout:result='timeout'
+except OSError as e:
+ result={101:'network-unreachable',113:'host-unreachable',111:'refused'}.get(e.errno,'socket-error')
+print(result)
+"""
+probes={}
+for name,command in {
+ 'namespace':['sudo','-n','ip','netns','exec','vpnkit-native','python3','-c',dns_probe,'namespace'],
+ 'uplink':['sudo','-n','python3','-c',dns_probe,'uplink'],
+}.items():
+ probes[name]=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
+dns_results={}
+for name,process in probes.items():
+ try: out,_=process.communicate(timeout=8)
+ except subprocess.TimeoutExpired: process.kill();process.communicate();out='timeout'
+ value=out.strip()
+ dns_results[name]=value if value in ('answered','dns-error-or-empty','invalid-response','timeout','network-unreachable','host-unreachable','refused','socket-error','error') else 'unavailable'
 os.umask(0o077)
 evidence=pathlib.Path(tempfile.mkdtemp(prefix='vpnkit-reboot-evidence-',dir='/var/tmp'))
 def capture(name,args):
@@ -163,7 +196,7 @@ except Exception: print('direct-probe-failed-or-unsupported')
 _,upstream=run(['sudo','-n','python3','-c',upstream_script])
 upstream=upstream.strip()
 if upstream not in ('dns-resolved-transport-unproven','direct-tcp-connected','direct-probe-failed-or-unsupported'): upstream='unavailable'
-print(json.dumps({'private_guest_evidence':str(evidence),'units':units,'gateway_codes':codes,'journal_signals':signals,'route_count':len(routes.splitlines()),'rule_count':len(rules.splitlines()),'tun_route_present':bool(re.search(r'\bdev tun\d+\b',routes)),'resolver_nameserver_count':sum(line.lstrip().startswith('nameserver ') for line in resolver.splitlines()),'autostart':safe_status,'guest_dns_probe':dns_ok,'guest_https_probe':https_ok,'upstream_direct_probe':upstream}))
+print(json.dumps({'private_guest_evidence':str(evidence),'rule_dns_probes':dns_results,'units':units,'gateway_codes':codes,'journal_signals':signals,'route_count':len(routes.splitlines()),'rule_count':len(rules.splitlines()),'tun_route_present':bool(re.search(r'\bdev tun\d+\b',routes)),'resolver_nameserver_count':sum(line.lstrip().startswith('nameserver ') for line in resolver.splitlines()),'autostart':safe_status,'guest_dns_probe':dns_ok,'guest_https_probe':https_ok,'upstream_direct_probe':upstream}))
 '''
     result = remote('python3 -c ' + shlex.quote(script), timeout=90, check=False)
     try:
