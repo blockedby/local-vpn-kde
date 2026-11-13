@@ -5,10 +5,14 @@ import { frames } from "./animation-frames";
 import { compatible } from "./request-policy";
 
 export interface MenuItem { key: string; label: string; run: () => void }
+export type ActionScope = AppState["screen"] | "global" | "server-table" | "menu" | "editor" | "confirmation";
 export interface ActionDefinition extends MenuItem {
   id: string;
   keys: readonly string[];
-  scope: AppState["screen"];
+  scope: ActionScope;
+  unavailableBehavior?: "notice" | "none";
+  preventDefault?: boolean;
+  preventDefaultKeys?: readonly string[];
   available: boolean;
   unavailableReason?: string;
 }
@@ -206,9 +210,13 @@ export function defineMenuActions(state: AppState, items: MenuItem[]): ActionDef
       id = state.ready() ? "home:connect" : "home:start-service";
     }
     let reason: string | undefined;
+    let unavailableBehavior: "notice" | "none" = "notice";
     const speed = screen === "home" && item.key === "t";
     const batch = screen === "servers" && (item.key === "p" || item.key === "t");
-    if (speed || batch) {
+    if (screen === "recovery" && item.key === "u" && state.backendOffline && (state.reconnecting || state.tasks.size > 0 || !!state.batch || state.homeTesting || state.closing)) {
+      reason = "Восстановление связи уже выполняется или другая операция ещё не завершена.";
+      unavailableBehavior = "none";
+    } else if (speed || batch) {
       if (batch ? !!state.busy || !!state.batch || state.homeTesting : [...state.tasks.values()].some(task => task.action !== "status") || !!state.batch || state.homeTesting)
         reason = "Дождитесь завершения или отмените текущую операцию [k].";
       else if (state.nativePreviewOnly()) reason = state.nativeUnavailable(speed ? "servers/speed" : "servers/check-batch");
@@ -238,6 +246,6 @@ export function defineMenuActions(state: AppState, items: MenuItem[]): ActionDef
         }
       }
     }
-    return { ...item, id, keys: [item.key], scope: screen, available: !reason, ...(reason ? { unavailableReason: reason } : {}) };
+    return { ...item, id, keys: [item.key], scope: screen, available: !reason, ...(reason ? { unavailableReason: reason, unavailableBehavior } : {}) };
   });
 }

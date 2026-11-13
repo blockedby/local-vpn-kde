@@ -126,6 +126,7 @@ export async function runBatch(state: AppState, kind: Batch, retry?: { ids: stri
     }
     const { done, total, failed } = state.batch;
     state.frozenOrder = undefined;
+    state.syncServerViewport();
     state.batch = undefined;
     state.notify(
       stoppedReason

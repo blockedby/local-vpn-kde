@@ -6,6 +6,7 @@ import { serverViewport, sortedServers, type ServerSort } from "./catalog-order"
 import { safeText } from "./formatting";
 import { names } from "./action-labels";
 import { dispatchKey } from "./key-dispatch";
+import { actionRegistry, groupedActions } from "./action-registry";
 import { perform, updateCatalog } from "./request-execution";
 import { testHomeSpeed, runBatch, cancelTask, cancel, retryCheck, reconnectBackend } from "./measurements";
 import { defineMenuActions, menuItems, type ActionDefinition } from "./menu-actions";
@@ -81,6 +82,7 @@ export class AppState {
     this.servers = [];
     this.catalogLoaded = false;
     this.serverID = undefined;
+    this.viewStart = 0;
   }
 
   async browseProfile(id: string) {
@@ -214,6 +216,7 @@ export class AppState {
         batch.done = batch.completed.size;
         batch.failed = batch.failures.size;
       }
+      this.syncServerViewport();
       this.paintTable();
       this.paintProgress();
     };
@@ -447,7 +450,8 @@ export class AppState {
   items(): ActionDefinition[] {
     return defineMenuActions(this, menuItems(this));
   }
-  actions(): ActionDefinition[] { return this.items(); }
+  actions(): ActionDefinition[] { return actionRegistry(this); }
+  groupedActions() { return groupedActions(this); }
   onKey = (key: AppKeyEvent) => dispatchKey(this, key);
   sortedServers() {
     return sortedServers(this.servers, this.sort, this.frozenOrder);
@@ -455,10 +459,11 @@ export class AppState {
   rowCount() {
     return Math.max(1, Math.min(100, this.viewport().terminalHeight - (this.inlineSpeed() ? (this.catalogStale || this.status?.subscription !== "configured" ? 14 : 12) : 15)));
   }
+  syncServerViewport() {
+    this.viewStart = serverViewport(this.sortedServers(), this.serverID, this.viewStart, this.rowCount()).start;
+  }
   visibleServers() {
-    const viewport = serverViewport(this.sortedServers(), this.serverID, this.viewStart, this.rowCount());
-    this.viewStart = viewport.start;
-    return viewport.servers;
+    return serverViewport(this.sortedServers(), this.serverID, this.viewStart, this.rowCount()).servers;
   }
   updateCatalog(reply: Reply, action: Action) { return updateCatalog(this, reply, action); }
   perform(action: Action, value?: string, insideBatch = false): Promise<Reply | undefined> {

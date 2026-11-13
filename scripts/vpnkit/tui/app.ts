@@ -66,6 +66,7 @@ export class App extends AppState {
       if (server) {
         this.serverMenu = false;
         this.serverID = server.server_id;
+        this.syncServerViewport();
         this.paint();
       }
     });
@@ -74,10 +75,11 @@ export class App extends AppState {
     this.noticeView = new NoticeView(renderer, this.root);
     this.footerView = new FooterView(renderer, this.root);
     renderer.keyInput.on("keypress", this.onKey);
-    renderer.on("resize", this.paint);
+    renderer.on("resize", this.onResize);
     this.paint();
   }
 
+  private onResize = () => { this.syncServerViewport(); this.paint(); };
   override viewport() { return { width: this.renderer.width, height: this.renderer.height, terminalHeight: this.renderer.terminalHeight }; }
   override paintMeasurement() {
     super.paintMeasurement();
@@ -118,7 +120,7 @@ export class App extends AppState {
   override onClosing() { this.editorView.blur(); }
   override onBeforeDispose() {
     this.renderer.keyInput.off("keypress", this.onKey);
-    this.renderer.off("resize", this.paint);
+    this.renderer.off("resize", this.onResize);
   }
   override async onDispose() {
     this.renderer.destroy();

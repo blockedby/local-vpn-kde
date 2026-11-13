@@ -70,6 +70,7 @@ export function updateCatalog(state: AppState, reply: Reply, action: Action) {
     }
     if (!state.servers.some((s) => s.server_id === state.serverID))
       state.serverID = state.sortedServers()[0]?.server_id;
+    state.syncServerViewport();
   }
 export async function perform(
     state: AppState,
@@ -132,6 +133,7 @@ export async function perform(
           download_mbps: previous.download_mbps, download_seconds: previous.download_seconds,
           downloaded_bytes: previous.downloaded_bytes } : row;
       });
+      if (previousMeasurements) state.syncServerViewport();
       if(reply.ok && reply.profiles) state.profiles=reply.profiles;
       if (action === "subscription/read" && reply.ok) {
         state.loadedSubscription = true;
@@ -199,6 +201,7 @@ export async function perform(
           state.catalogLoaded = false;
           state.servers = [];
           state.serverID = undefined;
+          state.viewStart = 0;
           state.loadedSubscription = true;
           if (revision === state.editorRevision) {
             state.draft = value ?? "";
