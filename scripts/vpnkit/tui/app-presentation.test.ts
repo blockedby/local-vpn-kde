@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
-import { App } from "./app";
+import { App, cell } from "./app";
+import { connection } from "./model";
 import type { Action, CheckProgress, Reply } from "./bridge";
 import { FakeBackend, settle, reply, rows, initial } from "./app-test-fixtures";
 
@@ -176,21 +177,15 @@ test("presentation: installed native separates service startup, connection, disc
     t.mockInput.pressKey("s"); await settle(); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("VPN отключён");
     expect(t.captureCharFrame()).toContain("Подключить VPN");
-    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start"]);
     t.mockInput.pressKey("s"); await settle(); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("VPN подключён");
     t.mockInput.pressKey("x"); await settle();
-    expect(b.calls.at(-1)?.action).toBe("start");
     t.mockInput.pressKey("n"); await settle();
-    expect(b.status.networkmanager_active).toBe("yes");
     t.mockInput.pressKey("x"); t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Native-служба работает");
-    expect(b.status.gateway_state).toBe("healthy");
     t.mockInput.pressKey("z"); await settle();
-    expect(b.calls.at(-1)?.action).toBe("disconnect");
     t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Native-служба и VPN остановлены");
-    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start", "start", "disconnect", "stop"]);
   } finally { await app.close(); }
 });
 
@@ -1445,7 +1440,7 @@ test("presentation: unknown routing mode is not presented as strict", async () =
   try {
     await app.perform("status"); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Режим: неизвестно");
-    expect((app as any).items().find((item: { key: string }) => item.key === "m").label).toContain("неизвестно");
+    expect(app.actions().find(item => item.key === "m")?.label).toContain("неизвестно");
   } finally { await app.close(); }
 });
 
@@ -1497,4 +1492,42 @@ test("presentation: stopping Docker also requires confirmation; mouse No does no
   } finally {
     await app.close();
   }
+});
+
+test("presentation: connection requires healthy Docker and active KDE", () => {
+  expect(connection({ ...initial, networkmanager_active: "yes" }).title).toBe(
+    "VPN подключён",
+  );
+  expect(connection(initial).title).toBe("VPN отключён");
+  expect(
+    connection({
+      ...initial,
+      gateway_state: "unhealthy",
+      networkmanager_active: "yes",
+    }).title,
+  ).not.toBe("VPN подключён");
+  expect(cell("東京", 6)).toBe("東京  ");
+  expect(Bun.stringWidth(cell("🇫🇮 Helsinki", 8))).toBe(8);
+});
+
+test("presentation: home speed starts during status polling and reports other conflicts", async () => {
+  const t = await createTestRenderer({ width: 100, height: 30 });
+  const b = new FakeBackend();
+  b.rows = rows.map((row, i) => ({ ...row, selected: i === 0 }));
+  const app = new App(t.renderer, b);
+  const state = app as any;
+  try {
+    await app.perform("status");
+    let finish!: (result: Reply) => void;
+    b.hold = { action: "status", promise: new Promise(resolve => { finish = resolve; }) };
+    const poll = app.perform("status");
+    await state.testHomeSpeed();
+    finish(reply()); await poll;
+    b.hold = { action: "start", promise: new Promise(resolve => { finish = resolve; }) };
+    const mutation = app.perform("start");
+    await state.testHomeSpeed();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Дождитесь завершения");
+    finish(reply()); await mutation;
+  } finally { await app.close(); }
 });

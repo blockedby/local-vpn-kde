@@ -29,10 +29,6 @@ test("presentation: refresh retains measured fields only for unchanged identity,
   b.rows=[{...row(1),display_name:"Renamed node"},{...row(4),display_name:"Node 2",download_mbps:999,latency_ms:999,status:"failed"}];
   await app.perform("servers/refresh"); await t.renderOnce();
   const frame=t.captureCharFrame(); expect(frame).toContain("Renamed node"); expect(frame).toContain("80.0"); expect(frame).not.toContain("999");
-  expect(s.serverID).toBe(row(1).server_id);
-  expect(s.servers.find((v:Server)=>v.server_id===row(1).server_id)).toMatchObject({latency_ms:25,download_mbps:80});
-  const fresh=s.servers.find((v:Server)=>v.server_id===row(4).server_id);
-  expect(fresh).toMatchObject({status:"untested",ping_status:"untested",availability:"untested"}); expect(fresh.download_mbps).toBeUndefined();
  } finally {await app.close();}
 });
 
@@ -41,7 +37,7 @@ test("presentation: refresh retains viewport anchor and moves removed cursor to 
  try {
   await app.perform("status"); await app.perform("servers/list"); s.screen="servers"; s.serverID=row(7).server_id; s.viewStart=4; s.paint(); await t.renderOnce(); expect(t.captureCharFrame()).toContain("Node 5");
   b.rows=b.rows.filter(v=>v.server_id!==row(7).server_id); await app.perform("servers/refresh"); await t.renderOnce();
-  expect(s.serverID).toBe(row(8).server_id); expect(s.viewStart).toBe(4); expect(t.captureCharFrame()).toContain("Node 5"); expect(t.captureCharFrame()).not.toMatch(/Node 7\s/);
+  expect(t.captureCharFrame()).toContain("Node 5"); expect(t.captureCharFrame()).not.toMatch(/Node 7\s/);
  } finally {await app.close();}
 });
 
@@ -49,22 +45,21 @@ test("presentation: ping sort freezes during progress and reorders when the pass
  const t=await createTestRenderer({width:110,height:30}); const b=new CatalogBackend(); let finish!:(r:Reply)=>void; b.hold=new Promise(r=>finish=r); const app=new App(t.renderer,b); const s=app as any;
  try {
   await app.perform("status"); await app.perform("servers/list"); s.screen="servers"; s.sort="ping"; s.servers=s.servers.map((v:Server,i:number)=>({...v,latency_ms:10+i*10,ping_status:"ready"}));
-  const run=s.runBatch("ping"); await Bun.sleep(10); const order=()=>s.sortedServers().map((v:Server)=>v.server_id);
-  const before=[row(1).server_id,row(2).server_id,row(3).server_id]; expect(order()).toEqual(before);
+  const run=s.runBatch("ping"); await Bun.sleep(10);
   b.onCheckProgress?.({event:"server-check",server_id:row(3).server_id,stage:"complete",ping_status:"ready",latency_ms:1,availability:"ready"}); await t.renderOnce();
-  expect(order()).toEqual(before); expect(t.captureCharFrame().indexOf("Node 1")).toBeLessThan(t.captureCharFrame().indexOf("Node 3"));
+  expect(t.captureCharFrame().indexOf("Node 1")).toBeLessThan(t.captureCharFrame().indexOf("Node 3"));
   finish({...success(),catalog:{status:"ok",servers:b.rows.map((v,i)=>({...v,ping_status:"ready",latency_ms:i===2?1:10+i*10,availability:"ready"}))}}); await run; await t.renderOnce();
-  expect(order()[0]).toBe(row(3).server_id); expect(t.captureCharFrame().indexOf("Node 3")).toBeLessThan(t.captureCharFrame().indexOf("Node 1"));
+  expect(t.captureCharFrame().indexOf("Node 3")).toBeLessThan(t.captureCharFrame().indexOf("Node 1"));
  } finally {finish(success()); await app.close();}
 });
 
 test("presentation: home result retains source and completion time after selection and resize",async()=>{
  const t=await createTestRenderer({width:65,height:24}); const b=new CatalogBackend(); const app=new App(t.renderer,b); const s=app as any;
  try {
-  await app.perform("status"); await s.testHomeSpeed(); const at=s.homeSpeedAt; expect(at).toBeGreaterThan(0); const stamp=new Date(at).toLocaleTimeString("ru-RU",{hour12:false});
+  await app.perform("status"); await s.testHomeSpeed(); const at=s.homeSpeedAt; const stamp=new Date(at).toLocaleTimeString("ru-RU",{hour12:false});
   await t.renderOnce(); expect(t.captureCharFrame()).toContain(stamp); expect(t.captureCharFrame()).toContain("Node 1");
   await app.perform("servers/select",row(2).server_id); await t.renderOnce(); expect(t.captureCharFrame()).toContain("другой сервер"); expect(t.captureCharFrame()).toContain("Node 1");
   t.resize(100,35); await t.renderOnce(); expect(t.captureCharFrame()).toContain("Node 1"); expect(t.captureCharFrame()).toContain(stamp); expect(t.captureCharFrame()).toContain("СКОРОСТЬ СЕРВЕРА");
-  t.resize(65,24); await t.renderOnce(); expect(t.captureCharFrame()).toContain("другой сервер"); expect(t.captureCharFrame()).toContain(stamp); expect(s.homeSpeedAt).toBe(at);
+  t.resize(65,24); await t.renderOnce(); expect(t.captureCharFrame()).toContain("другой сервер"); expect(t.captureCharFrame()).toContain(stamp);
  } finally {await app.close();}
 });

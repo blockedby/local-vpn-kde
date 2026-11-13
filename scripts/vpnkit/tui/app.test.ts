@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import { Renderable, TextRenderable } from "@opentui/core";
-import { App, cell } from "./app";
+import { App } from "./app";
 import { AppState } from "./app-state";
 import {
   Bridge,
@@ -12,7 +12,6 @@ import {
   type Server,
   type CheckProgress,
 } from "./bridge";
-import { connection } from "./model";
 import { initial, rows, reply, FakeBackend, settle } from "./app-test-fixtures";
 
 // Resolve the current action's rendered hit target without relying on its wording or row.
@@ -34,21 +33,25 @@ function actionTarget(app: App, root: Renderable, id: string) {
   return { x: target.screenX, y: target.screenY };
 }
 
-test("connection requires healthy Docker and active KDE", () => {
-  expect(connection({ ...initial, networkmanager_active: "yes" }).title).toBe(
-    "VPN подключён",
-  );
-  expect(connection(initial).title).toBe("VPN отключён");
-  expect(
-    connection({
-      ...initial,
-      gateway_state: "unhealthy",
-      networkmanager_active: "yes",
-    }).title,
-  ).not.toBe("VPN подключён");
-  expect(cell("東京", 6)).toBe("東京  ");
-  expect(Bun.stringWidth(cell("🇫🇮 Helsinki", 8))).toBe(8);
+test("connection requires healthy Docker and active KDE", async () => {
+  const backend = new FakeBackend();
+  const state = new AppState(backend);
+  try {
+    backend.status.networkmanager_active = "yes";
+    await state.perform("status");
+    expect(state.ready()).toBe(true);
+    expect(state.status?.networkmanager_active).toBe("yes");
+    backend.status.networkmanager_active = "no";
+    await state.perform("status");
+    expect(state.status?.networkmanager_active).toBe("no");
+    backend.status.gateway_state = "unhealthy";
+    backend.status.networkmanager_active = "yes";
+    await state.perform("status");
+    expect(state.ready()).toBe(false);
+    expect(state.status?.networkmanager_active).toBe("yes");
+  } finally { await state.close(); }
 });
+
 test("native runtime shows the supported lifecycle preview and native service prompts", async () => {
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", gateway_state: "absent" };
@@ -1569,11 +1572,10 @@ test("failed reapplication replaces drift instruction with the actual busy failu
 });
 
 test("home speed starts during status polling and reports other conflicts", async () => {
-  const t = await createTestRenderer({ width: 100, height: 30 });
   const b = new FakeBackend();
   b.rows = rows.map((row, i) => ({ ...row, selected: i === 0 }));
-  const app = new App(t.renderer, b);
-  const state = app as any;
+  const app = new AppState(b);
+  const state = app;
   try {
     await app.perform("status");
     let finish!: (result: Reply) => void;
@@ -1584,8 +1586,10 @@ test("home speed starts during status polling and reports other conflicts", asyn
     finish(reply()); await poll;
     b.hold = { action: "start", promise: new Promise(resolve => { finish = resolve; }) };
     const mutation = app.perform("start");
+    const callsBefore = b.calls.length;
     await state.testHomeSpeed();
-    expect(state.notice).toContain("Дождитесь завершения");
+    expect(b.calls).toHaveLength(callsBefore);
+    expect(state.homeTesting).toBe(false);
     finish(reply()); await mutation;
   } finally { await app.close(); }
 });
