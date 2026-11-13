@@ -38,7 +38,7 @@ export class SummaryView {
     const gatewayNames: Record<string, string> = { healthy: "готов", absent: "не запущен", inactive: "не запущен", stopped: "остановлен", starting: "запускается", unhealthy: "ошибка", running: "проверяется" };
     this.summary.height = state.screen === "diagnostics" ? 6 : 2;
     if (state.screen === "details") this.summary.content = detailsLines(state).join("\n");
-    if (state.screen === "tasks") this.summary.content = state.tasks.size ? "Текущие задачи" : "Нет выполняющихся задач";
+    if (state.screen === "tasks") this.summary.content = state.tasks.size || state.queue.length ? "Текущие задачи" : "Нет выполняющихся задач";
     if (state.screen === "cancel-confirm") this.summary.content = "Точно отменить эту операцию?";
     if (state.screen === "retry-confirm") this.summary.content = "Точно повторить изменение VPN?";
     if (state.screen === "recovery") {

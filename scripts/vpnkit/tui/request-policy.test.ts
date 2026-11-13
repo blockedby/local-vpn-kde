@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { compatible, compatibilityReasons, requestClasses } from "./request-policy";
+import { compatible, compatibilityReasons, pairReasons, requestClasses } from "./request-policy";
 import type { Action } from "./bridge";
 
 test("all action pairs follow the bridge gate and protect measurement publication", () => {
@@ -9,6 +9,7 @@ test("all action pairs follow the bridge gate and protect measurement publicatio
     const expected = a !== "exclusive" && b !== "exclusive" &&
       !(a === "measurement" && b === "measurement") && !(a === "selection" && b === "selection");
     expect(compatible(action, other)).toBe(expected);
+    expect(pairReasons[a][b]).toBeTruthy();
     expect(compatible(action, other)).toBe(compatible(other, action));
   }
   expect(Object.values(compatibilityReasons).every(Boolean)).toBe(true);

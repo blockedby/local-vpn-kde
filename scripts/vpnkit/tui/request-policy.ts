@@ -29,6 +29,16 @@ export const compatibilityReasons = {
   exclusive: "The bridge write gate excludes all other work.",
 } as const;
 
+export const pairReasons = {
+  read: { read: "Both use the shared gate.", measurement: "Cached reads do not publish measurements.", selection: "Selection and cached reads share the gate.", exclusive: "The bridge write gate excludes reads." },
+  measurement: { read: "Cached reads do not publish measurements.", measurement: "Concurrent passes race catalog publication and distort speed.", selection: "Selection has an independent mutation lock.", exclusive: "The bridge write gate excludes measurements." },
+  selection: { read: "Selection and cached reads share the gate.", measurement: "Selection has an independent mutation lock.", selection: "The bridge mutation lock excludes another selection.", exclusive: "The bridge write gate excludes selection." },
+  exclusive: { read: "The bridge write gate excludes reads.", measurement: "The bridge write gate excludes measurements.", selection: "The bridge write gate excludes selection.", exclusive: "The bridge write gate excludes other exclusive actions." },
+} as const;
+
 export function compatible(action: Action, other: Action): boolean {
   return compatibilityRules[requestClasses[action]][requestClasses[other]];
 }
+
+// Only operations without connection-changing effects may wait for admission.
+export const queueable = new Set<Action>(["status", "subscription/read", "servers/list", "servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch", "servers/refresh", "diagnostics", "profiles/list", "autostart/read"]);

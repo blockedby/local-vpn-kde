@@ -15,6 +15,8 @@ export const names: Partial<Record<Action, string>> = {
   "servers/list": "Загружаем серверы",
   "servers/refresh": "Обновляем каталог",
   "servers/select": "Применяем сервер",
+  "servers/check-batch": "Ping и сайт всех серверов",
+  "servers/speed-batch": "Скорость и сайт всех серверов",
   "servers/ping": "Ping",
   "servers/speed": "Тест скорости",
   "servers/availability": "Доступность сайта",

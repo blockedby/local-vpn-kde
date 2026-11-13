@@ -1,6 +1,6 @@
 import type { Action, Backend, CheckProgress, Reply, Server, Status, AutostartOptions, AutostartServiceState } from "./bridge";
 import { recoveryFor, type Recovery } from "./recovery";
-import { compatible } from "./request-policy";
+import { compatible, requestClasses } from "./request-policy";
 import { wrapText } from "./formatting";
 import { frames } from "./animation-frames";
 import { serverViewport, sortedServers, type ServerSort } from "./catalog-order";
@@ -117,7 +117,7 @@ export class AppState {
     this.resetProfileCatalog();
     this.open("profiles");
   }
-  tasks = new Map<string, { action: Action; measurement: boolean; started: number; phase: string; value?: string }>();
+  tasks = new Map<string, { action: Action; measurement: boolean; started: number; phase: string; value?: string; cancelRequested?: boolean }>();
   nextTask = 0;
   cancelTaskID?: string;
   recovery?: Recovery & { action: Action; value?: string; homeServerID?: string; batchRetry?: { kind: Batch; ids: string[]; target: string } };
@@ -132,7 +132,33 @@ export class AppState {
   get measurementAction(): Action | undefined {
     return [...this.tasks.values()].find(task => task.measurement)?.action;
   }
-  queued?: { action: Action; value?: string };
+  queue: { id: string; action: Action; value?: string; kind?: "batch" | "home"; batchKind?: Batch; signature: string; wasReady: boolean; started: number }[] = [];
+  history: { action: Action; started: number; ended: number; outcome: string; phase: string }[] = [];
+  get queued() { return this.queue[0]; }
+  catalogSignature() { return this.servers.map(server => server.server_id).sort().join("|") + `:${this.profiles?.active ?? ""}:${this.catalogStale}`; }
+  enqueue(action: Action, value?: string, kind?: "batch" | "home", batchKind?: Batch) {
+    if (this.queue.some(entry => entry.action === action && entry.value === value && entry.kind === kind)) { this.notify("Эта операция уже в очереди."); return; }
+    this.queue.push({ id: `queue-${++this.nextTask}`, action, value, kind, batchKind, signature: this.catalogSignature(), wasReady: this.ready(), started: Date.now() });
+    this.notify("Операция поставлена в очередь [j].");
+  }
+  drainQueue() {
+    if (this.closing || this.disposed || this.backendOffline || this.reconnecting) return;
+    while (this.queue.length) {
+      const entry = this.queue[0]!;
+      if (this.batch || this.homeTesting || [...this.tasks.values()].some(task => !compatible(entry.action, task.action))) return;
+      this.queue.shift();
+      if ((entry.wasReady && !this.ready()) || (entry.action.startsWith("servers/") && entry.signature !== this.catalogSignature())) {
+        this.history.unshift({ action: entry.action, started: entry.started, ended: Date.now(), outcome: "Не запущено: условия изменились", phase: "" });
+        this.history.length = Math.min(20, this.history.length);
+        this.notify("Задача снята с очереди: состояние или каталог изменились.", true);
+        continue;
+      }
+      if (entry.kind === "batch") void this.runBatch(entry.batchKind!);
+      else if (entry.kind === "home") void this.testHomeSpeed(entry.value);
+      else void this.perform(entry.action, entry.value);
+      return;
+    }
+  }
   batch?: {
     kind: Batch;
     done: number;
@@ -234,7 +260,7 @@ export class AppState {
       if (this.closing || this.disposed) return;
       this.backendOffline = true;
       this.forgetStatusHealth();
-      this.queued = undefined;
+      this.queue = [];
       this.cancelled = true;
       this.recovery = { ...recoveryFor("status", "backend-unavailable", this.status?.runtime), action: "status" };
       this.notify("Связь потеряна. Действие могло продолжиться. [f] Восстановить связь", true);
@@ -518,7 +544,7 @@ export class AppState {
   async close() {
     if (this.closing || this.disposed) return;
     this.closing = true;
-    this.queued = undefined;
+    this.queue = [];
     this.onClosing();
     this.pendingSubscription = undefined;
     this.draft = "";

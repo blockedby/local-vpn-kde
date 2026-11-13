@@ -1,9 +1,10 @@
 import type { Batch, AppState } from "./app-state";
 import { failure } from "./model";
+import { compatible, queueable } from "./request-policy";
 
 export async function testHomeSpeed(state: AppState, sourceID?: string) {
-    if ([...state.tasks.values()].some(task => task.action !== "status") || state.batch || state.homeTesting) {
-      state.notify("Дождитесь завершения или отмените текущую операцию [k].");
+    if ([...state.tasks.values()].some(task => !compatible("servers/speed", task.action)) || state.batch || state.homeTesting) {
+      state.enqueue("servers/speed", sourceID, "home");
       return;
     }
     if (state.nativePreviewOnly()) { state.notify(state.nativeUnavailable("servers/speed"), true); return; }
@@ -48,13 +49,13 @@ export async function testHomeSpeed(state: AppState, sourceID?: string) {
       state.homeTesting = false;
       state.paint();
       if (state.closing && !state.tasks.size) await state.finishClose();
-      else { await state.loadPendingSubscription(); await state.loadPendingScreenRead(); }
+      else { await state.loadPendingSubscription(); await state.loadPendingScreenRead(); state.drainQueue(); }
     }
   }
 
 export async function runBatch(state: AppState, kind: Batch, retry?: { ids: string[]; target: string }) {
-    if (state.busy || state.batch || state.homeTesting) {
-      state.notify("Дождитесь завершения или отмените текущую операцию [k].");
+    if (state.batch || state.homeTesting || [...state.tasks.values()].some(task => !compatible(kind === "speed" ? "servers/speed-batch" : "servers/check-batch", task.action))) {
+      state.enqueue(kind === "speed" ? "servers/speed-batch" : "servers/check-batch", undefined, "batch", kind);
       return;
     }
     if (state.nativePreviewOnly()) {
@@ -96,7 +97,7 @@ export async function runBatch(state: AppState, kind: Batch, retry?: { ids: stri
           true,
         );
         if (state.closing && !state.tasks.size && !state.homeTesting && !state.batch) await state.finishClose();
-        else await state.loadPendingScreenRead();
+        else { await state.loadPendingScreenRead(); state.drainQueue(); }
         return;
       }
     }
@@ -104,7 +105,7 @@ export async function runBatch(state: AppState, kind: Batch, retry?: { ids: stri
     if (ids.some(id => !state.servers.some(s => s.server_id === id))) {
       state.batch = undefined;
       state.notify("Сервер удалён из подписки. Обновите список перед проверкой.", true);
-      await state.loadPendingScreenRead();
+      await state.loadPendingScreenRead(); state.drainQueue();
       return;
     }
     state.frozenOrder = ids;
@@ -135,20 +136,29 @@ export async function runBatch(state: AppState, kind: Batch, retry?: { ids: stri
       failed > 0 || !!stoppedReason,
     );
     if (state.closing && !state.tasks.size && !state.homeTesting && !state.batch) await state.finishClose();
-    else { await state.loadPendingSubscription(); await state.loadPendingScreenRead(); }
+    else { await state.loadPendingSubscription(); await state.loadPendingScreenRead(); state.drainQueue(); }
   }
 export function cancelTask(state: AppState, id: string) {
+    const queued = state.queue.findIndex(entry => entry.id === id);
+    if (queued >= 0) {
+      const entry = state.queue.splice(queued, 1)[0]!;
+      state.history.unshift({ action: entry.action, started: entry.started, ended: Date.now(), phase: "", outcome: "Отменено в очереди" });
+      state.history.length = Math.min(20, state.history.length);
+      state.notify("Задача отменена в очереди."); state.drainQueue(); return;
+    }
     const task = state.tasks.get(id);
-    if (!task) return;
+    if (!task || task.cancelRequested) return;
+    task.cancelRequested = true;
     if (task.measurement) state.cancelled = true;
     state.backend.cancel?.(id);
     state.notify("Отмена запрошена. Ожидаем завершения и восстановления состояния.");
   }
 export function cancel(state: AppState) {
-    const entries = [...state.tasks.entries()].filter(([, task]) => !["status", "subscription", "subscription/read"].includes(task.action));
-    if (entries.length !== 1) { if (entries.length) state.open("tasks"); return; }
+    const entries = [...state.tasks.entries()].filter(([, task]) => task.action !== "status");
+    if (entries.length + state.queue.length !== 1) { if (entries.length || state.queue.length) state.open("tasks"); return; }
+    if (!entries.length) { state.cancelTask(state.queue[0]!.id); return; }
     const [id, task] = entries[0]!;
-    if (task.measurement || task.action.startsWith("servers/") && task.action !== "servers/select") state.cancelTask(id);
+    if (task.measurement || queueable.has(task.action)) state.cancelTask(id);
     else { state.cancelTaskID = id; state.open("cancel-confirm"); }
   }
 export async function retryCheck(state: AppState, recovery: NonNullable<AppState["recovery"]>) {

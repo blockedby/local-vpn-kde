@@ -1509,7 +1509,7 @@ test("presentation: connection requires healthy Docker and active KDE", () => {
   expect(Bun.stringWidth(cell("🇫🇮 Helsinki", 8))).toBe(8);
 });
 
-test("presentation: home speed starts during status polling and reports other conflicts", async () => {
+test("presentation: home speed starts during status polling and queues behind a mutation", async () => {
   const t = await createTestRenderer({ width: 100, height: 30 });
   const b = new FakeBackend();
   b.rows = rows.map((row, i) => ({ ...row, selected: i === 0 }));
@@ -1526,7 +1526,7 @@ test("presentation: home speed starts during status polling and reports other co
     const mutation = app.perform("start");
     await state.testHomeSpeed();
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Дождитесь завершения");
+    expect(t.captureCharFrame()).toContain("Операция поставлена в очередь");
     finish(reply()); await mutation;
   } finally { await app.close(); }
 });

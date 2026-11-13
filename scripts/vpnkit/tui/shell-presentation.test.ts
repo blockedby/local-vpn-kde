@@ -298,3 +298,27 @@ test("shell: fastest server confirmation names the measurement and defaults to N
     expect(app.selected).toBe(0);
   } finally { await app.close(); }
 });
+
+test("shell: activity shows running, queued and finished work and cancellation pending", async () => {
+  const { terminal: t, app, backend } = await fixture(80,24);
+  let finish!: (result: import("./bridge").Reply) => void;
+  try {
+    backend.hold = { action: "servers/speed-batch", promise: new Promise(resolve => { finish = resolve; }) };
+    const batch = app.runBatch("speed"); await Bun.sleep(10);
+    app.onKey({ name: "p", preventDefault() {} }); await t.renderOnce();
+    expect(t.captureCharFrame().split("\n")[1]).toContain("1 жд [j]");
+    app.onKey({ name: "j", preventDefault() {} }); await t.renderOnce();
+    let frame = t.captureCharFrame();
+    expect(frame).toContain("Скорость и сайт всех серверов");
+    expect(frame).toContain("В очереди: Ping и сайт всех серверов");
+    expect(frame).toContain("Завершено");
+    app.onKey({ name: "1", preventDefault() {} }); await t.renderOnce();
+    frame = t.captureCharFrame(); expect(frame).toContain("Отмена запрошена");
+    app.cancelTask(app.queue[0]!.id);
+    finish({ ...importReply(), ok: false, reason: "cancelled" }); await batch;
+  } finally { finish(importReply()); await Bun.sleep(10); await app.close(); }
+});
+
+function importReply(): import("./bridge").Reply {
+  return { ok: true, reason: "ok", code: 0, status: { vpn_state: "inactive", gateway_state: "healthy", subscription: "configured", routing_mode: "strict", networkmanager_configured: "yes", networkmanager_active: "no", diagnostics: "not-run" } };
+}

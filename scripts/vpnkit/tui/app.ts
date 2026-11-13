@@ -75,7 +75,7 @@ export class App extends AppState {
     this.headerView.update(this, this.demo);
     if (this.screen === "details") this.overlayView.update(this);
   }
-  override paintProgress() { super.paintProgress(); this.tabView.update(this); this.headerView.update(this, this.demo); }
+  override paintProgress() { super.paintProgress(); this.tabView.update(this); this.headerView.update(this, this.demo); if (this.screen === "tasks") this.overlayView.update(this); }
   override paint() {
     if (this.disposed) return;
     super.paint();

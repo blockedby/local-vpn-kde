@@ -1,6 +1,6 @@
 import type { Action, Reply } from "./bridge";
 import type { AppState } from "./app-state";
-import { compatible, requestClasses } from "./request-policy";
+import { compatible, queueable, requestClasses } from "./request-policy";
 import { recoveryFor } from "./recovery";
 import { failure } from "./model";
 
@@ -88,7 +88,8 @@ export async function perform(
     const allowedDuringMeasurement = requestClasses[action] === "read" || action === "servers/select";
     if ((measurementActive && !insideBatch && !allowedDuringMeasurement) ||
         [...state.tasks.values()].some(task => !compatible(action, task.action))) {
-      if (action !== "status") state.notify("Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k].");
+      if (!insideBatch && queueable.has(action)) state.enqueue(action, value);
+      else if (action !== "status") state.notify("Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k].");
       return;
     }
     if (action === "subscription" && (!value || !/^(https?:|vless:|hysteria2:|hy2:)\/\//.test(value))) {
@@ -104,6 +105,7 @@ export async function perform(
       navigation = state.navigationRevision;
     state.paint();
     let reply: Reply | undefined;
+    let cancelRequested = false;
     try {
       reply = await state.backend.request(action, value, requestID);
       if (!action.startsWith("servers/") && !action.startsWith("autostart/") && action !== "subscription/read" && !action.startsWith("profiles/")) {
@@ -213,7 +215,7 @@ export async function perform(
     } catch {
       state.backendOffline = true;
       state.cancelled = true;
-      state.queued = undefined;
+      state.queue = [];
       state.recovery = { ...recoveryFor(action, "backend-unavailable", state.status?.runtime), action, value };
       state.forgetStatusHealth();
       if (action === "autostart/read" || action === "autostart/set") {
@@ -227,16 +229,18 @@ export async function perform(
         true,
       );
     } finally {
+      const completed = state.tasks.get(requestID);
+      cancelRequested = !!completed?.cancelRequested;
       state.tasks.delete(requestID);
-      if (state.poll && requestClasses[action] === "exclusive" && !state.closing && !state.backendOffline && !state.reconnecting && ![...state.tasks.values()].some(task => task.action === "status")) void state.perform("status");
+      if (completed && action !== "status") {
+        state.history.unshift({ action, started: completed.started, ended: Date.now(), phase: state.batch && completed.measurement ? `${state.batch.done}/${state.batch.total}` : completed.phase, outcome: reply?.reason === "cancelled" ? "Отменено" : reply?.ok ? "Завершено" : `Ошибка: ${reply ? failure(reply.reason, reply.code, state.status?.runtime) : "связь потеряна"}` });
+        state.history.length = Math.min(20, state.history.length);
+      }
+      if (state.poll && !cancelRequested && requestClasses[action] === "exclusive" && !state.closing && !state.backendOffline && !state.reconnecting && ![...state.tasks.values()].some(task => task.action === "status")) void state.perform("status");
       if (action === "servers/speed" && value) { state.liveSpeeds.delete(value); if (reply?.ok) state.measurementTimes.set(value, Date.now()); }
       state.paint();
       if (state.closing && !state.batch && !state.homeTesting && !state.tasks.size) await state.finishClose();
-      else if (state.queued) {
-        const queued = state.queued;
-        state.queued = undefined;
-        await state.perform(queued.action, queued.value);
-      } else if (
+      else if (
         action === "backend/start" &&
         reply?.ok &&
         state.screen === "servers" &&
@@ -250,11 +254,19 @@ export async function perform(
         );
       }
     }
+    if (cancelRequested && !state.closing && !state.backendOffline && !queueable.has(action)) {
+      await state.perform("status");
+      if (action.startsWith("profiles/")) await state.perform("profiles/list");
+      if (action === "subscription") await state.perform("subscription/read");
+      if ((action === "servers/select" || action === "subscription" || action.startsWith("profiles/")) && state.ready()) await state.perform("servers/list");
+      if (action === "autostart/set") await state.perform("autostart/read");
+    }
     if(action==="servers/refresh" && reply?.ok && state.profiles){
       await state.perform("profiles/list");
       if(state.profiles.items.find(p=>p.id===state.profiles?.active)?.stale) state.notify("Источник недоступен. Показаны ранее сохранённые серверы.");
     }
     await state.loadPendingSubscription();
     await state.loadPendingScreenRead();
+    state.drainQueue();
     return reply;
   }

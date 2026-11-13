@@ -2,7 +2,7 @@ import type { Action } from "./bridge";
 import type { AppState } from "./app-state";
 import { names } from "./action-labels";
 import { frames } from "./animation-frames";
-import { compatible } from "./request-policy";
+import { compatible, queueable } from "./request-policy";
 
 export interface MenuItem { key: string; label: string; run: () => void }
 export type ActionScope = AppState["screen"] | "global" | "server-table" | "menu" | "editor" | "confirmation";
@@ -26,13 +26,17 @@ export function menuItems(state: AppState): MenuItem[] {
           else { const id = state.cancelTaskID; state.open("tasks"); if (id) state.cancelTask(id); }
         } }];
     }
-    if (state.screen === "tasks") return [...state.tasks].filter(([, task]) => task.action !== "status").map(([id, task], i) => ({
-      key: String(i + 1), label: `Отменить: ${names[task.action] ?? (task.action === "servers/check-batch" ? "Ping → сайт" : "Операция")}`,
-      run: () => {
-        if (task.measurement || task.action.startsWith("servers/") && task.action !== "servers/select") state.cancelTask(id);
-        else { state.cancelTaskID = id; state.open("cancel-confirm"); }
-      },
-    }));
+    if (state.screen === "tasks") {
+      const running = [...state.tasks].filter(([, task]) => task.action !== "status");
+      const entries = [
+        ...running.map(([id, task]) => ({ id, action: task.action, label: `${task.cancelRequested ? "Отмена запрошена" : "Отменить"}: ${state.actionLabel(task.action)} · ${task.phase || (state.batch && task.measurement ? `${state.batch.done}/${state.batch.total}` : "выполняется")} · ${Math.floor((Date.now() - task.started) / 1000)} с`, direct: task.measurement || queueable.has(task.action) })),
+        ...state.queue.map(entry => ({ id: entry.id, action: entry.action, label: `В очереди: ${state.actionLabel(entry.action)} · ${Math.floor((Date.now() - entry.started) / 1000)} с`, direct: true })),
+      ];
+      return [
+        ...entries.map((entry, i) => ({ key: String(i + 1), label: entry.label, run: () => { if (entry.direct) state.cancelTask(entry.id); else { state.cancelTaskID = entry.id; state.open("cancel-confirm"); } } })),
+        ...state.history.map((entry, i) => ({ key: String(entries.length + i + 1), label: `${state.actionLabel(entry.action)} · ${entry.phase ? entry.phase + " · " : ""}${entry.outcome} · ${Math.floor((entry.ended - entry.started) / 1000)} с`, run: () => {} })),
+      ];
+    }
     if (state.screen === "recovery") {
       if (state.backendOffline) return [{ key: "u", label: state.reconnecting ? "Восстанавливаем связь…" : "Восстановить связь", run: () => void state.reconnectBackend() }];
       return (state.recovery?.actions ?? ["status", "diagnostics"]).map(choice => ({
@@ -221,8 +225,8 @@ export function defineMenuActions(state: AppState, items: MenuItem[]): ActionDef
     const screen = state.screen;
     let id = `${screen}:${item.key}`;
     if (screen === "tasks") {
-      const tasks = [...state.tasks].filter(([, task]) => task.action !== "status");
-      id = `task:cancel:${tasks[Number(item.key) - 1]?.[0] ?? item.key}`;
+      const tasks = [...state.tasks].filter(([, task]) => task.action !== "status").map(([id]) => id).concat(state.queue.map(entry => entry.id));
+      id = `task:cancel:${tasks[Number(item.key) - 1] ?? item.key}`;
     } else if (screen === "profiles" && /^[1-9]$/.test(item.key)) {
       id = `profile:open:${state.profiles?.items[state.profilePage * state.profilePageSize() + Number(item.key) - 1]?.id ?? item.key}`;
     } else if (screen === "home" && item.key === "s") {
@@ -230,15 +234,17 @@ export function defineMenuActions(state: AppState, items: MenuItem[]): ActionDef
     }
     let reason: string | undefined;
     let unavailableBehavior: "notice" | "none" = "notice";
+    if (screen === "tasks" && Number(item.key) > [...state.tasks.values()].filter(task => task.action !== "status").length + state.queue.length) {
+      reason = "Операция завершена.";
+      unavailableBehavior = "none";
+    }
     const speed = screen === "home" && item.key === "t";
     const batch = screen === "servers" && (item.key === "p" || item.key === "t");
     if (screen === "recovery" && item.key === "u" && state.backendOffline && (state.reconnecting || state.tasks.size > 0 || !!state.batch || state.homeTesting || state.closing)) {
       reason = "Восстановление связи уже выполняется или другая операция ещё не завершена.";
       unavailableBehavior = "none";
     } else if (speed || batch) {
-      if (batch ? !!state.busy || !!state.batch || state.homeTesting : [...state.tasks.values()].some(task => task.action !== "status") || !!state.batch || state.homeTesting)
-        reason = "Дождитесь завершения или отмените текущую операцию [k].";
-      else if (state.nativePreviewOnly()) reason = state.nativeUnavailable(speed ? "servers/speed" : "servers/check-batch");
+      if (state.nativePreviewOnly()) reason = state.nativeUnavailable(speed ? "servers/speed" : "servers/check-batch");
       else if (!state.ready()) reason = `Сначала запустите ${state.serviceObject()}.`;
       else if (batch && state.catalogLoaded && !state.servers.length) reason = "Список серверов пуст.";
     } else if (screen === "servers" && item.key === "i") {
@@ -258,8 +264,8 @@ export function defineMenuActions(state: AppState, items: MenuItem[]): ActionDef
           reason = "Служба управления недоступна. [f] Восстановить связь";
         else if (state.nativePreviewOnly() && !["status", "backend/start", "network/reapply", "start", "disconnect", "stop", "autostart/read", "autostart/set"].includes(request))
           reason = state.nativeUnavailable(request);
-        else if (((!!state.batch || state.homeTesting) && !["servers/select", "status", "subscription/read"].includes(request)) ||
-          [...state.tasks.values()].some(task => !compatible(request, task.action))) {
+        else if (!queueable.has(request) && (((!!state.batch || state.homeTesting) && !["servers/select", "status", "subscription/read"].includes(request)) ||
+          [...state.tasks.values()].some(task => !compatible(request, task.action)))) {
           reason = "Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k].";
         }
       }

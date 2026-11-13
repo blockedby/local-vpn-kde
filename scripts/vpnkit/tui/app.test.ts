@@ -1045,7 +1045,7 @@ test("measurement cancellation is scoped and never cancels concurrent server sel
   } finally { finishCheck(reply()); finishSelect(reply()); await settle(); await app.close(); }
 });
 
-test("conflicting refresh and second measurement stay blocked while selection is allowed", async () => {
+test("conflicting refresh and second measurement queue while selection is allowed", async () => {
   const t = await createTestRenderer({ width: 90, height: 35 });
   const b = new FakeBackend();
   let finish!: (r: Reply) => void;
@@ -1060,6 +1060,7 @@ test("conflicting refresh and second measurement stay blocked while selection is
     await app.perform("stop");
     t.mockInput.pressKey("t"); await settle();
     expect(b.calls.some(c => ["servers/refresh", "subscription", "stop", "servers/speed"].includes(c.action))).toBe(false);
+    expect(app.queue.map(entry => entry.action)).toEqual(["servers/refresh", "servers/speed-batch"]);
     await app.perform("servers/select", rows[0]!.server_id);
     expect(b.calls.some(c => c.action === "servers/select")).toBe(true);
   } finally { finish(reply()); await settle(); await app.close(); }

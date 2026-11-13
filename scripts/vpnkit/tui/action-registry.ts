@@ -77,7 +77,7 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
       if (state.recovery?.actions.includes("reapply")) void state.perform("network/reapply"); else state.open("recovery");
     }, reason, "notice");
   }
-  const cancellable = [...state.tasks.values()].some(task => !["status", "subscription", "subscription/read"].includes(task.action));
+  const cancellable = state.queue.length > 0 || [...state.tasks.values()].some(task => task.action !== "status");
   add("global:cancel", ["k"], "Отменить", "global", () => state.cancel(), cancellable ? undefined : "Нет операции для отмены.");
   const screens: [string, string, string, () => Screen][] = [
     ["servers", "v", "Серверы", () => "servers"],
@@ -104,12 +104,11 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
     add("servers:details", ["l"], "Подробности сервера", "server-table", () => state.open("details"), state.serverID ? undefined : "Нет выбранного сервера.");
     const ping = items.find(item => item.key === "p");
     add(ping?.id ?? "servers:ping-alias", ["p"], "Ping всех + сайт", "server-table", () => void state.runBatch("ping"),
-      state.busy || state.batch || state.homeTesting ? "Дождитесь завершения или отмените текущую операцию [k]."
-        : state.nativePreviewOnly() ? state.nativeUnavailable("servers/check-batch") : !state.ready() ? `Сначала запустите ${state.serviceObject()}.`
+      state.nativePreviewOnly() ? state.nativeUnavailable("servers/check-batch") : !state.ready() ? `Сначала запустите ${state.serviceObject()}.`
         : state.status?.subscription !== "configured" ? "Сначала добавьте подписку."
         : state.catalogLoaded && !state.servers.length ? "Список серверов пуст." : undefined, "notice");
     if (ping) actions[actions.length - 1]!.preventDefaultKeys = ["p"];
-    add("servers:single-speed", ["shift+t"], "Скорость сервера", "server-table", () => { if (!state.serverID) state.notify("Нет выбранного сервера.", true); else void state.testHomeSpeed(state.serverID); }, !state.serverID ? "Нет выбранного сервера." : [...state.tasks.values()].some(task => task.action !== "status") || state.batch || state.homeTesting ? "Дождитесь завершения текущей операции." : state.nativePreviewOnly() ? state.nativeUnavailable("servers/speed") : !state.ready() ? `Сначала запустите ${state.serviceObject()}.` : state.catalogStale ? "Подписка изменена. Обновите список серверов." : undefined, "notice");
+    add("servers:single-speed", ["shift+t"], "Скорость сервера", "server-table", () => { if (!state.serverID) state.notify("Нет выбранного сервера.", true); else void state.testHomeSpeed(state.serverID); }, !state.serverID ? "Нет выбранного сервера." : state.nativePreviewOnly() ? state.nativeUnavailable("servers/speed") : !state.ready() ? `Сначала запустите ${state.serviceObject()}.` : state.catalogStale ? "Подписка изменена. Обновите список серверов." : undefined, "notice");
     add("servers:sort", ["o"], "Сортировка", "server-table", () => {
       const sorts = ["name", "ping", "speed", "availability"] as const;
       state.frozenOrder = undefined; state.sort = sorts[(sorts.indexOf(state.sort) + 1) % sorts.length]; state.viewStart = 0;
@@ -138,7 +137,7 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
   if (state.screen !== "servers") add("menu:next", ["down"], "Выбор", menuScope, () => menuMove(1), items.length <= 1 ? "Нет другого пункта." : undefined);
   const current = items[state.selected];
   if (state.screen !== "servers" || !state.ready() || state.nativePreviewOnly()) add("menu:select", ["return"], "Выбрать", menuScope, () => { current?.run(); state.paint(); }, current ? current.unavailableReason : "Нет выбранного пункта.", current?.unavailableBehavior ?? "none");
-  if (!items.some(item => item.key === "u")) add("global:refresh", ["u"], state.screen === "diagnostics" ? "Обновить диагностику" : "Обновить состояние", "global", () => { void state.perform(state.screen === "diagnostics" ? "diagnostics" : "status"); state.paint(); }, state.backendOffline ? "Служба управления недоступна." : [...state.tasks.values()].some(task => !compatible(state.screen === "diagnostics" ? "diagnostics" : "status", task.action)) ? "Эта операция конфликтует с текущей." : undefined, state.backendOffline ? "notice" : "none");
+  if (!items.some(item => item.key === "u")) add("global:refresh", ["u"], state.screen === "diagnostics" ? "Обновить диагностику" : "Обновить состояние", "global", () => { void state.perform(state.screen === "diagnostics" ? "diagnostics" : "status"); state.paint(); }, state.backendOffline ? "Служба управления недоступна." : undefined, state.backendOffline ? "notice" : "none");
   for (const item of items) actions.push({ ...item, preventDefault: true, run: () => { item.run(); state.paint(); } });
   // A shortcut has one effective owner. Earlier definitions have the same
   // precedence as dispatch, including global navigation over menu shortcuts.
