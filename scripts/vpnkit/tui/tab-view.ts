@@ -24,7 +24,7 @@ export class TabView {
     const message = state.batch ? `Проверка ${state.batch.done}/${state.batch.total}` : task ? state.actionLabel(task.action) : "";
     const width = Math.max(0, this.renderer.terminalWidth - 2 - 44);
     const suffix = state.queue.length && width < 20 ? `очередь ${state.queue.length} [j]` : `${state.queue.length ? ` · в очереди ${state.queue.length}` : ""} [j]`;
-    const prefix = message ? `${frames[state.frame % 10]} ${message}` : "";
+    const prefix = message && !(state.queue.length && width < 20) ? `${frames[state.frame % 10]} ${message}` : "";
     const text = message || state.queue.length ? `${cell(prefix, Math.max(0, width - Bun.stringWidth(suffix))).trimEnd()}${suffix}` : "";
     this.activity.content = width > 0 && text ? cell(text, width).trimEnd().padStart(width) : "";
   }

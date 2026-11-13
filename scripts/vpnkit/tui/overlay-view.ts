@@ -66,7 +66,8 @@ export class OverlayView {
       if (!entry) return;
       const action = entry.action;
       const server = ["servers:select", "servers:single-speed", "servers:details"].includes(action.id) ? state.servers.find(s => s.server_id === state.serverID)?.display_name : undefined;
-      row.content = cell(`${offset + i === state.paletteIndex ? "›" : " "} ${action.label}${server ? ` · ${server}` : ""}  [${action.key}]${action.available ? "" : ` · ${action.unavailableReason ?? "недоступно"}`}`, width - 2).trimEnd();
+      const key: Record<string, string> = { "shift+t": "T", "ctrl+c": "Ctrl+C", "ctrl+p": "Ctrl+P", "shift+tab": "Shift+Tab", tab: "Tab", return: "Enter", escape: "Esc", up: "↑", down: "↓", pageup: "PgUp", pagedown: "PgDn", home: "Home", end: "End" };
+      row.content = cell(`${offset + i === state.paletteIndex ? "›" : " "} ${action.label}${server ? ` · ${server}` : ""}  [${key[action.key] ?? action.key}]${action.available ? "" : ` · ${action.unavailableReason ?? "недоступно"}`}`, width - 2).trimEnd();
       row.fg = action.available ? (offset + i === state.paletteIndex ? p.accent : p.text) : p.muted;
     });
   }
