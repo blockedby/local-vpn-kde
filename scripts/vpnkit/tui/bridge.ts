@@ -350,8 +350,10 @@ export class DemoBackend implements Backend {
         const rows = this.servers.filter((s) => ids.includes(s.server_id));
         for (const [index, row] of rows.entries()) {
           this.onCheckProgress?.({ event: "server-check", server_id: row.server_id, stage: "start", ping_status: "untested", latency_ms: 0, availability: "untested" }, id);
-          await Bun.sleep(action === "servers/speed-batch" ? 3200 : 1200);
-          if (task.cancelled) return { ok: false, reason: "cancelled", code: null, status: { ...this.status } };
+          for (let elapsed = 0; elapsed < (action === "servers/speed-batch" ? 3200 : 1200); elapsed += 100) {
+            await Bun.sleep(100);
+            if (task.cancelled) return { ok: false, reason: "cancelled", code: null, status: { ...this.status } };
+          }
           row.ping_status = "ready";
           row.latency_ms = 20 + index * 7;
           row.availability = "ready";

@@ -105,3 +105,19 @@ test("failed speed replies containing cached values do not count as a session me
     expect(state.measurementTimes.has(rows[1]!.server_id)).toBe(false);
   } finally { await state.close(); }
 });
+
+test("queued measurement is dropped if service stops, but status can still be read", async () => {
+  const backend = new FakeBackend(); const state = new AppState(backend);
+  let finish!: (result: Reply) => void;
+  try {
+    await state.perform("status"); await state.perform("servers/list");
+    backend.hold = { action: "stop", promise: new Promise(resolve => { finish = resolve; }) };
+    const stop = state.perform("stop");
+    await state.perform("servers/ping", rows[0]!.server_id); await state.perform("status");
+    backend.status.gateway_state = "stopped";
+    finish(reply(backend.status)); await stop; await settle();
+    expect(backend.calls.some(call => call.action === "servers/ping")).toBe(false);
+    expect(backend.calls.filter(call => call.action === "status")).toHaveLength(2);
+    expect(state.history.some(item => item.outcome.includes("условия изменились"))).toBe(true);
+  } finally { finish(reply()); await state.close(); }
+});
