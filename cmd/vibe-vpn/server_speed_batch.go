@@ -321,7 +321,7 @@ func withSpeedProxy(ctx context.Context, c config.Config, n vless.Node, check fu
 		return err
 	}
 	defer func() { cancel(); _ = command.Process.Kill(); _ = command.Wait() }()
-	if err := waitTCPContext(backendCtx, c.TestSocks, 3*time.Second); err != nil {
+	if err := waitTCPContext(backendCtx, c.TestSocks, benchmarkBackendStartTimeout); err != nil {
 		return err
 	}
 	return check()
