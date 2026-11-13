@@ -171,6 +171,8 @@ export async function perform(
         reply.ok &&
         action !== "status" &&
         action !== "subscription/read" &&
+        action !== "profiles/list" &&
+        action !== "autostart/read" &&
         !insideBatch
       ) {
         if (state.recovery?.actions.includes("reapply") && ["network/reapply", "backend/start", "start", "disconnect", "stop"].includes(action)) state.recovery = undefined;

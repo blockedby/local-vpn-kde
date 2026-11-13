@@ -96,7 +96,7 @@ export class SummaryView {
     if(state.screen==="profiles") { this.summary.height = 1; this.summary.content="Выбор профиля не меняет активное VPN-подключение."; }
     if(state.screen==="profile-name") this.summary.content="Новый профиль · имя\nНапример: Моя VPS или Основная подписка";
     if(state.screen==="profile-source") this.summary.content=`${state.profileName} · ссылка\nHTTPS-подписка, vless://, hysteria2:// или hy2://`;
-    if(state.screen==="profile-remove") this.summary.content="Удалить активный профиль?\nЭто не останавливает уже работающий сервер.";
+    if(state.screen==="profile-remove") this.summary.content=state.profileRemoval ? `Удалить активный профиль «${safeText(state.profileRemoval.name)}»?\nЭто не останавливает уже работающий сервер.` : "Удалить активный профиль?\nЭто не останавливает уже работающий сервер.";
     if (state.screen === "target")
       this.summary.content =
         "Адрес для проверки доступности\nHTTPS-запрос через каждый сервер; это не тест скорости.";

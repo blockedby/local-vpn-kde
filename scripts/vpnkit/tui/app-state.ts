@@ -74,6 +74,7 @@ export class AppState {
   measurementTimes = new Map<string, number>();
   profiles?: Reply["profiles"];
   profileName = "";
+  profileRemoval?: { id: string; name: string; kind: "subscription" | "server" };
   profilePage = 0;
 
   forgetStatusHealth() {
@@ -112,7 +113,15 @@ export class AppState {
   }
 
   async removeProfile() {
-    const reply = await this.perform("profiles/remove", this.profiles?.active);
+    const target = this.profileRemoval;
+    this.profileRemoval = undefined;
+    const current = this.profiles?.items.find(item => item.id === target?.id);
+    if (!target || this.profiles?.active !== target.id || !current || current.name !== target.name || current.kind !== target.kind) {
+      this.open("profiles", false);
+      this.notify("Профиль изменился. Выберите его заново.", true);
+      return;
+    }
+    const reply = await this.perform("profiles/remove", target.id);
     if (!reply?.ok) return;
     this.resetProfileCatalog();
     this.open("profiles");
@@ -496,6 +505,10 @@ export class AppState {
     this.pendingScreenRead = undefined;
     this.selected = screen === "profile-remove" ? 1 : 0;
     if (screen === "details") this.detailsOffset = 0;
+    if (screen === "profile-remove") {
+      const profile = this.profiles?.items.find(item => item.id === this.profiles?.active);
+      this.profileRemoval = profile && { id: profile.id, name: profile.name, kind: profile.kind };
+    }
     this.serverMenu = false;
     this.navigationRevision++;
     if (screen === "subscription") {

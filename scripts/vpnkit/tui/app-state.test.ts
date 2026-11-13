@@ -184,3 +184,23 @@ test("repeated status reads coalesce into one follow-up", async () => {
     expect(backend.calls).toHaveLength(2);
   } finally { await state.close(); }
 });
+
+test("profile removal rejects a changed active profile while confirmation is open", async () => {
+  const backend = new FakeBackend();
+  let finish!: (reply: Reply) => void;
+  backend.hold = { action: "profiles/list", promise: new Promise(resolve => { finish = resolve; }) };
+  const items = [
+    { id: "a", name: "Alpha", kind: "server" as const, count: 1, stale: false },
+    { id: "b", name: "Beta", kind: "server" as const, count: 1, stale: false },
+  ];
+  const state = new AppState(backend);
+  try {
+    state.profiles = { active: "a", items };
+    state.open("profiles");
+    state.items().find(item => item.key === "X")!.run();
+    finish({ ...reply(), profiles: { active: "b", items } }); await settle();
+    state.items().find(item => item.key === "y")!.run(); await settle();
+    expect(backend.calls.some(call => call.action === "profiles/remove")).toBe(false);
+    expect(state.notice).toContain("изменил");
+  } finally { await state.close(); }
+});
