@@ -28,6 +28,25 @@ import termios
 import time
 import pyte
 
+# Compiled-layout contract: keep visible labels and shortcuts together so a UI
+# redesign has one review point; measurement and cleanup assertions stay below.
+SCREEN = {
+    'title': 'VPNKIT', 'native': 'NATIVE', 'docker': 'Docker',
+    'servers': 'Серверы', 'ping_column': 'Ping мс',
+    'fixture_profile': 'Lab compiled speed acceptance', 'fixture_node': 'Lab compiled real node',
+    'https': 'HTTPS', 'site_editor': 'Адрес сайта', 'site_saved': 'Адрес сайта сохранён.',
+    'speed_stage': 'замер', 'speed_action': 'Скорость + сайт',
+    'batch_complete': r'Завершено:\s*(\d+)/(\d+)\s*·\s*ошибок\s*(\d+)',
+    'batch_stopped': 'Остановлено:', 'diagnostics_updated': 'Состояние компонентов обновлено.',
+    'backend_unavailable': 'Служба управления недоступна',
+    'connection_lost': 'Связь потеряна. Действие могло продолжиться.',
+    'restore_connection': 'Восстановить связь', 'status_unavailable': 'Статус недоступен',
+}
+KEY = {
+    'site': 'e', 'diagnostics': 'd', 'refresh': 'u', 'servers': 'v', 'servers_alias': 'h',
+    'profiles': 'c', 'speed_batch': 't', 'cancel': 'k', 'quit': 'q', 'escape': '\x1b',
+}
+
 assert os.environ.get('VPNKIT_NATIVE_VM_LAB') == '1'
 assert pathlib.Path('/etc/hostname').read_text().strip() == 'vpn-native-lab'
 assert not shutil.which('docker') and not pathlib.Path('/var/run/docker.sock').exists(), 'Docker-free guest required'
@@ -127,7 +146,7 @@ def pump(seconds=.1):
         raw.extend(data)
         if b'\x1b[6n' in data:os.write(master,b'\x1b[1;1R')
         stream.feed(decoder.decode(data))
-        seen_speed |= any('замер' in line and 'Скорость + сайт' not in line for line in screen.display)
+        seen_speed |= any(SCREEN['speed_stage'] in line and SCREEN['speed_action'] not in line for line in screen.display)
 
 
 def wait(predicate, label, timeout=150, allow_unavailable=False):
@@ -136,7 +155,7 @@ def wait(predicate, label, timeout=150, allow_unavailable=False):
         pump()
         text=frame()
         if not allow_unavailable:
-            assert 'Служба управления недоступна' not in text, 'compiled TUI lost backend: '+label
+            assert SCREEN['backend_unavailable'] not in text, 'compiled TUI lost backend: '+label
         assert process.poll() is None, 'compiled TUI exited: '+label
         if predicate(text):return text
         assert time.monotonic()<deadline, 'compiled TUI timeout: '+label
@@ -148,19 +167,19 @@ def key(value):
 
 
 def site(url):
-    key('e')
-    wait(lambda text:'HTTPS' in text or 'Адрес сайта' in text,'site editor')
+    key(KEY['site'])
+    wait(lambda text:SCREEN['https'] in text or SCREEN['site_editor'] in text,'site editor')
     # End + backspaces is independent of editor Ctrl+A/selection bindings.
     key('\x1b[F'+'\x7f'*200+url+'\r')
-    wait(lambda text:'Адрес сайта сохранён.' in text and 'Серверы' in text,'saved site')
-    key('e')
-    wait(lambda text:'HTTPS' in text and url in text,'reopened exact site')
-    key('\x1b')
-    wait(lambda text:'Серверы' in text and 'Ping мс' in text,'returned to server table')
+    wait(lambda text:SCREEN['site_saved'] in text and SCREEN['servers'] in text,'saved site')
+    key(KEY['site'])
+    wait(lambda text:SCREEN['https'] in text and url in text,'reopened exact site')
+    key(KEY['escape'])
+    wait(lambda text:SCREEN['servers'] in text and SCREEN['ping_column'] in text,'returned to server table')
 
 
 def completed(errors=None):
-    pattern=r'Завершено:\s*(\d+)/(\d+)\s*·\s*ошибок\s*(\d+)'
+    pattern=SCREEN['batch_complete']
     text=wait(lambda text:re.search(pattern,text),'batch complete')
     result=re.search(pattern,text)
     assert int(result[1])==expected_count and int(result[2])==expected_count, 'compiled batch incomplete'
@@ -174,16 +193,16 @@ def record(result):
 
 
 def second_action():
-    key('d');key('u')
-    wait(lambda text:'Состояние компонентов обновлено.' in text,'second diagnostic action')
-    assert 'Docker' not in frame(), 'native diagnostics displays Docker wording'
-    key('v')
-    wait(lambda text:'Ping мс' in text and expected_display_name in text,'return to server table')
+    key(KEY['diagnostics']);key(KEY['refresh'])
+    wait(lambda text:SCREEN['diagnostics_updated'] in text,'second diagnostic action')
+    assert SCREEN['docker'] not in frame(), 'native diagnostics displays Docker wording'
+    key(KEY['servers'])
+    wait(lambda text:SCREEN['ping_column'] in text and expected_display_name in text,'return to server table')
 
 
 try:
     setup()
-    wait(lambda text:'VPNKIT' in text and 'NATIVE' in text,'native UI startup',30)
+    wait(lambda text:SCREEN['title'] in text and SCREEN['native'] in text,'native UI startup',30)
     if '--trace-requests' in sys.argv:
         trace_path=private/'ui-private-writes.trace';trace_path.write_text('')
         threads=[part for tid in pathlib.Path('/proc/'+str(process.pid)+'/task').iterdir() for part in ('-p',tid.name)]
@@ -193,13 +212,13 @@ try:
         kernel=subprocess.check_output(['sudo','-n','journalctl','-k','-b','--no-pager','-o','cat'],text=True)
         print(json.dumps({'ui_alive_mem_available_kib':memory['MemAvailable'],'swap_free_kib':memory['SwapFree'],'ui_rss_kib':int(rss),'kernel_oom_kill_lines':sum('Killed process' in line or 'Out of memory:' in line for line in kernel.splitlines())}),flush=True)
         pump(.5)
-    assert 'Docker' not in frame(), 'native UI displays Docker wording'
-    key('c')
-    wait(lambda text:'Lab compiled speed acceptance' in text,'loaded profile list',30)
+    assert SCREEN['docker'] not in frame(), 'native UI displays Docker wording'
+    key(KEY['profiles'])
+    wait(lambda text:SCREEN['fixture_profile'] in text,'loaded profile list',30)
     key(str(active_index+1))
-    table = wait(lambda text:'Ping мс' in text and 'Lab compiled real node' in text,'loaded fixture server table',30)
+    table = wait(lambda text:SCREEN['ping_column'] in text and SCREEN['fixture_node'] in text,'loaded fixture server table',30)
     lines = table.splitlines()
-    header = next(i for i, line in enumerate(lines) if 'Ping мс' in line)
+    header = next(i for i, line in enumerate(lines) if SCREEN['ping_column'] in line)
     data_rows = []
     for line in lines[header + 1:]:
         if not line.strip(): break
@@ -211,22 +230,22 @@ try:
         expected=json.loads((private/'expected-batch.json').read_text())
         parity=cli('servers/speed-batch',json.dumps({'ids':[expected['server_id']],'url':expected['url']}))['catalog']['servers'][0]
         print(json.dumps({'raw_while_compiled_ui_alive':{key:parity.get(key) for key in ('status','ping_status','availability','downloaded_bytes')}}),flush=True)
-    key('t')
+    key(KEY['speed_batch'])
     if '--expect-broken' in sys.argv:
-        wait(lambda text:'Служба управления недоступна' in text,'old speed validator failure',40,True)
-        key('d');key('u')
-        wait(lambda text:'Служба управления недоступна' in text,'old bridge remains unusable',30,True)
+        wait(lambda text:SCREEN['backend_unavailable'] in text,'old speed validator failure',40,True)
+        key(KEY['diagnostics']);key(KEY['refresh'])
+        wait(lambda text:SCREEN['backend_unavailable'] in text,'old bridge remains unusable',30,True)
         record({'baseline_compiled_speed_stage_backend_loss':'reproduced','docker_installed':False})
     else:
         completed(errors=0)
         assert seen_speed, 'compiled UI never rendered the real speed stage'
-        assert 'Docker' not in frame(), 'native batch displays Docker wording'
+        assert SCREEN['docker'] not in frame(), 'native batch displays Docker wording'
         second_action()
         record({'compiled_speed_site_complete':'passed','real_speed_stage_rendered':True,'second_action':'passed','docker_installed':False})
         # Failed website evidence must not destroy the bridge/throughput pass.
         site('https://127.0.0.1:9/unavailable')
         seen_speed=False
-        key('t');completed(errors=expected_count)
+        key(KEY['speed_batch']);completed(errors=expected_count)
         assert seen_speed, 'failed site suppressed the real throughput stage'
         failed_rows=[row for row in cli('servers/list')['catalog']['servers'] if row.get('profile_id')==created]
         assert len(failed_rows)==expected_count
@@ -236,10 +255,10 @@ try:
         # Cancel only once a real throughput stage is visible, then reuse bridge.
         site('https://www.gstatic.com/generate_204')
         seen_speed=False
-        key('t')
+        key(KEY['speed_batch'])
         wait(lambda text:seen_speed,'active speed cancellation')
-        key('k')
-        wait(lambda text:'Остановлено:' in text,'cancelled speed batch')
+        key(KEY['cancel'])
+        wait(lambda text:SCREEN['batch_stopped'] in text,'cancelled speed batch')
         second_action()
         record({'active_speed_cancel_without_backend_loss':'passed','second_action':'passed'})
     if '--expect-broken' not in sys.argv:
@@ -256,16 +275,16 @@ try:
                 bridges.append(pid)
         assert len(bridges)==1, 'cannot identify UI-owned bridge for controlled failure'
         os.kill(bridges[0],signal.SIGTERM)
-        key('h');key('u')
-        wait(lambda text:'Связь потеряна. Действие могло продолжиться.' in text and 'Восстановить связь' in text,
+        key(KEY['servers_alias']);key(KEY['refresh'])
+        wait(lambda text:SCREEN['connection_lost'] in text and SCREEN['restore_connection'] in text,
              'controlled status transport failure',30,True)
-        assert 'NATIVE' in frame() and 'Docker' not in frame(), 'transport failure changed native identity to Docker'
-        assert 'Статус недоступен' in frame(), 'failed transport retained stale healthy status'
-        key('v');pump(.3)
-        assert 'NATIVE' in frame() and 'Docker' not in frame(), 'unavailable native server controls display Docker'
-        assert 'Статус недоступен' in frame(), 'server screen retained stale healthy status'
+        assert SCREEN['native'] in frame() and SCREEN['docker'] not in frame(), 'transport failure changed native identity to Docker'
+        assert SCREEN['status_unavailable'] in frame(), 'failed transport retained stale healthy status'
+        key(KEY['servers']);pump(.3)
+        assert SCREEN['native'] in frame() and SCREEN['docker'] not in frame(), 'unavailable native server controls display Docker'
+        assert SCREEN['status_unavailable'] in frame(), 'server screen retained stale healthy status'
         record({'controlled_transport_failure_native_identity':'preserved','false_docker_wording':False})
-    key('q')
+    key(KEY['quit'])
     process.wait(timeout=45)
     assert process.returncode==0, 'compiled UI did not exit cleanly'
     restore_profiles()

@@ -11,6 +11,9 @@ import signal
 import subprocess
 import time
 
+# Compiled-layout contract for the startup screen.
+SCREEN_TITLE = b'VPNKIT'
+
 assert not os.path.exists('/usr/share/local-vpn-kde/scripts/vpnkit/tui/node_modules')
 assert not os.path.exists('/usr/share/local-vpn-kde/scripts/vpnkit/tui/index.ts')
 # Compile regression must run without the system Bun or sing-box executable.
@@ -58,11 +61,11 @@ for arguments in (['--demo'], []):
                 # OpenTUI's renderer waits for terminal capability responses.
                 if b'\x1b[6n' in data:
                     os.write(master, b'\x1b[1;1R')
-            if b'VPNKIT' in output:
+            if SCREEN_TITLE in output:
                 break
             if child.poll() is not None:
                 break
-        assert b'VPNKIT' in output, output.decode(errors='replace')[-3000:]
+        assert SCREEN_TITLE in output, output.decode(errors='replace')[-3000:]
         assert child.poll() is None, output.decode(errors='replace')[-3000:]
         if not arguments:
             commands = descendants(child.pid)
