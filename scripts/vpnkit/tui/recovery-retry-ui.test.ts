@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import { App } from "./app";
+import { AppState } from "./app-state";
 import type { Action, Backend, CheckProgress, Reply, Server, Status } from "./bridge";
 const status:Status={vpn_state:"active",gateway_state:"healthy",subscription:"configured",routing_mode:"smart",networkmanager_configured:"yes",networkmanager_active:"yes",diagnostics:"not-run"};
 const rows:Server[]=[1,2].map(n=>({server_id:`srv_${String(n).repeat(27)}`,display_name:`Node ${n}`,selected:n===1,status:"untested"}));
@@ -60,10 +61,12 @@ test("cancelled operation clears preceding recovery and shows cancellation",asyn
 });
 
 test("retry confirmation keeps captured operation when recovery changes",async()=>{
- const t=await createTestRenderer({width:100,height:30});const b=new BackendStub();const app=new App(t.renderer,b);const s=app as any;
+ const b=new BackendStub();const state=new AppState(b);
+ const key=(name:string)=>state.onKey({name,preventDefault(){}});
  try{
-  await app.perform("status");b.fail="start";b.reason="timeout";await app.perform("start");s.open("recovery");s.items().find((x:any)=>x.key==="r").run();expect(s.screen).toBe("retry-confirm");expect(s.selected).toBe(0);
-  b.fail=undefined;s.recovery={action:"stop",stage:"docker",message:"new error",actions:["retry"]};s.items()[1].run();await Bun.sleep(10);await t.renderOnce();
+  await state.perform("status");b.fail="start";b.reason="timeout";await state.perform("start");
+  key("f");key("r");expect(state.screen).toBe("retry-confirm");expect(state.selected).toBe(0);
+  b.fail=undefined;state.recovery={action:"stop",stage:"docker",message:"new error",actions:["retry"]};key("y");await Bun.sleep(10);
   expect(b.calls.at(-1)?.action).toBe("start");expect(b.calls.some(c=>c.action==="stop")).toBe(false);
- }finally{await app.close();}
+ }finally{await state.close();}
 });
