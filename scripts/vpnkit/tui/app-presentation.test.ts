@@ -1,8 +1,8 @@
 import { test, expect } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import { App } from "./app";
-import type { Reply } from "./bridge";
-import { FakeBackend, settle, reply } from "./app-test-fixtures";
+import type { Action, Reply } from "./bridge";
+import { FakeBackend, settle, reply, rows } from "./app-test-fixtures";
 
 test("legacy status without runtime keeps Docker lifecycle wording", async () => {
   const t = await createTestRenderer({ width: 100, height: 28 });
@@ -192,4 +192,88 @@ test("presentation: installed native separates service startup, connection, disc
     expect(t.captureCharFrame()).toContain("Native-служба и VPN остановлены");
     expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start", "start", "disconnect", "stop"]);
   } finally { await app.close(); }
+});
+
+test("presentation: native runtime shows the supported lifecycle preview and native service prompts", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", gateway_state: "absent" };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    await t.renderOnce();
+    let frame = t.captureCharFrame();
+    expect(frame).toContain("NATIVE PREVIEW");
+    expect(frame).toContain("Native-служба");
+    expect(frame).toContain("Запустить сервис");
+    expect(frame).not.toContain("Docker");
+    t.mockInput.pressKey("s");
+    await settle();
+
+    b.status.gateway_state = "healthy";
+    await app.perform("status");
+    t.mockInput.pressKey("z");
+    await t.renderOnce();
+    frame = t.captureCharFrame();
+    expect(frame).toContain("остановить сервис и отключить VPN?");
+    expect(frame).not.toContain("Docker");
+  } finally {
+    await app.close();
+  }
+});
+
+
+test("presentation: native mode guards unsupported actions before the backend request", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native" };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    const unsupported: [Action, string?][] = [
+      ["servers/list"],
+      ["servers/refresh"],
+      ["servers/check-batch", JSON.stringify({ ids: [] })],
+      ["servers/speed-batch", JSON.stringify({ ids: [], url: "https://example.invalid/" })],
+      ["servers/ping", rows[0]!.server_id],
+      ["servers/speed", rows[0]!.server_id],
+      ["servers/availability", JSON.stringify({ id: rows[0]!.server_id })],
+      ["servers/select", rows[0]!.server_id],
+      ["retest/select"],
+      ["toggle-mode"],
+      ["subscription/read"],
+      ["subscription", "https://example.invalid/new"],
+      ["diagnostics"],
+    ];
+    for (const [action, value] of unsupported) await app.perform(action, value);
+    t.mockInput.pressKey("v");
+    t.mockInput.pressKey("c");
+    t.mockInput.pressKey("d");
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("native preview");
+    expect(t.captureCharFrame()).not.toContain("Docker");
+  } finally {
+    await app.close();
+  }
+});
+
+
+test("presentation: checkout native and native status without installed=true keep subscription setup disabled", async () => {
+  for (const installed of [undefined, false] as const) {
+    const t = await createTestRenderer({ width: 100, height: 28 });
+    const b = new FakeBackend();
+    b.status = { ...b.status, runtime: "native", installed };
+    const app = new App(t.renderer, b);
+    try {
+      await app.perform("status");
+      t.mockInput.pressKey("c");
+      await settle();
+      await t.renderOnce();
+      expect(t.captureCharFrame()).toContain("недоступна в native preview");
+      expect(t.captureCharFrame()).not.toContain("Enter сохранить");
+    } finally {
+      await app.close();
+    }
+  }
 });

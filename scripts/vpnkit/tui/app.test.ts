@@ -30,39 +30,28 @@ test("connection requires healthy Docker and active KDE", () => {
   expect(Bun.stringWidth(cell("🇫🇮 Helsinki", 8))).toBe(8);
 });
 test("native runtime shows the supported lifecycle preview and native service prompts", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", gateway_state: "absent" };
-  const app = new App(t.renderer, b);
+  const state = new AppState(b);
+  const key = (name: string) => state.onKey({ name, preventDefault() {} });
   try {
-    await app.perform("status");
-    await t.renderOnce();
-    let frame = t.captureCharFrame();
-    expect(frame).toContain("NATIVE PREVIEW");
-    expect(frame).toContain("Native-служба");
-    expect(frame).toContain("Запустить сервис");
-    expect(frame).not.toContain("Docker");
-    t.mockInput.pressKey("s");
+    await state.perform("status");
+    expect(state.nativePreviewOnly()).toBe(true);
+    key("s");
     await settle();
     expect(b.calls.at(-1)?.action).toBe("backend/start");
-
     b.status.gateway_state = "healthy";
-    await app.perform("status");
-    t.mockInput.pressKey("z");
-    await t.renderOnce();
-    frame = t.captureCharFrame();
-    expect(frame).toContain("остановить сервис и отключить VPN?");
-    expect(frame).not.toContain("Docker");
-  } finally {
-    await app.close();
-  }
+    await state.perform("status");
+    key("z");
+    expect(state.screen).toBe("confirm");
+    expect(state.confirmation).toBe("stop");
+  } finally { await state.close(); }
 });
 
 test("native mode guards unsupported actions before the backend request", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native" };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
   try {
     await app.perform("status");
     const unsupported: [Action, string?][] = [
@@ -81,14 +70,11 @@ test("native mode guards unsupported actions before the backend request", async 
       ["diagnostics"],
     ];
     for (const [action, value] of unsupported) await app.perform(action, value);
-    t.mockInput.pressKey("v");
-    t.mockInput.pressKey("c");
-    t.mockInput.pressKey("d");
+    for (const name of ["v", "c", "d"]) app.onKey({ name, preventDefault() {} });
     await settle();
-    await t.renderOnce();
     expect(b.calls.map((call) => call.action)).toEqual(["status"]);
-    expect(t.captureCharFrame()).toContain("native preview");
-    expect(t.captureCharFrame()).not.toContain("Docker");
+    expect(app.nativePreviewOnly()).toBe(true);
+    expect(app.error).toBe(true);
   } finally {
     await app.close();
   }
@@ -143,21 +129,18 @@ test("installed native subscription setup uses the private editor and explicit c
 
 test("checkout native and native status without installed=true keep subscription setup disabled", async () => {
   for (const installed of [undefined, false] as const) {
-    const t = await createTestRenderer({ width: 100, height: 28 });
     const b = new FakeBackend();
     b.status = { ...b.status, runtime: "native", installed };
-    const app = new App(t.renderer, b);
+    const state = new AppState(b);
     try {
-      await app.perform("status");
-      t.mockInput.pressKey("c");
+      await state.perform("status");
+      state.onKey({ name: "c", preventDefault() {} });
       await settle();
-      await t.renderOnce();
-      expect(t.captureCharFrame()).toContain("недоступна в native preview");
-      expect(t.captureCharFrame()).not.toContain("Enter сохранить");
-      expect(b.calls.map((call) => call.action)).toEqual(["status"]);
-    } finally {
-      await app.close();
-    }
+      expect(state.subscriptionAvailable()).toBe(false);
+      expect(state.screen).toBe("home");
+      expect(state.error).toBe(true);
+      expect(b.calls.map(call => call.action)).toEqual(["status"]);
+    } finally { await state.close(); }
   }
 });
 
