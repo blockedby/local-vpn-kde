@@ -26,7 +26,7 @@ export class EditorView {
     this.hint.visible = visible;
     if (visible && !closing) this.input.focus();
     else this.input.blur();
-    this.hint.content = "Enter сохранить · Esc назад · Ctrl+U очистить\nЗначение видно только здесь; в журнал не попадает.";
+    this.hint.content = "Enter сохранить · Esc назад · Ctrl+U очистить\nЗначение в журнал не попадает.";
   }
   blur() { this.input.blur(); }
 }

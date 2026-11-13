@@ -75,7 +75,7 @@ export class OverlayView {
     this.box.width = width; this.box.height = height;
     this.box.left = Math.floor((this.renderer.terminalWidth - width) / 2);
     this.box.top = Math.floor((this.renderer.terminalHeight - height) / 2);
-    const names: Record<string,string> = { global: "Общие", "server-table": "Серверы", menu: "Выбор", editor: "Редактор", confirmation: "Подтверждение", servers: "Серверы", profiles: "Профили", diagnostics: "Диагностика", settings: "Настройки", autostart: "Автозапуск" };
+    const names: Record<string,string> = { global: "Общие", "server-table": "Серверы", menu: "Выбор", editor: "Редактор", confirmation: "Подтверждение", confirm: "Подтверждение", "profile-remove": "Подтверждение", "cancel-confirm": "Подтверждение", "retry-confirm": "Подтверждение", tasks: "Задачи", recovery: "Восстановление", details: "Сервер", servers: "Серверы", profiles: "Профили", diagnostics: "Диагностика", settings: "Настройки", autostart: "Автозапуск" };
     const wrap = (line: string) => {
       const result: string[] = []; let current = "";
       for (const word of line.split(/\s+/)) {

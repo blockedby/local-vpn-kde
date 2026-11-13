@@ -177,6 +177,7 @@ test("shell: dialogs keep the workspace, capture shortcuts and stack help", asyn
     expect(app.screen).toBe("confirm"); expect(backend.calls.length).toBe(before);
     app.onKey({ name: "?", preventDefault() {} }); await t.renderOnce();
     expect(app.helpOpen).toBe(true);
+    expect(t.captureCharFrame()).not.toContain("confirm");
     app.onKey({ name: "escape", preventDefault() {} }); await t.renderOnce();
     expect(app.helpOpen).toBe(false); expect(app.screen).toBe("confirm");
     frame = t.captureCharFrame(); expect(frame).toContain("[n] Нет");
