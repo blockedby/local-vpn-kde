@@ -46,7 +46,7 @@ func NativeGatewayFailureMessage(err error) string {
 			stage = failure.stage
 		}
 		switch failure.reason {
-		case "failed", "exited", "timeout", "cancelled", "unavailable", "rule-download-dns", "rule-download-timeout", "rule-download-refused", "rule-download-network", "rule-download-failed":
+		case "failed", "exited", "timeout", "cancelled", "unavailable", "rule-init-dns", "rule-init-timeout", "rule-init-refused", "rule-init-network", "rule-init-failed":
 			reason = failure.reason
 		}
 	}
@@ -54,7 +54,7 @@ func NativeGatewayFailureMessage(err error) string {
 }
 
 // Inspect complete child log lines without retaining or forwarding them. Only
-// fixed categories from an explicitly reported rule-set download failure are
+// fixed categories from an explicitly reported rule-set initialization failure are
 // exposed; the line itself can contain secrets. A category is evidence of what
 // the child reported, not proof that an upstream service was at fault.
 type gatewayChildDiagnostics struct {
@@ -79,7 +79,7 @@ func (d *gatewayChildDiagnostics) Write(p []byte) (int, error) {
 
 func (d *gatewayChildDiagnostics) inspect(line string) {
 	line = strings.ToLower(line)
-	if !(strings.Contains(line, "rule-set") || strings.Contains(line, "rule set")) || !(strings.Contains(line, "download") || strings.Contains(line, "fetch")) {
+	if !(strings.Contains(line, "rule-set") || strings.Contains(line, "rule set")) || !(strings.Contains(line, "download") || strings.Contains(line, "fetch") || strings.Contains(line, "initialize")) {
 		return
 	}
 	if !(strings.Contains(line, "fatal") || strings.Contains(line, "error") || strings.Contains(line, "failed")) {
@@ -87,15 +87,15 @@ func (d *gatewayChildDiagnostics) inspect(line string) {
 	}
 	switch {
 	case strings.Contains(line, "no such host"), strings.Contains(line, "name resolution"), strings.Contains(line, "lookup "):
-		d.classification = "rule-download-dns"
+		d.classification = "rule-init-dns"
 	case strings.Contains(line, "timeout"), strings.Contains(line, "timed out"), strings.Contains(line, "deadline exceeded"):
-		d.classification = "rule-download-timeout"
+		d.classification = "rule-init-timeout"
 	case strings.Contains(line, "connection refused"):
-		d.classification = "rule-download-refused"
+		d.classification = "rule-init-refused"
 	case strings.Contains(line, "network is unreachable"), strings.Contains(line, "no route to host"):
-		d.classification = "rule-download-network"
+		d.classification = "rule-init-network"
 	default:
-		d.classification = "rule-download-failed"
+		d.classification = "rule-init-failed"
 	}
 }
 

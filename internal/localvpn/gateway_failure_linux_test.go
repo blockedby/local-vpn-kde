@@ -8,11 +8,11 @@ import (
 
 func TestGatewayFailureDiagnosticsRedactAndClassify(t *testing.T) {
 	for _, tc := range []struct{ line, reason string }{
-		{"FATAL initialize rule-set[geoip-ru]: download: lookup private.example: no such host", "rule-download-dns"},
-		{"FATAL initialize rule-set[x]: download: context deadline exceeded https://private.example/token", "rule-download-timeout"},
-		{"FATAL initialize rule-set[x]: download: connection refused https://private.example/token", "rule-download-refused"},
-		{"FATAL initialize rule-set[x]: download: network is unreachable", "rule-download-network"},
-		{"FATAL initialize rule-set[x]: download: bad certificate", "rule-download-failed"},
+		{"FATAL initialize rule-set[geoip-ru]: download: lookup private.example: no such host", "rule-init-dns"},
+		{"FATAL initialize rule-set[x]: download: context deadline exceeded https://private.example/token", "rule-init-timeout"},
+		{"FATAL initialize rule-set[x]: connection refused https://private.example/token", "rule-init-refused"},
+		{"FATAL initialize rule-set[x]: download: network is unreachable", "rule-init-network"},
+		{"FATAL initialize rule-set[x]: download: bad certificate", "rule-init-failed"},
 		{"INFO download rule-set[x] https://private.example/token", "exited"},
 		{"FATAL unrelated private.example token", "exited"},
 	} {
