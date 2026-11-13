@@ -26,3 +26,11 @@ export function wrapText(text: string, width: number): string[] {
   if (line) lines.push(line);
   return lines.map(value => cell(value, width).trimEnd());
 }
+
+/** Public form of a check URL; credentials, query and fragment stay in the editor. */
+export function displayCheckAddress(value: string, width = 45): string {
+  try {
+    const url = new URL(value);
+    return cell(`${url.protocol}//${url.host}${url.pathname}`, width).trimEnd();
+  } catch { return "недоступен"; }
+}

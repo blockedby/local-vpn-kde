@@ -2,7 +2,7 @@ import type { Action } from "./bridge";
 import type { AppState } from "./app-state";
 import { frames } from "./animation-frames";
 import { compatible, queueable } from "./request-policy";
-import { cell } from "./formatting";
+import { cell, displayCheckAddress } from "./formatting";
 
 export interface MenuItem { key: string; label: string; run: () => void }
 export type ActionScope = AppState["screen"] | "global" | "server-table" | "menu" | "editor" | "confirmation";
@@ -170,7 +170,7 @@ export function menuItems(state: AppState): MenuItem[] {
       { key: "a", label: `Автозапуск: ${state.autostart ? `шлюз ${state.autostart.gateway ? "да" : "нет"}, VPN ${state.autostart.connect ? "да" : "нет"}` : "не проверен"} · служба ${state.serviceState ? `${state.activeServiceLabel(state.serviceState.active)}/${({ enabled: "вкл", disabled: "выкл", masked: "маска" } as Record<string, string>)[state.serviceState.enabled] ?? "неизвестно"}` : "неизвестно"}`, run: () => state.open("autostart") },
       { key: "m", label: `Режим: ${state.status?.routing_mode === "smart" ? "умный" : state.status?.routing_mode === "strict" ? "строгий" : "неизвестно"}`, run: () => void state.perform("toggle-mode") },
       { key: "c", label: "Профили и источники", run: () => state.open(state.nativeInstalled() && state.status?.subscription === "configured" ? "profiles" : "subscription") },
-      { key: "e", label: `Сайт для проверки: ${state.target}`, run: () => state.open("target") },
+      { key: "e", label: `Сайт для проверки: ${displayCheckAddress(state.target)}`, run: () => state.open("target") },
       ...(!state.ready() ? [{ key: "s", label: `Запустить ${state.serviceObject()}`, run: run("backend/start") }] : []),
       ...(["healthy", "unhealthy", "running", "stopped", "starting"].includes(state.status?.gateway_state ?? state.status?.vpn_state ?? "") ? [{ key: "z", label: state.nativeMode() ? "Остановить сервис" : "Остановить Docker и VPN", run: () => state.confirm("stop") }] : []),
     ];

@@ -1,5 +1,6 @@
 import { BoxRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
 import type { AppState } from "./app-state";
+import { displayCheckAddress } from "./formatting";
 import { palette as p } from "./model";
 
 export const DETAILS_THRESHOLD = 120;
@@ -18,7 +19,7 @@ export function detailsLines(state: AppState): string[] {
   const status = queued ? "в очереди" : active ? ({ start: "подготовка", ping: "проверка ping", speed: "замер скорости", complete: "завершение" }[stage ?? "start"]) : state.homeTesting && state.homeSpeedServer?.id === server.server_id ? (state.measurementAction === "servers/ping" ? "проверка ping" : "замер скорости") : server.ping_status === "failed" || server.status === "failed" || server.availability === "failed" ? "ошибка проверки" : server.availability === "ready" || server.status === "ready" ? "готов" : "не проверен";
   const site = server.availability === "ready" ? "доступен" : server.availability === "failed" ? "недоступен" : "не проверен";
   const speed = live !== undefined ? `~${live.toFixed(1)} Мбит/с · сейчас` : server.download_mbps === undefined ? "нет данных" : `${server.download_mbps.toFixed(1)} Мбит/с${time ? ` · ${new Date(time).toLocaleString("ru-RU")}` : " · время неизвестно"}`;
-  return [server.display_name, `Профиль: ${profile ?? "неизвестен"}`, `Выбран для VPN: ${server.selected ? "да" : "нет"}`, `Ping: ${server.ping_status === "failed" ? "ошибка" : server.latency_ms === undefined ? "нет данных" : `${server.latency_ms} мс`}`, `Скорость: ${speed}`, `Сайт: ${site}`, ...(server.availability === "ready" || server.availability === "failed" ? [`Адрес проверки: ${state.target}`] : []), `Состояние: ${status}`];
+  return [server.display_name, `Профиль: ${profile ?? "неизвестен"}`, `Выбран для VPN: ${server.selected ? "да" : "нет"}`, `Ping: ${server.ping_status === "failed" ? "ошибка" : server.latency_ms === undefined ? "нет данных" : `${server.latency_ms} мс`}`, `Скорость: ${speed}`, `Сайт: ${site}`, ...(server.availability === "ready" || server.availability === "failed" ? [`Адрес проверки: ${displayCheckAddress(state.target, 18)}`] : []), `Состояние: ${status}`];
 }
 
 export class DetailsView {

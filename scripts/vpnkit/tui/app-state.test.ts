@@ -218,3 +218,18 @@ test("late profile open leaves a newer confirmation in place", async () => {
     expect(state.confirmation).toBe("disconnect");
   } finally { await state.close(); }
 });
+
+test("site check address hides query and fragment outside its editor", async () => {
+  const { detailsLines } = await import("./details-view");
+  const state = new AppState(new FakeBackend());
+  try {
+    state.target = "https://example.invalid/path?token=private-marker#fragment-marker";
+    state.servers = [{ ...rows[0]!, availability: "ready" }]; state.serverID = rows[0]!.server_id;
+    state.open("settings", false);
+    const shown = [...detailsLines(state), ...state.items().map(item => item.label), ...state.paletteActions().map(entry => entry.action.label)].join("\n");
+    expect(shown).toContain("https://example.invalid/path");
+    expect(shown).not.toContain("private-marker");
+    expect(shown).not.toContain("fragment-marker");
+    state.open("target"); expect(state.editorValue).toContain("private-marker");
+  } finally { await state.close(); }
+});
