@@ -917,7 +917,7 @@ test("speed batch shows parallel preparation and speed stage, cancellation sends
  }finally{finish(reply());await settle();await app.close();}
 });
 
-test("held speed batch blocks every other measurement even after navigating home", async () => {
+test("held speed batch queues other measurements even after navigating home", async () => {
  const t = await createTestRenderer({width:110,height:30}); const b = new FakeBackend();
  let finish!:(r:Reply)=>void; b.hold={action:"servers/speed-batch",promise:new Promise(r=>finish=r)};
  const app = new App(t.renderer,b);
@@ -931,6 +931,8 @@ test("held speed batch blocks every other measurement even after navigating home
   await app.perform("servers/speed", rows[0]!.server_id, true);
   t.mockInput.pressKey("escape");t.mockInput.pressKey("t");await settle();
   expect(b.calls).toHaveLength(initialCalls);
+  expect(app.queue.some(entry => entry.action === "servers/check-batch")).toBe(true);
+  expect(app.queue.some(entry => entry.action === "servers/speed")).toBe(true);
   expect(b.calls.filter(c=>c.action==="servers/speed-batch")).toHaveLength(1);
   finish(reply());await settle();
  } finally {finish(reply());await settle();await app.close();}
