@@ -1,5 +1,5 @@
 import { BoxRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
-import type { AppState } from "./app-state";
+import { isOverlay, type AppState } from "./app-state";
 import { palette as p } from "./model";
 
 export class FooterView {
@@ -10,6 +10,14 @@ export class FooterView {
   update(state: AppState, editor: boolean) {
     if (state.helpOpen) { this.footer.content = "↑↓ прокрутка · Esc / ? закрыть"; return; }
     const actions = state.groupedActions().flatMap(group => group.actions).filter(action => action.available);
+    if (isOverlay(state.screen) && !editor) {
+      const choices = actions.filter(action => !["global:help", "global:back", "global:quit-control", "menu:previous", "menu:next"].includes(action.id));
+      const hints = choices.map(action => `${action.keyHints[0]} ${action.label.toLowerCase()}`);
+      hints.push("Esc назад");
+      if (actions.some(action => action.id === "global:help")) hints.push("? помощь");
+      while (hints.length > 1 && Bun.stringWidth(hints.join(" · ")) > this.renderer.terminalWidth - 2) hints.shift();
+      this.footer.content = hints.join(" · "); return;
+    }
     const priorities = editor ? ["editor:submit", "global:back", "global:quit-control"] : state.screen === "servers"
       ? ["global:recovery", "servers:select", "servers:p", "servers:t", "servers:r", "home:connect", "home:start-service", "home:x", "global:cancel", "servers:sort"]
       : ["global:recovery", "menu:select", "diagnostics:u", "home:connect", "home:start-service", "home:x", "global:cancel", "global:back", "global:tasks"];

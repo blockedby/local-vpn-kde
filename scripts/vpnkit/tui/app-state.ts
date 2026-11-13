@@ -22,6 +22,8 @@ export type Screen =
   | "diagnostics"
   | "target"
   | "confirm";
+export const overlayScreens: readonly Screen[] = ["confirm", "cancel-confirm", "retry-confirm", "profile-remove", "tasks", "recovery", "subscription", "target", "profile-name", "profile-source"];
+export const isOverlay = (screen: Screen) => overlayScreens.includes(screen);
 export type Batch = "ping" | "speed" | "availability";
 const phases: Record<string, string> = {
   preparing: "Подготовка",
@@ -419,7 +421,7 @@ export class AppState {
     if (["servers", "profiles", "diagnostics", "settings"].includes(screen)) this.tab = screen as typeof this.tab;
     this.helpOpen = false;
     this.pendingScreenRead = undefined;
-    this.selected = 0;
+    this.selected = screen === "profile-remove" ? 1 : 0;
     this.serverMenu = false;
     this.navigationRevision++;
     if (screen === "subscription") {

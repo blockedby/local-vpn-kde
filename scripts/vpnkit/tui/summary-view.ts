@@ -1,6 +1,7 @@
 import { BoxRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
 import type { AppState } from "./app-state";
 import { palette as p } from "./model";
+import { wrapText } from "./formatting";
 
 export class SummaryView {
   private summary: TextRenderable;
@@ -8,6 +9,12 @@ export class SummaryView {
     this.summary = new TextRenderable(renderer, { content: "", fg: p.muted, height: 2, flexShrink: 0 });
     this.summary.minHeight = 0;
     parent.add(this.summary);
+  }
+  fit(width: number) {
+    const lines = this.summary.chunks.map(chunk => chunk.text).join("").split("\n").flatMap(line => wrapText(line, width));
+    this.summary.content = lines.join("\n");
+    this.summary.height = lines.length;
+    return lines.length;
   }
   hide() { this.summary.visible = false; this.summary.height = 0; }
   update(state: AppState) {
@@ -30,8 +37,8 @@ export class SummaryView {
       } else {
         this.summary.content =
           state.confirmation === "disconnect"
-            ? "Подтверждение · Точно хотите отключить VPN?"
-            : `Подтверждение · Точно хотите остановить ${state.serviceObject()} и отключить VPN?`;
+            ? "Точно хотите отключить VPN?"
+            : `Точно хотите остановить ${state.serviceObject()} и отключить VPN?`;
       }
     }
     if (state.screen === "home")

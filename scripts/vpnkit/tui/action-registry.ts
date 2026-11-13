@@ -1,4 +1,4 @@
-import type { AppKeyEvent, AppState, Screen } from "./app-state";
+import { isOverlay, type AppKeyEvent, type AppState, type Screen } from "./app-state";
 import { compatible } from "./request-policy";
 import type { ActionDefinition, ActionScope } from "./menu-actions";
 
@@ -22,7 +22,9 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
     state.screen.startsWith("profile-") ? "profiles"
       : state.screen === "target" ? state.tab
       : state.screen === "confirm" && state.confirmation === "subscription" ? "subscription"
-      : ["confirm", "cancel-confirm", "retry-confirm", "tasks", "recovery"].includes(state.screen) ? state.tab : "servers", state.screen !== "confirm"), state.closing ? "Закрываем приложение." : undefined, "none", true);
+      : state.screen === "cancel-confirm" ? "tasks"
+      : state.screen === "retry-confirm" ? "recovery"
+      : ["confirm", "tasks", "recovery"].includes(state.screen) ? state.tab : "servers", state.screen !== "confirm"), state.closing ? "Закрываем приложение." : undefined, "none", true);
   add("global:quit-control", ["ctrl+c"], "Выход", "global", () => void state.close(), state.closing || state.disposed ? "Закрываем приложение." : undefined, "none", true);
   if (editor) {
     add("editor:submit", ["return"], "Сохранить", "editor", () => {
@@ -46,6 +48,16 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
         } catch { state.notify("Нужен HTTPS-адрес без логина и пароля.", true); }
       }
     }, undefined, "none", true);
+    return actions;
+  }
+  if (isOverlay(state.screen)) {
+    const items = state.items();
+    const move = (delta: number) => { state.selected = (state.selected + items.length + delta) % Math.max(1, items.length); state.paint(); };
+    add("menu:previous", ["up"], "Выбор", "menu", () => move(-1), items.length <= 1 ? "Нет другого пункта." : undefined);
+    add("menu:next", ["down"], "Выбор", "menu", () => move(1), items.length <= 1 ? "Нет другого пункта." : undefined);
+    const current = items[state.selected];
+    add("menu:select", ["return"], "Выбрать", "menu", () => { current?.run(); state.paint(); }, current?.unavailableReason ?? (!current ? "Нет выбранного пункта." : undefined), current?.unavailableBehavior ?? "none");
+    for (const item of items) actions.push({ ...item, preventDefault: true, run: () => { item.run(); state.paint(); } });
     return actions;
   }
   add("global:quit", ["q"], "Выход", "global", () => void state.close(), state.closing || state.disposed ? "Закрываем приложение." : undefined);

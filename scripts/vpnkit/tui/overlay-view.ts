@@ -1,21 +1,59 @@
 import { BoxRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
-import type { AppState } from "./app-state";
+import { isOverlay, type AppState } from "./app-state";
+import { SummaryView } from "./summary-view";
+import { MenuView } from "./menu-view";
+import { EditorView } from "./editor-view";
 import { palette as p } from "./model";
 import { cell } from "./formatting";
 
 /** Absolute overlay host. Other modal views can use the same positioning pattern. */
 export class OverlayView {
+  private dialog: BoxRenderable;
+  private dialogSummary: SummaryView;
+  private dialogMenu: MenuView;
+  private dialogEditor: EditorView;
   private backdrop: BoxRenderable;
   private box: BoxRenderable;
   private text: TextRenderable;
   constructor(private renderer: CliRenderer, root: BoxRenderable) {
+    this.dialog = new BoxRenderable(renderer, { position: "absolute", top: 2, left: 2, width: 54, height: 8, zIndex: 50, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, overflow: "hidden", flexDirection: "column", visible: false });
+    root.add(this.dialog);
+    this.dialogSummary = new SummaryView(renderer, this.dialog);
+    this.dialogMenu = new MenuView(renderer, this.dialog, index => {
+      if (!this.current || this.current.helpOpen) return;
+      const state = this.current;
+      state.selected = index;
+      const item = state.items()[index];
+      const action = item && state.actions().find(candidate => candidate.keys.includes(item.key));
+      if (action?.available) action.run();
+      else if (action?.unavailableBehavior === "notice" && action.unavailableReason) state.notify(action.unavailableReason, true);
+      state.paint();
+    });
+    this.dialogEditor = new EditorView(renderer, this.dialog, value => this.current?.edit(value));
     this.backdrop = new BoxRenderable(renderer, { position: "absolute", top: 2, left: 0, width: "100%", height: 1, zIndex: 99, backgroundColor: p.base, visible: false });
     root.add(this.backdrop);
     this.box = new BoxRenderable(renderer, { position: "absolute", top: 2, left: 2, width: 54, height: 10, zIndex: 100, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, title: " Помощь · ↑↓ прокрутка · Esc закрыть ", overflow: "hidden", visible: false });
     this.text = new TextRenderable(renderer, { content: "", fg: p.text, width: "100%", height: "100%" });
     this.box.add(this.text); root.add(this.box);
   }
+  private current?: AppState;
   update(state: AppState) {
+    this.current = state;
+    const modal = isOverlay(state.screen) && this.renderer.terminalWidth >= 60 && this.renderer.terminalHeight >= 16;
+    const editor = ["subscription", "target", "profile-name", "profile-source"].includes(state.screen);
+    this.dialog.visible = modal;
+    this.dialogEditor.update(state.editorValue, modal && editor && !state.helpOpen, state.closing);
+    if (modal) {
+      const width = Math.min(64, this.renderer.terminalWidth - 4);
+      this.dialogSummary.update(state);
+      const summaryHeight = this.dialogSummary.fit(width - 2);
+      const height = Math.min(this.renderer.terminalHeight - 4, Math.max(5, 2 + summaryHeight + (editor ? 3 : state.items().length)));
+      this.dialog.width = width; this.dialog.height = height;
+      this.dialog.left = Math.floor((this.renderer.terminalWidth - width) / 2);
+      this.dialog.top = Math.floor((this.renderer.terminalHeight - height) / 2);
+      this.dialog.title = ["confirm", "profile-remove", "cancel-confirm", "retry-confirm"].includes(state.screen) ? " Подтверждение " : state.screen === "tasks" ? " Задачи " : state.screen === "recovery" ? " Восстановление " : " Редактор ";
+      this.dialogMenu.update(state.items(), editor, state.selected, true);
+    }
     this.box.visible = state.helpOpen;
     this.backdrop.visible = state.helpOpen;
     if (!state.helpOpen) return;

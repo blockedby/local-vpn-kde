@@ -162,3 +162,41 @@ test("shell: live speed stays attributed to its measured row and appears in stat
     expect(lines.find(line => line.includes("Node 01") && line.includes("~16.0"))).toBeDefined();
   } finally { app.homeTesting = false; await app.close(); }
 });
+
+test("shell: dialogs keep the workspace, capture shortcuts and stack help", async () => {
+  const { terminal: t, app, backend } = await fixture(60, 16);
+  try {
+    app.status!.networkmanager_active = "yes";
+    app.confirm("stop"); await t.renderOnce();
+    let frame = t.captureCharFrame();
+    expect(frame).toContain("Node 00");
+    expect(frame).toContain("остановить Docker и отключить VPN?");
+    expect(frame).toContain("[n] Нет"); expect(frame).toContain("[y] Да");
+    const before = backend.calls.length;
+    app.onKey({ name: "d", preventDefault() {} });
+    expect(app.screen).toBe("confirm"); expect(backend.calls.length).toBe(before);
+    app.onKey({ name: "?", preventDefault() {} }); await t.renderOnce();
+    expect(app.helpOpen).toBe(true);
+    app.onKey({ name: "escape", preventDefault() {} }); await t.renderOnce();
+    expect(app.helpOpen).toBe(false); expect(app.screen).toBe("confirm");
+    frame = t.captureCharFrame(); expect(frame).toContain("[n] Нет");
+    app.onKey({ name: "escape", preventDefault() {} });
+    expect(app.screen).toBe("servers"); expect(backend.calls.length).toBe(before);
+  } finally { await app.close(); }
+});
+
+test("shell: editor and native confirmation fit the minimum terminal", async () => {
+  const { terminal: t, app } = await fixture(60, 16);
+  try {
+    app.open("target"); await t.renderOnce();
+    let frame = t.captureCharFrame();
+    expect(frame).toContain("Адрес для проверки доступности");
+    expect(frame).toContain("Ctrl+U очистить");
+    expect(frame).toContain("в журнал не попадает");
+    app.status!.runtime = "native"; app.status!.installed = true;
+    app.confirmation = "subscription"; app.open("confirm"); await t.renderOnce();
+    frame = t.captureCharFrame();
+    expect(frame).toContain("Polkit"); expect(frame).toContain("автозапуск не изменяется");
+    expect(frame).toContain("[n] Нет"); expect(frame).toContain("[y] Да");
+  } finally { await app.close(); }
+});
