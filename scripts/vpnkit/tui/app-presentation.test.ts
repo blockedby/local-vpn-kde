@@ -571,3 +571,81 @@ test("presentation: Cancel stops the remaining batch and preserves its completed
     await app.close();
   }
 });
+
+test("presentation: changing subscription invalidates old rows and refreshes the catalog", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v");
+    await settle();
+    await app.perform("subscription", "https://example.invalid/new");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).not.toContain("Amsterdam");
+    t.mockInput.pressKey("v");
+    await settle();
+  } finally {
+    await app.close();
+  }
+});
+
+test("presentation: Docker readiness loads the list on an already-open servers screen", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  b.status.gateway_state = "absent";
+  let finish!: (r: Reply) => void;
+  b.hold = {
+    action: "backend/start",
+    promise: new Promise((r) => (finish = r)),
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    const task = app.perform("backend/start");
+    t.mockInput.pressKey("v");
+    finish(reply());
+    await task;
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Amsterdam");
+  } finally {
+    finish(reply());
+    await settle();
+    await app.close();
+  }
+});
+
+test("presentation: subscription opened during status loads on the first visit after status completes", async () => {
+  const t = await createTestRenderer({ width: 100, height: 24 });
+  const b = new FakeBackend();
+  let finish!: (r: Reply) => void;
+  b.hold = { action: "status", promise: new Promise((r) => (finish = r)) };
+  const app = new App(t.renderer, b);
+  try {
+    const task = app.perform("status");
+    t.mockInput.pressKey("c");
+    await settle();
+    finish(reply());
+    await task;
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("https://example.invalid/saved");
+  } finally { finish(reply()); await settle(); await app.close(); }
+});
+
+test("presentation: deferred subscription load does not replace text typed while busy", async () => {
+  const t = await createTestRenderer({ width: 100, height: 24 });
+  const b = new FakeBackend();
+  let finish!: (r: Reply) => void;
+  b.hold = { action: "status", promise: new Promise((r) => (finish = r)) };
+  const app = new App(t.renderer, b);
+  try {
+    const task = app.perform("status");
+    t.mockInput.pressKey("c");
+    await settle();
+    await t.mockInput.pasteBracketedText("https://example.invalid/new");
+    finish(reply());
+    await task;
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("https://example.invalid/new");
+  } finally { finish(reply()); await settle(); await app.close(); }
+});

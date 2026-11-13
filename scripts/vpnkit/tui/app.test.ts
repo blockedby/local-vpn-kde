@@ -570,17 +570,17 @@ test("server actions are reachable with Tab and Enter, including before Docker s
 });
 
 test("changing subscription invalidates old rows and refreshes the catalog", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
     await app.perform("subscription", "https://example.invalid/new");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("Amsterdam");
-    t.mockInput.pressKey("v");
+    expect(app.servers).toEqual([]);
+    expect(app.catalogStale).toBe(true);
+    key("v");
     await settle();
     expect(b.calls.at(-1)?.action).toBe("servers/refresh");
     expect(b.calls.some((c) => c.action === "servers/select")).toBe(false);
@@ -590,7 +590,6 @@ test("changing subscription invalidates old rows and refreshes the catalog", asy
 });
 
 test("Docker readiness loads the list on an already-open servers screen", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   b.status.gateway_state = "absent";
   let finish!: (r: Reply) => void;
@@ -598,16 +597,16 @@ test("Docker readiness loads the list on an already-open servers screen", async 
     action: "backend/start",
     promise: new Promise((r) => (finish = r)),
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
     const task = app.perform("backend/start");
-    t.mockInput.pressKey("v");
+    key("v");
     finish(reply());
     await task;
-    await t.renderOnce();
     expect(b.calls.at(-1)?.action).toBe("servers/list");
-    expect(t.captureCharFrame()).toContain("Amsterdam");
+    expect(app.servers.map(server => server.server_id)).toContain(rows[1]!.server_id);
   } finally {
     finish(reply());
     await settle();
@@ -780,21 +779,20 @@ test("ping and site render before batch completion and completed rows stop spinn
 });
 
 test("subscription opened during status loads on the first visit after status completes", async () => {
-  const t = await createTestRenderer({ width: 100, height: 24 });
   const b = new FakeBackend();
   let finish!: (r: Reply) => void;
   b.hold = { action: "status", promise: new Promise((r) => (finish = r)) };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     const task = app.perform("status");
-    t.mockInput.pressKey("c");
+    key("c");
     await settle();
     expect(b.calls.map(c => c.action)).toEqual(["status"]);
     finish(reply());
     await task;
-    await t.renderOnce();
     expect(b.calls.map(c => c.action)).toEqual(["status", "subscription/read"]);
-    expect(t.captureCharFrame()).toContain("https://example.invalid/saved");
+    expect(app.editorValue).toBe("https://example.invalid/saved");
   } finally { finish(reply()); await settle(); await app.close(); }
 });
 
@@ -812,7 +810,7 @@ test("deferred subscription load does not replace text typed while busy", async 
     finish(reply());
     await task;
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("https://example.invalid/new");
+    expect(app.editorValue).toBe("https://example.invalid/new");
     expect(b.calls.map(c => c.action)).toEqual(["status"]);
   } finally { finish(reply()); await settle(); await app.close(); }
 });
