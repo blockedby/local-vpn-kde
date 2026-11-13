@@ -11,94 +11,7 @@ import {
   type CheckProgress,
 } from "./bridge";
 import { connection } from "./model";
-const initial: Status = {
-  vpn_state: "inactive",
-  gateway_state: "healthy",
-  subscription: "configured",
-  routing_mode: "strict",
-  networkmanager_configured: "yes",
-  networkmanager_active: "no",
-  diagnostics: "not-run",
-};
-const rows: Server[] = [
-  {
-    server_id: `srv_${"a".repeat(27)}`,
-    display_name: "Tokyo 東京",
-    status: "untested",
-    selected: false,
-  },
-  {
-    server_id: `srv_${"b".repeat(27)}`,
-    display_name: "Amsterdam",
-    status: "ready",
-    selected: false,
-    download_mbps: 40,
-  },
-];
-const reply = (status = initial): Reply => ({
-  ok: true,
-  reason: "ok",
-  code: 0,
-  status: { ...status },
-});
-class FakeBackend implements Backend {
-  calls: { action: Action; value?: string }[] = [];
-  status = { ...initial };
-  rows = rows;
-  hold?: { action: Action; promise: Promise<Reply> };
-  cancelled = 0;
-  onProgress?: (phase: string) => void;
-  onCheckProgress?: (result: CheckProgress) => void;
-  async request(action: Action, value?: string): Promise<Reply> {
-    this.calls.push({ action, value });
-    if (this.hold?.action === action) return this.hold.promise;
-    const r = reply(this.status);
-    if (action === "subscription/read")
-      r.value = "https://example.invalid/saved";
-    if (action === "servers/list" || action === "servers/refresh")
-      r.catalog = { status: "ok", servers: structuredClone(this.rows) };
-    if (action === "servers/check-batch" || action === "servers/speed-batch") {
-      const ids: string[] = JSON.parse(value!).ids;
-      r.catalog = {
-        status: "ok",
-        servers: this.rows
-          .filter((s) => ids.includes(s.server_id))
-          .map((s) => ({
-            ...s,
-            ping_status: "ready",
-            latency_ms: 24,
-            availability: "ready",
-            ...(action === "servers/speed-batch" ? {status: "ready", download_mbps: 40, download_seconds: 3, downloaded_bytes: 15000000} : {}),
-          })),
-      };
-    }
-    if (
-      action === "servers/ping" ||
-      action === "servers/speed" ||
-      action === "servers/availability"
-    ) {
-      const id =
-        action === "servers/availability" ? JSON.parse(value!).id : value;
-      r.catalog = {
-        status: "ok",
-        server: {
-          ...rows.find((s) => s.server_id === id)!,
-          ping_status: "ready",
-          latency_ms: 24,
-          status: "ready",
-          download_mbps: 50,
-          availability: "ready",
-        },
-      };
-    }
-    return r;
-  }
-  cancel() {
-    this.cancelled++;
-  }
-  async close() {}
-}
-const settle = () => Bun.sleep(10);
+import { initial, rows, reply, FakeBackend, settle } from "./app-test-fixtures";
 
 test("connection requires healthy Docker and active KDE", () => {
   expect(connection({ ...initial, networkmanager_active: "yes" }).title).toBe(
@@ -318,57 +231,6 @@ test("native autostart edits retain the returned runtime and do not connect imme
   }
 });
 
-test("legacy status without runtime keeps Docker lifecycle wording", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
-  const b = new FakeBackend();
-  b.status.gateway_state = "absent";
-  const app = new App(t.renderer, b);
-  try {
-    await app.perform("status");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запустить Docker");
-    expect(t.captureCharFrame()).not.toContain("NATIVE PREVIEW");
-    b.status.gateway_state = "healthy";
-    await app.perform("status");
-    t.mockInput.pressKey("z");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("остановить Docker и отключить VPN?");
-    expect(t.captureCharFrame()).not.toContain("native-службу");
-  } finally {
-    await app.close();
-  }
-});
-
-test("compact home has state-specific actions, no stale generic hints or refresh timestamp", async () => {
-  const t = await createTestRenderer({ width: 80, height: 24 });
-  const b = new FakeBackend();
-  b.status.gateway_state = "absent";
-  const app = new App(t.renderer, b);
-  try {
-    await app.perform("status");
-    await t.renderOnce();
-    let frame = t.captureCharFrame();
-    expect(frame).toContain("Запустить Docker");
-    expect(frame).not.toContain("[s] Подключить");
-    expect(frame).not.toContain("Обновлено:");
-    expect(frame).not.toContain("Нажмите");
-    b.status.gateway_state = "healthy";
-    await app.perform("status");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Подключить VPN");
-    b.status.networkmanager_active = "yes";
-    await app.perform("status");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Отключить VPN");
-    const lines = t.captureCharFrame().split("\n");
-    expect(lines.findIndex(line => line.includes("[x] Отключить VPN"))).toBe(3);
-    t.resize(60, 20);
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("q выход");
-  } finally {
-    await app.close();
-  }
-});
 test("navigation and diagnostics Back are immediate during a held mutation", async () => {
   const t = await createTestRenderer({ width: 90, height: 28 });
   const b = new FakeBackend();
@@ -718,27 +580,6 @@ test("cached errors do not masquerade as tests in the current session", async ()
     await app.perform("servers/speed", server.server_id);
     await t.renderOnce();
     expect(t.captureCharFrame()).toContain("ошибка");
-  } finally {
-    await app.close();
-  }
-});
-
-test("home has one list of navigation entries and no top tabs", async () => {
-  const t = await createTestRenderer({ width: 80, height: 24 });
-  const app = new App(t.renderer, new FakeBackend());
-  try {
-    await app.perform("status");
-    await t.renderOnce();
-    const frame = t.captureCharFrame();
-    expect(frame).not.toContain("[h] Главная");
-    for (const label of ["[v] Серверы", "[c] Подписка", "[d] Диагностика"])
-      expect(frame.split(label)).toHaveLength(2);
-    const row = frame
-      .split("\n")
-      .findIndex((line) => line.includes("[d] Диагностика"));
-    await t.mockMouse.click(5, row);
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
   } finally {
     await app.close();
   }
@@ -1372,63 +1213,6 @@ test("autostart screen keeps saved intent separate from the actual disabled unit
     expect(frame).toContain("Подключать VPN: да");
     expect(frame).toContain("Фактическое состояние службы: автозапуск отключён");
     expect(frame).toContain("текущее состояние: неактивна");
-  } finally {
-    await app.close();
-  }
-});
-
-test("autostart screen renders failed and masked service states", async () => {
-  for (const service of [
-    { enabled: "enabled", active: "failed", expected: ["автозапуск включён", "текущее состояние: ошибка"] },
-    { enabled: "masked", active: "inactive", expected: ["автозапуск замаскирован", "текущее состояние: неактивна"] },
-    { enabled: "not-installed", active: "unknown", expected: ["служба не установлена", "текущее состояние: неизвестно"] },
-  ]) {
-    const t = await createTestRenderer({ width: 100, height: 28 });
-    const b = new FakeBackend();
-    const original = b.request.bind(b);
-    b.request = async (action, value) => {
-      const result = await original(action, value);
-      if (action === "autostart/read") {
-        result.autostart = { gateway: true, connect: false };
-        result.autostart_service = { enabled: service.enabled, active: service.active };
-      }
-      return result;
-    };
-    const app = new App(t.renderer, b);
-    try {
-      await app.perform("status");
-      t.mockInput.pressKey("a");
-      await settle();
-      await t.renderOnce();
-      const frame = t.captureCharFrame();
-      for (const expected of service.expected) expect(frame).toContain(expected);
-    } finally {
-      await app.close();
-    }
-  }
-});
-
-test("missing actual autostart status stays explicit and does not infer from saved intent", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
-  const b = new FakeBackend();
-  const original = b.request.bind(b);
-  b.request = async (action, value) => {
-    const result = await original(action, value);
-    if (action === "autostart/read")
-      result.autostart = { gateway: true, connect: false };
-    return result;
-  };
-  const app = new App(t.renderer, b);
-  try {
-    await app.perform("status");
-    t.mockInput.pressKey("a");
-    await settle();
-    await t.renderOnce();
-    const frame = t.captureCharFrame();
-    expect(frame).toContain("Запускать шлюз: да");
-    expect(frame).toContain("не проверено");
-    expect(frame).toContain("недоступно");
-    expect(frame).not.toContain("Фактическое состояние службы: автозапуск включён");
   } finally {
     await app.close();
   }
