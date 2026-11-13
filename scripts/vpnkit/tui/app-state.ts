@@ -148,6 +148,7 @@ export class AppState {
   cancelTaskAction?: Action;
   recovery?: Recovery & { action: Action; value?: string; homeServerID?: string; batchRetry?: { kind: Batch; ids: string[]; target: string } };
   retryOperation?: NonNullable<AppState["recovery"]>;
+  retryTarget?: { kind: "server" | "profile"; id: string; name?: string };
   backendOffline = false;
   reconnecting = false;
   liveSpeeds = new Map<string, number>();
@@ -530,6 +531,15 @@ export class AppState {
     this.pendingScreenRead = undefined;
     this.selected = screen === "profile-remove" ? 1 : 0;
     if (screen === "details") this.detailsOffset = 0;
+    if (screen === "retry-confirm") {
+      this.confirmationSnapshot = this.confirmationContext();
+      const retry = this.retryOperation;
+      this.retryTarget = retry?.value && retry.action === "servers/select"
+        ? { kind: "server", id: retry.value, name: this.servers.find(server => server.server_id === retry.value)?.display_name }
+        : retry?.value && ["profiles/open", "profiles/remove"].includes(retry.action)
+          ? { kind: "profile", id: retry.value, name: this.profiles?.items.find(profile => profile.id === retry.value)?.name }
+          : undefined;
+    }
     if (screen === "cancel-confirm") this.cancelTaskAction = this.cancelTaskID ? this.tasks.get(this.cancelTaskID)?.action : undefined;
     if (screen === "profile-remove") {
       const profile = this.profiles?.items.find(item => item.id === this.profiles?.active);
@@ -572,6 +582,13 @@ export class AppState {
     this.fastestCandidate = { id: server.server_id, name: server.display_name, speed: server.download_mbps!, measuredAt: this.measurementTimes.get(server.server_id)! };
     this.confirmation = "fastest";
     this.open("confirm");
+  }
+  retryTargetValid() {
+    const target = this.retryTarget;
+    if (!target) return true;
+    if (!target.name) return false;
+    if (target.kind === "server") return this.servers.some(server => server.server_id === target.id && server.display_name === target.name);
+    return this.profiles?.items.some(profile => profile.id === target.id && profile.name === target.name) ?? false;
   }
   confirmationContext() {
     return JSON.stringify({ runtime: this.status?.runtime, installed: this.status?.installed,

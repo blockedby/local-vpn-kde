@@ -330,3 +330,17 @@ test("secret sources never appear in new details, palette, notices or history", 
     expect(visible).not.toContain("private-query-marker");
   } finally { await state.close(); }
 });
+
+test("retry confirmation rejects a changed connection target", async () => {
+  const { recoveryFor } = await import("./recovery");
+  const backend = new FakeBackend(); const state = new AppState(backend);
+  try {
+    state.status = { ...backend.status, networkmanager_active: "no" };
+    state.recovery = { ...recoveryFor("start", "timeout"), action: "start" };
+    state.open("recovery"); state.items().find(item => item.key === "r")!.run();
+    state.status.networkmanager_active = "yes";
+    key(state, "y"); await settle();
+    expect(backend.calls.some(call => call.action === "start")).toBe(false);
+    expect(state.notice).toContain("изменил");
+  } finally { await state.close(); }
+});

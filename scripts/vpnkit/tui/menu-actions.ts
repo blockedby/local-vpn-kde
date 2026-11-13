@@ -22,7 +22,7 @@ export function menuItems(state: AppState): MenuItem[] {
       const retry = state.screen === "retry-confirm";
       return [{ key: "n", label: "Нет", run: () => state.open(retry ? "recovery" : "tasks") },
         { key: "y", label: "Да", run: () => {
-          if (retry) { const r = state.retryOperation; state.retryOperation = undefined; state.open(state.tab, false); if (r) void state.perform(r.action, r.value); }
+          if (retry) { const r = state.retryOperation; const valid = state.confirmationSnapshot === state.confirmationContext() && state.retryTargetValid(); state.retryOperation = undefined; state.retryTarget = undefined; state.open(state.tab, false); if (r && valid) void state.perform(r.action, r.value); else state.notify("Состояние или цель изменились. Выберите действие заново.", true); }
           else { const id = state.cancelTaskID; const task = id && state.tasks.get(id); const valid = task && task.action === state.cancelTaskAction && !task.cancelRequested; state.open("tasks"); if (valid && id) state.cancelTask(id); else state.notify("Операция изменилась или уже завершена."); }
         } }];
     }

@@ -1,6 +1,10 @@
 import type { Action } from "./bridge";
 
 export const names: Partial<Record<Action, string>> = {
+  "profiles/list": "Читаем профили",
+  "profiles/open": "Открываем профиль",
+  "profiles/add": "Добавляем профиль",
+  "profiles/remove": "Удаляем профиль",
   "autostart/read": "Читаем настройки автозапуска",
   "autostart/set": "Сохраняем автозапуск",
   "backend/start": "Запускаем Docker",
