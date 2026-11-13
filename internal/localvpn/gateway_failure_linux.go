@@ -53,6 +53,37 @@ func NativeGatewayFailureMessage(err error) string {
 	return fmt.Sprintf("native_gateway_start_failure=%s-%s: gateway startup failed during %s (%s)", stage, reason, stage, reason)
 }
 
+// gatewayJournalReason accepts only exact messages emitted by this binary.
+// Journal text is never copied into user state or returned to the caller.
+func gatewayJournalReason(data []byte) string {
+	stages := []string{"unknown", "config-sync", "config-check", "sing-box", "barrier", "openvpn", "routing", "health", "notify"}
+	reasons := []string{"failed", "exited", "timeout", "cancelled", "unavailable", "rule-init-dns", "rule-init-timeout", "rule-init-refused", "rule-init-network", "rule-init-failed"}
+	for _, line := range strings.Split(string(data), "\n") {
+		for _, stage := range stages {
+			for _, reason := range reasons {
+				expected := NativeGatewayFailureMessage(gatewayFailure(stage, reason, nil))
+				if line == expected {
+					return stage + "-" + reason
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func gatewayReasonAllowed(code string) bool {
+	stages := []string{"unknown", "config-sync", "config-check", "sing-box", "barrier", "openvpn", "routing", "health", "notify"}
+	reasons := []string{"failed", "exited", "timeout", "cancelled", "unavailable", "rule-init-dns", "rule-init-timeout", "rule-init-refused", "rule-init-network", "rule-init-failed"}
+	for _, stage := range stages {
+		for _, reason := range reasons {
+			if code == stage+"-"+reason {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Inspect complete child log lines without retaining or forwarding them. Only
 // fixed categories from an explicitly reported rule-set initialization failure are
 // exposed; the line itself can contain secrets. A category is evidence of what

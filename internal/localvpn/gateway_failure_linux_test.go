@@ -33,3 +33,15 @@ func TestGatewayFailureDiagnosticsRedactAndClassify(t *testing.T) {
 		t.Fatal(message)
 	}
 }
+
+func TestGatewayJournalReasonAcceptsOnlyExactSafeMessages(t *testing.T) {
+	message := NativeGatewayFailureMessage(gatewayFailure("sing-box", "rule-init-refused", nil))
+	if got := gatewayJournalReason([]byte(message + "\n")); got != "sing-box-rule-init-refused" {
+		t.Fatal(got)
+	}
+	for _, input := range []string{message + " private-secret\n", "native_gateway_start_failure=private-secret: private-secret\n"} {
+		if got := gatewayJournalReason([]byte(input)); got != "" {
+			t.Fatal(got)
+		}
+	}
+}

@@ -235,3 +235,16 @@ func TestNativeAutostartErrorsAreCoarse(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeAutostartStoresSafeGatewayReason(t *testing.T) {
+	a := configuredNativeAutostart(t, false)
+	a.nativeStatus = func(context.Context) (GatewayStatus, error) { return availableNativeStatus(), nil }
+	a.nativeStart = func(context.Context) error { return &nativeGatewayStartError{reason: "sing-box-rule-init-refused"} }
+	if err := a.Run(context.Background()); err == nil {
+		t.Fatal("failure was lost")
+	}
+	status, err := a.Status(context.Background())
+	if err != nil || status.LastGatewayReason != "sing-box-rule-init-refused" {
+		t.Fatal(status, err)
+	}
+}

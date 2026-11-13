@@ -19,11 +19,12 @@ const autostartUnit = "local-vpn-kde-autostart.service"
 const autostartMarker = "# Managed by local-vpn-kde autostart\n"
 
 type AutostartOptions struct {
-	Gateway    bool   `json:"gateway"`
-	Connect    bool   `json:"connect"`
-	Runtime    string `json:"runtime,omitempty"`
-	LastResult string `json:"last_result,omitempty"`
-	LastReason string `json:"last_reason,omitempty"`
+	Gateway           bool   `json:"gateway"`
+	Connect           bool   `json:"connect"`
+	Runtime           string `json:"runtime,omitempty"`
+	LastResult        string `json:"last_result,omitempty"`
+	LastReason        string `json:"last_reason,omitempty"`
+	LastGatewayReason string `json:"last_gateway_reason,omitempty"`
 }
 
 type autostartFailure struct{ reason string }
@@ -147,17 +148,20 @@ func (a Autostart) Status(ctx context.Context) (AutostartOptions, error) {
 	}
 	options.LastResult = ""
 	options.LastReason = ""
+	options.LastGatewayReason = ""
 	result, resultErr := readAt(fd, "autostart-result.json")
 	if resultErr == nil {
 		var state struct {
-			Result string `json:"result"`
-			Reason string `json:"reason"`
+			Result        string `json:"result"`
+			Reason        string `json:"reason"`
+			GatewayReason string `json:"gateway_reason"`
 		}
-		if json.Unmarshal(result, &state) != nil || !autostartResultAllowed(state.Result) || !autostartReasonAllowed(state.Reason) {
+		if json.Unmarshal(result, &state) != nil || !autostartResultAllowed(state.Result) || !autostartReasonAllowed(state.Reason) || (state.GatewayReason != "" && !gatewayReasonAllowed(state.GatewayReason)) {
 			return options, errors.New("invalid autostart result")
 		}
 		options.LastResult = state.Result
 		options.LastReason = state.Reason
+		options.LastGatewayReason = state.GatewayReason
 	} else if !errors.Is(resultErr, unix.ENOENT) {
 		return options, resultErr
 	}
@@ -178,13 +182,17 @@ func autostartReasonAllowed(reason string) bool {
 	return false
 }
 func (a Autostart) recordResult(result string, reasons ...string) error {
-	reason := ""
-	if len(reasons) == 1 {
-		reason = reasons[0]
-	} else if len(reasons) != 0 {
+	reason, gatewayReason := "", ""
+	if len(reasons) > 2 {
 		return errors.New("invalid autostart reason")
 	}
-	if !autostartResultAllowed(result) || !autostartReasonAllowed(reason) {
+	if len(reasons) > 0 {
+		reason = reasons[0]
+	}
+	if len(reasons) > 1 {
+		gatewayReason = reasons[1]
+	}
+	if !autostartResultAllowed(result) || !autostartReasonAllowed(reason) || (gatewayReason != "" && !gatewayReasonAllowed(gatewayReason)) {
 		return errors.New("invalid autostart result")
 	}
 	fd, err := directory(a.Base, true, true)
@@ -192,7 +200,7 @@ func (a Autostart) recordResult(result string, reasons ...string) error {
 		return err
 	}
 	defer unix.Close(fd)
-	data, _ := json.Marshal(map[string]string{"result": result, "reason": reason})
+	data, _ := json.Marshal(map[string]string{"result": result, "reason": reason, "gateway_reason": gatewayReason})
 	return atomicWrite(fd, "autostart-result.json", data)
 }
 func (a Autostart) validateBase() error {
@@ -276,6 +284,7 @@ func (a Autostart) Configure(ctx context.Context, options AutostartOptions) erro
 	}
 	options.LastResult = ""
 	options.LastReason = ""
+	options.LastGatewayReason = ""
 	if options.Connect && !options.Gateway {
 		return errors.New("autoconnect requires gateway autostart")
 	}
@@ -355,13 +364,14 @@ func (a Autostart) Run(ctx context.Context) (runErr error) {
 	}
 	result := "failed"
 	reason := ""
+	gatewayReason := ""
 	defer func() {
 		if errors.Is(runErr, context.Canceled) {
 			result = "cancelled"
 		} else if errors.Is(runErr, context.DeadlineExceeded) {
 			result = "failed"
 		}
-		if err := a.recordResult(result, reason); runErr == nil && err != nil {
+		if err := a.recordResult(result, reason, gatewayReason); runErr == nil && err != nil {
 			runErr = err
 		}
 	}()
@@ -452,6 +462,10 @@ func (a Autostart) Run(ctx context.Context) (runErr error) {
 				return contextErr
 			}
 			reason = "gateway-start-failed"
+			var failure *nativeGatewayStartError
+			if errors.As(err, &failure) && gatewayReasonAllowed(failure.reason) {
+				gatewayReason = failure.reason
+			}
 			return &autostartFailure{reason: reason}
 		}
 		// Starting the notify service can take time. Re-read immediately before
