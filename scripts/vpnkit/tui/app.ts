@@ -13,6 +13,9 @@ import { StyledText, t } from "@opentui/core";
 import { speedometer } from "./speedometer";
 import { recoveryFor, type Recovery } from "./recovery";
 import { observeRendererClose } from "./renderer-lifecycle";
+import { cell, safeText } from "./formatting";
+import { compatible } from "./request-policy";
+export { cell } from "./formatting";
 
 type Screen =
   | "tasks" | "cancel-confirm" | "recovery" | "retry-confirm"
@@ -71,21 +74,6 @@ const nativeSupportedActions: readonly Action[] = [
   "autostart/read",
   "autostart/set",
 ];
-const safeText = (s: string) =>
-  s.replace(/[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, "");
-export function cell(text: string, width: number) {
-  let out = "";
-  for (const part of new Intl.Segmenter().segment(safeText(text))) {
-    if (Bun.stringWidth(out + part.segment) > width) break;
-    out += part.segment;
-  }
-  if (out !== safeText(text) && width > 1) {
-    while (Bun.stringWidth(out) > width - 1)
-      out = Array.from(out).slice(0, -1).join("");
-    out += "…";
-  }
-  return out + " ".repeat(Math.max(0, width - Bun.stringWidth(out)));
-}
 
 export class App {
   private status?: Status;
@@ -150,15 +138,6 @@ export class App {
   }
   private get measurementAction(): Action | undefined {
     return [...this.tasks.values()].find(task => task.measurement)?.action;
-  }
-  private compatible(action: Action, other: Action): boolean {
-    const probe = (a: Action) => ["servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch"].includes(a);
-    const read = (a: Action) => ["status", "subscription/read"].includes(a);
-    if ((action === "status" && other === "servers/list") || (other === "status" && action === "servers/list")) return true;
-    return (read(action) && action !== other && (probe(other) || other === "servers/select")) ||
-      (read(other) && action !== other && (probe(action) || action === "servers/select")) ||
-      (action === "servers/select" && probe(other)) ||
-      (other === "servers/select" && probe(action));
   }
   private queued?: { action: Action; value?: string };
   private batch?: {
@@ -510,7 +489,7 @@ export class App {
     return `Фактическое состояние службы: ${this.enabledServiceLabel(this.serviceState.enabled)}; текущее состояние: ${this.activeServiceLabel(this.serviceState.active)}`;
   }
   private async loadPendingSubscription() {
-    if (this.closing || this.disposed || this.nativePreviewOnly() || [...this.tasks.values()].some(task => !this.compatible("subscription/read", task.action))) return;
+    if (this.closing || this.disposed || this.nativePreviewOnly() || [...this.tasks.values()].some(task => !compatible("subscription/read", task.action))) return;
     const revision = this.pendingSubscriptionRevision;
     this.pendingSubscriptionRevision = undefined;
     if (revision !== undefined && revision === this.editorRevision &&
@@ -520,7 +499,7 @@ export class App {
   private async loadPendingScreenRead() {
     const action = this.pendingScreenRead;
     if (!action || this.closing || this.disposed || this.backendOffline || this.reconnecting ||
-        this.batch || this.homeTesting || [...this.tasks.values()].some(task => !this.compatible(action, task.action))) return;
+        this.batch || this.homeTesting || [...this.tasks.values()].some(task => !compatible(action, task.action))) return;
     this.pendingScreenRead = undefined;
     if ((action === "profiles/list" && this.screen === "profiles") ||
         (action === "autostart/read" && this.screen === "autostart")) await this.perform(action);
@@ -1036,7 +1015,7 @@ export class App {
     const measurementActive = !!this.batch || this.homeTesting;
     const allowedDuringMeasurement = ["servers/select", "status", "subscription/read"].includes(action);
     if ((measurementActive && !insideBatch && !allowedDuringMeasurement) ||
-        [...this.tasks.values()].some(task => !this.compatible(action, task.action))) {
+        [...this.tasks.values()].some(task => !compatible(action, task.action))) {
       if (this.busy === "status" && action !== "status" && !this.queued && !measurementActive) {
         this.queued = { action, value };
         return;
