@@ -14,8 +14,8 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
   add("global:back", ["escape"], "Назад", editor ? "editor" : "global", () => state.open(
     state.screen.startsWith("profile-") || state.screen === "servers" && !!state.profiles ? "profiles"
       : state.screen === "target" ? "servers"
-      : state.screen === "confirm" && state.confirmation === "subscription" ? "subscription" : "home"), undefined, "none", true);
-  add("global:quit-control", ["ctrl+c"], "Выход", "global", () => void state.close(), undefined, "none", true);
+      : state.screen === "confirm" && state.confirmation === "subscription" ? "subscription" : "home"), state.closing ? "Закрываем приложение." : undefined, "none", true);
+  add("global:quit-control", ["ctrl+c"], "Выход", "global", () => void state.close(), state.closing || state.disposed ? "Закрываем приложение." : undefined, "none", true);
   if (editor) {
     add("editor:submit", ["return"], "Сохранить", "editor", () => {
       if (state.screen === "profile-name") {
@@ -40,17 +40,24 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
     }, undefined, "none", true);
     return actions;
   }
-  add("global:quit", ["q"], "Выход", "global", () => void state.close());
+  add("global:quit", ["q"], "Выход", "global", () => void state.close(), state.closing || state.disposed ? "Закрываем приложение." : undefined);
   if (state.closing) return actions;
   add("global:tasks", ["j"], "Задачи", "global", () => state.open("tasks"));
-  if (state.recovery) add("global:recovery", ["f"], "Действия", "global", () => {
-    if (state.recovery?.actions.includes("reapply")) void state.perform("network/reapply"); else state.open("recovery");
-  });
+  if (state.recovery) {
+    const reapply = state.recovery.actions.includes("reapply");
+    const conflict = [...state.tasks.values()].some(task => !compatible("network/reapply", task.action));
+    const queued = state.busy === "status" && !state.queued && !state.batch && !state.homeTesting;
+    const reason = !reapply ? undefined : state.backendOffline || state.reconnecting ? "Служба управления недоступна. [f] Восстановить связь"
+      : (state.batch || state.homeTesting || conflict) && !queued ? "Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k]." : undefined;
+    add("global:recovery", ["f"], reapply ? "Применить сетевые настройки VPN" : "Действия", "global", () => {
+      if (state.recovery?.actions.includes("reapply")) void state.perform("network/reapply"); else state.open("recovery");
+    }, reason, "notice");
+  }
   const cancellable = [...state.tasks.values()].some(task => !["status", "subscription", "subscription/read"].includes(task.action));
   add("global:cancel", ["k"], "Отменить", "global", () => state.cancel(), cancellable ? undefined : "Нет операции для отмены.");
   const screens: [string, string, string, () => Screen][] = [
     ["home", "h", "Главная", () => "home"], ["servers", "v", "Серверы", () => "servers"],
-    ["subscription", "c", "Подписка", () => state.nativeInstalled() && state.status?.subscription === "configured" ? "profiles" : "subscription"],
+    ["subscription", "c", state.nativeInstalled() && state.status?.subscription === "configured" ? "Профили · подписки и серверы" : "Подписка", () => state.nativeInstalled() && state.status?.subscription === "configured" ? "profiles" : "subscription"],
     ["diagnostics", "d", "Диагностика", () => "diagnostics"],
   ];
   for (const [id, key, label, target] of screens) add(`global:${id}`, [key], label, "global", () => state.open(target()), id === "subscription" && !state.subscriptionAvailable() ? state.nativeUnavailable("subscription") : undefined, "notice", true);
