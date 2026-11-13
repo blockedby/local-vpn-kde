@@ -71,7 +71,7 @@ export function menuItems(state: AppState): MenuItem[] {
       return [
         ...profiles.slice(state.profilePage*pageSize,state.profilePage*pageSize+pageSize).map((profile,i)=>({key:String(i+1),label:`${profile.id===state.profiles?.active?"● ":""}${profile.name} · ${profile.kind==="server"?"сервер":"подписка"} · серверов: ${profile.count} · ${profile.stale ? "сохранённый список" : "актуален"}`,run:()=>void state.browseProfile(profile.id)})),
         {key:"n",label:"Добавить профиль",run:()=>state.open("profile-name")},
-        ...(state.profiles?.active?[{key:"X",label:"Удалить выбранный профиль",run:()=>state.open("profile-remove")}]:[]),
+        ...(state.profiles?.active?[{key:"X",label:"Удалить активный профиль",run:()=>state.open("profile-remove")}]:[]),
         ...(pages>1?[{key:"[",label:"Предыдущие профили",run:()=>{state.profilePage=(state.profilePage+pages-1)%pages;state.selected=0;state.paint()}},{key:"]",label:"Следующие профили",run:()=>{state.profilePage=(state.profilePage+1)%pages;state.selected=0;state.paint()}}]:[]),
       ];
     }

@@ -282,6 +282,7 @@ test("shell: long task overlays scroll and outside clicks cannot activate worksp
     expect(t.captureCharFrame()).toContain("› 12  Выполняется");
     app.tasks.clear(); app.open("profiles"); app.open("profile-remove");
     expect(app.items()[app.selected]?.key).toBe("n");
+    await t.renderOnce(); expect(t.captureCharFrame()).toContain("Удалить активный профиль?");
   } finally { app.tasks.clear(); await app.close(); }
 });
 
