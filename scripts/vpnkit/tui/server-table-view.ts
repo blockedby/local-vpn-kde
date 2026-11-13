@@ -8,6 +8,7 @@ import type { AppState } from "./app-state";
 type BatchKind = "ping" | "speed" | "availability";
 interface TableState {
   visible: boolean;
+  width: number;
   servers: Server[];
   rowCount: number;
   serverID?: string;
@@ -42,7 +43,7 @@ export class ServerTableView {
 
   update(state: TableState) {
     const { batch, frame, liveSpeeds } = state;
-    const width = Math.max(10, this.renderer.terminalWidth - 2);
+    const width = Math.max(10, state.width);
     const showStatus = width >= 78;
     const showSite = width >= 65;
     const nameWidth = Math.max(10, width - (showStatus ? 45 : showSite ? 29 : 21));

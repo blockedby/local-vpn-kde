@@ -200,3 +200,28 @@ test("shell: editor and native confirmation fit the minimum terminal", async () 
     expect(frame).toContain("[n] Нет"); expect(frame).toContain("[y] Да");
   } finally { await app.close(); }
 });
+
+test("shell: details appear at the width threshold and omit hidden backend identifiers", async () => {
+  const { terminal: t, app } = await fixture(119, 24);
+  try {
+    app.servers[0]!.server_id = "secret-endpoint-identifier";
+    app.serverID = "secret-endpoint-identifier";
+    app.servers[0]!.display_name = "Full server name";
+    app.servers[0]!.download_mbps = 42;
+    app.servers[0]!.availability = "ready";
+    app.liveSpeeds.set(app.serverID, 12.5);
+    app.paint(); await t.renderOnce();
+    expect(t.captureCharFrame()).not.toContain("Выбран для VPN:");
+    t.resize(120, 24); await t.renderOnce();
+    let frame = t.captureCharFrame();
+    expect(frame).toContain("Выбран для VPN:");
+    expect(frame).toContain("~12.5 Мбит/с");
+    expect(frame).toContain("Адрес проверки:");
+    expect(frame).not.toContain("secret-endpoint-identifier");
+    t.resize(60, 16); app.onKey({ name: "l", preventDefault() {} }); await t.renderOnce();
+    frame = t.captureCharFrame();
+    expect(frame).toContain("Выбран для VPN:"); expect(frame).toContain("Full server name");
+    expect(frame).not.toContain("secret-endpoint-identifier");
+    app.onKey({ name: "escape", preventDefault() {} }); expect(app.screen).toBe("servers");
+  } finally { await app.close(); }
+});

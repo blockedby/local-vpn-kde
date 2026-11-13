@@ -7,7 +7,7 @@ import { failure } from "./model";
 export function updateCatalog(state: AppState, reply: Reply, action: Action) {
     if ((action === "servers/check-batch" || action === "servers/speed-batch") && reply.catalog?.servers) {
       for (const row of reply.catalog.servers) {
-        state.measurementTimes.set(row.server_id, Date.now());
+        if (action === "servers/speed-batch" && row.download_mbps !== undefined) state.measurementTimes.set(row.server_id, Date.now());
         const at = state.servers.findIndex((s) => s.server_id === row.server_id);
         if (at >= 0)
           state.servers[at] = {

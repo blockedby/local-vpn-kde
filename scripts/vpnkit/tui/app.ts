@@ -3,6 +3,7 @@ import type { Backend } from "./bridge";
 import { palette as p } from "./model";
 import { observeRendererClose } from "./renderer-lifecycle";
 import { ServerTableView } from "./server-table-view";
+import { DetailsView, DETAILS_THRESHOLD, DETAILS_WIDTH } from "./details-view";
 import { MenuView } from "./menu-view";
 import { HeaderView } from "./header-view";
 import { TabView } from "./tab-view";
@@ -24,6 +25,7 @@ export class App extends AppState {
   private summaryView: SummaryView;
   private menuView: MenuView;
   private tableView: ServerTableView;
+  private detailsView: DetailsView;
   private editorView: EditorView;
   private noticeView: NoticeView;
   private footerView: FooterView;
@@ -48,7 +50,12 @@ export class App extends AppState {
       else if (action?.unavailableBehavior === "notice" && action.unavailableReason) this.notify(action.unavailableReason, true);
       this.paint();
     });
-    this.tableView = new ServerTableView(renderer, this.content, index => { if (isOverlay(this.screen) || this.helpOpen) return; const server = this.visibleServers()[index]; if (server) { this.serverID = server.server_id; this.syncServerViewport(); this.paint(); } });
+    const serverArea = new BoxRenderable(renderer, { flexDirection: "row", flexGrow: 1, minHeight: 0, overflow: "hidden" });
+    this.content.add(serverArea);
+    const tableArea = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, minWidth: 0, overflow: "hidden" });
+    serverArea.add(tableArea);
+    this.detailsView = new DetailsView(renderer, serverArea);
+    this.tableView = new ServerTableView(renderer, tableArea, index => { if (isOverlay(this.screen) || this.helpOpen) return; const server = this.visibleServers()[index]; if (server) { this.serverID = server.server_id; this.syncServerViewport(); this.paint(); } });
     this.editorView = new EditorView(renderer, this.content, value => this.edit(value));
     this.noticeView = new NoticeView(renderer, this.root);
     this.footerView = new FooterView(renderer, this.root);
@@ -58,11 +65,15 @@ export class App extends AppState {
   }
   private onResize = () => { this.syncServerViewport(); this.paint(); };
   override viewport() { return { width: this.renderer.width, height: this.renderer.height, terminalHeight: this.renderer.terminalHeight }; }
-  override paintMeasurement() { super.paintMeasurement(); this.headerView.update(this, this.demo); }
+  override paintMeasurement() { super.paintMeasurement(); this.headerView.update(this, this.demo); this.detailsView.update(this, this.renderer.width >= DETAILS_THRESHOLD && (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0); if (this.screen === "details") this.overlayView.update(this); }
   override paintTable() {
     super.paintTable();
-    this.tableView.update({ visible: this.renderer.width >= 60 && this.renderer.height >= 16 && (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0, servers: this.visibleServers(), rowCount: this.rowCount(), serverID: this.serverID, batch: this.batch, frame: this.frame, liveSpeeds: this.liveSpeeds, sort: this.sort });
+    const tableVisible = (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0;
+    const wide = this.renderer.width >= DETAILS_THRESHOLD && tableVisible;
+    this.detailsView.update(this, wide);
+    this.tableView.update({ width: this.renderer.terminalWidth - 2 - (wide ? DETAILS_WIDTH : 0), visible: this.renderer.width >= 60 && this.renderer.height >= 16 && (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0, servers: this.visibleServers(), rowCount: this.rowCount(), serverID: this.serverID, batch: this.batch, frame: this.frame, liveSpeeds: this.liveSpeeds, sort: this.sort });
     this.headerView.update(this, this.demo);
+    if (this.screen === "details") this.overlayView.update(this);
   }
   override paintProgress() { super.paintProgress(); this.tabView.update(this); this.headerView.update(this, this.demo); }
   override paint() {

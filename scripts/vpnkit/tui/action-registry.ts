@@ -24,7 +24,7 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
       : state.screen === "confirm" && state.confirmation === "subscription" ? "subscription"
       : state.screen === "cancel-confirm" ? "tasks"
       : state.screen === "retry-confirm" ? "recovery"
-      : ["confirm", "tasks", "recovery"].includes(state.screen) ? state.tab : "servers", state.screen !== "confirm"), state.closing ? "Закрываем приложение." : undefined, "none", true);
+      : ["details", "confirm", "tasks", "recovery"].includes(state.screen) ? state.tab : "servers", state.screen !== "confirm"), state.closing ? "Закрываем приложение." : undefined, "none", true);
   add("global:quit-control", ["ctrl+c"], "Выход", "global", () => void state.close(), state.closing || state.disposed ? "Закрываем приложение." : undefined, "none", true);
   if (editor) {
     add("editor:submit", ["return"], "Сохранить", "editor", () => {
@@ -51,6 +51,11 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
     return actions;
   }
   if (isOverlay(state.screen)) {
+    if (state.screen === "details") {
+      add("details:up", ["up", "pageup"], "Прокрутить вверх", "menu", () => { state.detailsOffset = Math.max(0, state.detailsOffset - 1); state.paint(); });
+      add("details:down", ["down", "pagedown"], "Прокрутить вниз", "menu", () => { state.detailsOffset++; state.paint(); });
+      return actions;
+    }
     const items = state.items();
     const move = (delta: number) => { state.selected = (state.selected + items.length + delta) % Math.max(1, items.length); state.paint(); };
     add("menu:previous", ["up"], "Выбор", "menu", () => move(-1), items.length <= 1 ? "Нет другого пункта." : undefined);
@@ -96,6 +101,7 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
     for (const item of lifecycle) actions.push({ ...item, scope: "global", run: () => { item.run(); state.paint(); } });
   const items = state.items();
   if (state.screen === "servers") {
+    add("servers:details", ["l"], "Подробности сервера", "server-table", () => state.open("details"), state.serverID ? undefined : "Нет выбранного сервера.");
     const ping = items.find(item => item.key === "p");
     add(ping?.id ?? "servers:ping-alias", ["p"], "Ping всех + сайт", "server-table", () => void state.runBatch("ping"),
       state.busy || state.batch || state.homeTesting ? "Дождитесь завершения или отмените текущую операцию [k]."

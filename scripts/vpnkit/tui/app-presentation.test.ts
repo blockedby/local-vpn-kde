@@ -662,7 +662,7 @@ test("presentation: speed batch shows parallel preparation and speed stage, canc
  try {await app.perform("status");t.mockInput.pressKey("v");await settle();t.mockInput.pressKey("t");await settle();
  const event=(i:number,stage:CheckProgress["stage"]):CheckProgress=>({event:"server-check",server_id:rows[i]!.server_id,stage,ping_status:stage==="start"?"untested":"ready",latency_ms:20,availability:"untested"});
  b.onCheckProgress?.(event(0,"start"));b.onCheckProgress?.(event(1,"start"));await t.renderOnce();
- expect(t.captureCharFrame().split("подготовка").length-1).toBe(2);
+ expect(t.captureCharFrame().split("\n").map(line => line.slice(0, 82)).join("\n").split("подготовка").length-1).toBe(2);
  b.onCheckProgress?.(event(0,"speed"));await t.renderOnce();expect(t.captureCharFrame()).toContain("замер");expect(t.captureCharFrame()).toContain("подготовка");
  b.onCheckProgress?.({...event(0,"complete"),availability:"ready",status:"ready",download_mbps:31});
  t.mockInput.pressKey("k");finish({...reply(),ok:false,reason:"cancelled"});await settle();await t.renderOnce();

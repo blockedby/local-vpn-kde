@@ -48,10 +48,15 @@ export class OverlayView {
       this.dialogSummary.update(state);
       const summaryHeight = this.dialogSummary.fit(width - 2);
       const height = Math.min(this.renderer.terminalHeight - 4, Math.max(5, 2 + summaryHeight + (editor ? 3 : state.items().length)));
+      if (state.screen === "details") {
+        state.detailsOffset = Math.min(state.detailsOffset, Math.max(0, summaryHeight - (height - 2)));
+        this.dialogSummary.update(state);
+        this.dialogSummary.fit(width - 2, state.detailsOffset, height - 2);
+      }
       this.dialog.width = width; this.dialog.height = height;
       this.dialog.left = Math.floor((this.renderer.terminalWidth - width) / 2);
       this.dialog.top = Math.floor((this.renderer.terminalHeight - height) / 2);
-      this.dialog.title = ["confirm", "profile-remove", "cancel-confirm", "retry-confirm"].includes(state.screen) ? " Подтверждение " : state.screen === "tasks" ? " Задачи " : state.screen === "recovery" ? " Восстановление " : " Редактор ";
+      this.dialog.title = ["confirm", "profile-remove", "cancel-confirm", "retry-confirm"].includes(state.screen) ? " Подтверждение " : state.screen === "details" ? " Сервер " : state.screen === "tasks" ? " Задачи " : state.screen === "recovery" ? " Восстановление " : " Редактор ";
       this.dialogMenu.update(state.items(), editor, state.selected, true);
     }
     this.box.visible = state.helpOpen;

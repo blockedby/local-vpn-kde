@@ -13,7 +13,7 @@ import { testHomeSpeed, runBatch, cancelTask, cancel, retryCheck, reconnectBacke
 import { defineMenuActions, menuItems, type ActionDefinition } from "./menu-actions";
 
 export type Screen =
-  | "tasks" | "cancel-confirm" | "recovery" | "retry-confirm"
+  | "details" | "tasks" | "cancel-confirm" | "recovery" | "retry-confirm"
  | "profiles" | "profile-name" | "profile-source" | "profile-remove"
   | "autostart"
   | "home" | "settings"
@@ -22,7 +22,7 @@ export type Screen =
   | "diagnostics"
   | "target"
   | "confirm";
-export const overlayScreens: readonly Screen[] = ["confirm", "cancel-confirm", "retry-confirm", "profile-remove", "tasks", "recovery", "subscription", "target", "profile-name", "profile-source"];
+export const overlayScreens: readonly Screen[] = ["details", "confirm", "cancel-confirm", "retry-confirm", "profile-remove", "tasks", "recovery", "subscription", "target", "profile-name", "profile-source"];
 export const isOverlay = (screen: Screen) => overlayScreens.includes(screen);
 export type Batch = "ping" | "speed" | "availability";
 const phases: Record<string, string> = {
@@ -70,6 +70,7 @@ export class AppState {
   tab: "servers" | "profiles" | "diagnostics" | "settings" = "servers";
   helpOpen = false;
   helpOffset = 0;
+  detailsOffset = 0;
   measurementTimes = new Map<string, number>();
   profiles?: Reply["profiles"];
   profileName = "";
@@ -215,7 +216,7 @@ export class AppState {
       batch.pinged.add(row.server_id);
       if (row.stage === "speed" && batch.target === this.target) server.availability = row.availability;
       if (row.stage === "complete") {
-        this.measurementTimes.set(row.server_id, Date.now());
+        if (batch.kind === "speed" && row.download_mbps !== undefined) this.measurementTimes.set(row.server_id, Date.now());
         if (batch.target === this.target) server.availability = row.availability;
         if (batch.kind === "speed") { server.status = row.status ?? "failed"; server.download_mbps = row.download_mbps; server.download_seconds = row.download_seconds; server.downloaded_bytes = row.downloaded_bytes; }
         batch.running.delete(row.server_id);
@@ -422,6 +423,7 @@ export class AppState {
     this.helpOpen = false;
     this.pendingScreenRead = undefined;
     this.selected = screen === "profile-remove" ? 1 : 0;
+    if (screen === "details") this.detailsOffset = 0;
     this.serverMenu = false;
     this.navigationRevision++;
     if (screen === "subscription") {

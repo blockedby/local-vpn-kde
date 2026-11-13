@@ -2,6 +2,7 @@ import { BoxRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
 import type { AppState } from "./app-state";
 import { palette as p } from "./model";
 import { wrapText } from "./formatting";
+import { detailsLines } from "./details-view";
 
 export class SummaryView {
   private summary: TextRenderable;
@@ -10,10 +11,10 @@ export class SummaryView {
     this.summary.minHeight = 0;
     parent.add(this.summary);
   }
-  fit(width: number) {
+  fit(width: number, offset = 0, limit = Infinity) {
     const lines = this.summary.chunks.map(chunk => chunk.text).join("").split("\n").flatMap(line => wrapText(line, width));
-    this.summary.content = lines.join("\n");
-    this.summary.height = lines.length;
+    this.summary.content = lines.slice(offset, offset + limit).join("\n");
+    this.summary.height = Math.min(limit, Math.max(0, lines.length - offset));
     return lines.length;
   }
   hide() { this.summary.visible = false; this.summary.height = 0; }
@@ -21,6 +22,7 @@ export class SummaryView {
     const gateway = state.status?.gateway_state ?? state.status?.vpn_state;
     const gatewayNames: Record<string, string> = { healthy: "готов", absent: "не запущен", inactive: "не запущен", stopped: "остановлен", starting: "запускается", unhealthy: "ошибка", running: "проверяется" };
     this.summary.height = state.screen === "diagnostics" ? 6 : 2;
+    if (state.screen === "details") this.summary.content = detailsLines(state).join("\n");
     if (state.screen === "tasks") this.summary.content = state.tasks.size ? "Текущие задачи" : "Нет выполняющихся задач";
     if (state.screen === "cancel-confirm") this.summary.content = "Точно отменить эту операцию?";
     if (state.screen === "retry-confirm") this.summary.content = "Точно повторить изменение VPN?";
