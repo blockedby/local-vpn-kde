@@ -18,9 +18,9 @@ import { initial, rows, reply, FakeBackend, settle } from "./app-test-fixtures";
 function actionTarget(app: App, root: Renderable, id: string) {
   if (!app.actions().some(item => item.id === id)) throw new Error(`Missing action: ${id}`);
   const action = app.actions().find(item => item.id === id)!;
-  const rendered = app.items().find(item => item.key === action.key);
+  const index = app.items().findIndex(item => item.key === action.key);
   const visit = (node: Renderable): Renderable | undefined => {
-    if (node.id === `action:${isOverlay(app.screen) ? "overlay" : "workspace"}:${rendered?.id}` && node.visible) return node;
+    if (node.id === `menu:${isOverlay(app.screen) ? "overlay" : "workspace"}:row:${index}` && node.visible) return node;
     for (const child of node.getChildren()) {
       const found = visit(child);
       if (found) return found;
