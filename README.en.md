@@ -57,13 +57,13 @@ cd local-vpn-kde
 
 ## Get connected
 
-**`c` Profiles** → add a link → **`v` Servers** → select a server → **`s` Connect VPN**. If the service is stopped, start it using the same menu item first.
+Press `c` to set up the first subscription or link → **`v` Servers** → select a server → **`s` Connect VPN**. If the service is stopped, start it using the same key first. With a configured subscription, installed native mode uses `c` to open Profiles; you can also reach that tab with `Tab`.
 
 `m` — routing mode · `a` — autostart · `d` — diagnostics · `x` — disconnect VPN.
 
 The server table opens first. `Tab` cycles through Servers, Profiles, Diagnostics and Settings; the status line shows the connection, selected server and routing mode. `?` opens help, `:` or `Ctrl+P` searches commands, and `j` opens activity. Checks can overlap or wait in a queue; cancel a task from the activity panel.
 
-In the table, `/` filters names, `Enter` keeps the filter and `Esc` clears it. `p` checks ping and website access and `t` checks speed and website access for the shown servers; `T` tests the row under the cursor and `b` offers the fastest measured shown server for confirmation. `o` cycles sort columns, `[` and `]` choose a column, and `\` reverses direction; clicking a header also sorts it. `l` opens server details, `i` opens settings, and `X` removes the selected profile after confirmation. `a` opens autostart; it does not run ping.
+In the table, `/` filters names, `Enter` keeps the filter and `Esc` clears it. `p` checks ping and website access and `t` checks speed and website access for the shown servers; `T` tests the row under the cursor and `b` offers the fastest measured shown server for confirmation. `o` cycles sort columns, `[` and `]` choose a column, and `\` reverses direction; clicking a header also sorts it. `l` opens server details, `i` opens settings, and `X` removes the active profile after confirmation. `a` opens autostart; it does not run ping.
 
 ## Learn more
 

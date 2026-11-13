@@ -78,7 +78,7 @@ The installer requests administrator access when needed, installs build and runt
 
 ## First connection
 
-1. Open **Profiles** (`c`, «Профили») and add a subscription or an individual server link.
+1. Press `c` and add the first subscription or an individual server link. Once installed native mode is configured, `c` opens Profiles («Профили»); you can also reach that tab with `Tab`.
 2. Open **Servers** (`v`, «Серверы»). Refresh a new subscription (`r`), then select and apply a server.
 3. Optionally check latency, website access or speed from the server list.
 4. Start the service if it is stopped, then choose **Connect VPN** (`s`, «Подключить VPN»).
@@ -91,7 +91,7 @@ The installer requests administrator access when needed, installs build and runt
 | :---: | :--- |
 | `s` / `x` | Start the service or connect the VPN / disconnect the VPN, depending on state |
 | `v` | Servers and connection checks |
-| `c` | Profiles: subscriptions and individual servers |
+| `c` | Profiles in installed native mode with a configured subscription; otherwise the subscription editor |
 | `m` | Strict / smart routing |
 | `a` | Autostart settings |
 | `d` | Diagnostics |
@@ -104,7 +104,7 @@ The installer requests administrator access when needed, installs build and runt
 | `l` | Details for the row under the cursor |
 | `:` / `Ctrl+P` | Search commands |
 | `j` / `k` | Activity / cancel operation |
-| `X` | Remove the selected profile after confirmation |
+| `X` | Remove the active profile after confirmation |
 | `z` | Stop the native service and its VPN |
 | `Esc` / `q` | Go back / exit the interface |
 
