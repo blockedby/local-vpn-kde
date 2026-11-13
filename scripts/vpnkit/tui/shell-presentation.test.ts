@@ -317,6 +317,8 @@ test("shell: activity shows running, queued and finished work and cancellation p
     frame = t.captureCharFrame(); expect(frame).toContain("Отмена запрошена");
     app.cancelTask(app.queue[0]!.id);
     finish({ ...importReply(), ok: false, reason: "cancelled" }); await batch;
+    app.selected = 0; app.paint(); await t.renderOnce();
+    expect(t.captureCharFrame().split("\n").at(-1)).not.toContain("Enter отменить");
   } finally { finish(importReply()); await Bun.sleep(10); await app.close(); }
 });
 

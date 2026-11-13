@@ -10,7 +10,7 @@ export class FooterView {
   update(state: AppState, editor: boolean) {
     if (state.helpOpen) { this.footer.content = "↑↓ прокрутка · Esc / ? закрыть"; return; }
     if (state.filterEditing) { this.footer.content = "Enter применить · Esc очистить"; return; }
-    if (state.screen === "tasks") { this.footer.content = "↑↓ выбор · Enter отменить · Esc назад · ? помощь"; return; }
+    if (state.screen === "tasks") { this.footer.content = `↑↓ выбор${state.items()[state.selected]?.available ? " · Enter отменить" : ""} · Esc назад · ? помощь`; return; }
     const actions = state.groupedActions().flatMap(group => group.actions).filter(action => action.available);
     if (isOverlay(state.screen) && !editor) {
       const choices = actions.filter(action => !["global:help", "global:back", "global:quit-control", "menu:previous", "menu:next"].includes(action.id));
