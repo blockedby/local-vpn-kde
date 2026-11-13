@@ -44,6 +44,7 @@ SCREEN = {
     'filter': 'Фильтр:', 'queued': 'в очереди 1 [j]', 'tasks': 'Задачи',
     'running': 'Выполняются', 'queue_heading': 'В очереди', 'history': 'Завершены',
     'ping_task': 'Ping и сайт', 'speed_task': 'Скорость и сайт',
+    'conflict': 'Эта операция конфликтует с текущей.',
 }
 KEY = {
     'site': 'e', 'diagnostics': 'd', 'refresh': 'u', 'servers': 'v', 'servers_alias': 'h',
@@ -178,6 +179,20 @@ def key(value):
     pump(.2)
 
 
+def open_profile(index):
+    # Profile reads and status polls can still be in flight when the cached
+    # profile rows appear. Retry the same selection only on a visible conflict.
+    deadline = time.monotonic() + 30
+    while True:
+        key(str(index + 1))
+        text = wait(lambda text: SCREEN['ping_column'] in text or SCREEN['conflict'] in text,
+                    'open profile', timeout=max(.1, deadline - time.monotonic()))
+        if SCREEN['ping_column'] in text:
+            return
+        assert time.monotonic() < deadline, 'profile selection remained busy'
+        pump(1)
+
+
 def site(url):
     key(KEY['site'])
     wait(lambda text:SCREEN['https'] in text or SCREEN['site_editor'] in text,'site editor')
@@ -227,7 +242,7 @@ try:
     assert SCREEN['docker'] not in frame(), 'native UI displays Docker wording'
     key(KEY['profiles'])
     wait(lambda text:SCREEN['fixture_profile'] in text,'loaded profile list',30)
-    key(str(original_index+1))
+    open_profile(original_index)
     wait(lambda text:SCREEN['ping_column'] in text,'original server table',30)
     key(KEY['filter']); key(filter_name); key('\r')
     wait(lambda text: SCREEN['filter'] in text and f'1/{original_count}' in text, 'filter narrows original catalog')
@@ -240,7 +255,7 @@ try:
     record({'filtered_catalog_and_ping_batch':'passed','shown':1,'total':original_count})
     key(KEY['profiles'])
     wait(lambda text:SCREEN['fixture_profile'] in text,'return to profile list',30)
-    key(str(active_index+1))
+    open_profile(active_index)
     table = wait(lambda text:SCREEN['ping_column'] in text and SCREEN['fixture_node'] in text,'loaded fixture server table',30)
     # At 140 columns the details pane has its own nonblank lines beside the
     # table.  Count only the table's columns, not the entire terminal row.
