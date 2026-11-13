@@ -1,6 +1,7 @@
 import { test, expect } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import { App, cell } from "./app";
+import { AppState } from "./app-state";
 import {
   Bridge,
   type Action,
@@ -264,22 +265,20 @@ test("navigation and diagnostics Back are immediate during a held mutation", asy
   }
 });
 test("completed diagnostics never reopen a screen the user left", async () => {
-  const t = await createTestRenderer({ width: 80, height: 24 });
   const b = new FakeBackend();
   let finish!: (r: Reply) => void;
   b.hold = { action: "diagnostics", promise: new Promise((r) => (finish = r)) };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({name, preventDefault() {}});
   try {
     await app.perform("status");
-    t.mockInput.pressKey("d");
+    key("d");
     const task = app.perform("diagnostics");
-    t.mockInput.pressEscape();
+    key("escape");
     await Bun.sleep(60);
     finish(reply());
     await task;
-    await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("OpenVPN / KDE");
-    expect(t.captureCharFrame()).toContain("Подключить VPN");
+    expect(app.screen).toBe("home");
   } finally {
     finish(reply());
     await settle();
@@ -1415,9 +1414,7 @@ test("removing the active source browses its fallback without changing the VPN",
   } finally { await app.close(); }
 });
 
-// Real input/rendering with a deterministic backend; no installed-system claim.
 test("installed native separates service startup, connection, disconnect and shutdown", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true, gateway_state: "absent" };
   const original = b.request.bind(b);
@@ -1428,26 +1425,29 @@ test("installed native separates service startup, connection, disconnect and shu
     if (action === "stop") b.status.gateway_state = "stopped";
     return original(action, value);
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({name, preventDefault() {}});
   try {
     await app.perform("status");
-    t.mockInput.pressKey("s"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("VPN отключён");
-    expect(t.captureCharFrame()).toContain("Подключить VPN");
+    key("s"); await settle();
+    expect(app.status?.networkmanager_active).toBe("no");
+    expect(app.status?.gateway_state).toBe("healthy");
     expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start"]);
-    t.mockInput.pressKey("s"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("VPN подключён");
-    t.mockInput.pressKey("x"); await settle();
+    key("s"); await settle();
+    expect(app.status?.networkmanager_active).toBe("yes");
+    key("x"); await settle();
     expect(b.calls.at(-1)?.action).toBe("start");
-    t.mockInput.pressKey("n"); await settle();
+    key("n"); await settle();
     expect(b.status.networkmanager_active).toBe("yes");
-    t.mockInput.pressKey("x"); t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Native-служба работает");
+    key("x"); key("y"); await settle();
+    expect(app.status?.networkmanager_active).toBe("no");
+    expect(app.noticeIdentity).toEqual({action:"disconnect",reason:"ok",ok:true});
     expect(b.status.gateway_state).toBe("healthy");
-    t.mockInput.pressKey("z"); await settle();
+    key("z"); await settle();
     expect(b.calls.at(-1)?.action).toBe("disconnect");
-    t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Native-служба и VPN остановлены");
+    key("y"); await settle();
+    expect(app.status?.gateway_state).toBe("stopped");
+    expect(app.noticeIdentity).toEqual({action:"stop",reason:"ok",ok:true});
     expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start", "start", "disconnect", "stop"]);
   } finally { await app.close(); }
 });
