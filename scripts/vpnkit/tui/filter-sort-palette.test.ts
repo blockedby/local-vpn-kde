@@ -39,7 +39,8 @@ test("filtered batches and fastest selection use shown servers; hidden late resu
 test("sort direction keeps missing measurements last and preserves cursor", async () => {
   const { state } = fixture(); state.servers.push({ ...rows[0], server_id: "third", latency_ms: 5, download_mbps: 7 });
   state.servers[0]!.latency_ms = 10; state.servers[1]!.latency_ms = undefined;
-  for (const descending of [false, true]) expect(sortedServers(state.servers, "ping", undefined, descending).at(-1)?.server_id).toBe(rows[1].server_id);
+  state.servers[0]!.download_mbps = 10; state.servers[1]!.download_mbps = undefined;
+  for (const sort of ["ping", "speed"] as const) for (const descending of [false, true]) expect(sortedServers(state.servers, sort, undefined, descending).at(-1)?.server_id).toBe(rows[1].server_id);
   const id = state.serverID; state.setSort("ping"); state.setSort("ping"); expect(state.serverID).toBe(id);
   await state.close();
 });
