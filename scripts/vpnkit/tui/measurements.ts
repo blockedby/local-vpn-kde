@@ -56,7 +56,7 @@ export async function testHomeSpeed(state: AppState, sourceID?: string) {
 
 export async function runBatch(state: AppState, kind: Batch, retry?: { ids: string[]; target: string }) {
     if (state.batch || state.homeTesting || [...state.tasks.values()].some(task => !compatible(kind === "speed" ? "servers/speed-batch" : "servers/check-batch", task.action))) {
-      const snapshot = retry ?? (state.filter.trim() ? { ids: state.sortedServers().map(server => server.server_id), target: state.target } : undefined);
+      const snapshot = retry ?? (state.catalogLoaded || state.filter.trim() ? { ids: state.sortedServers().map(server => server.server_id), target: state.target } : undefined);
       if (snapshot && !snapshot.ids.length) { state.notify("Нет показанных серверов для проверки.", true); return; }
       state.enqueue(kind === "speed" ? "servers/speed-batch" : "servers/check-batch", snapshot ? JSON.stringify(snapshot) : undefined, "batch", kind);
       return;

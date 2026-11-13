@@ -58,6 +58,15 @@ test("a queued filtered batch retains its original scope and deduplicates subseq
   await state.close();
 });
 
+test("an unfiltered queued batch keeps the whole shown catalog after filtering", async () => {
+  const { state, backend } = fixture(); let finish!: (value: ReturnType<typeof reply>) => void;
+  backend.hold = { action: "servers/speed-batch", promise: new Promise(resolve => { finish = resolve; }) };
+  const running = state.runBatch("speed"); await Bun.sleep(10); await state.runBatch("ping");
+  state.editFilter("ber"); finish(reply()); await running; await Bun.sleep(20);
+  expect(JSON.parse(backend.calls.find(call => call.action === "servers/check-batch")!.value!).ids).toHaveLength(2);
+  await state.close();
+});
+
 test("changing sort during a pass preserves frozen order until completion", async () => {
   const { state, backend } = fixture();
   let finish!: (value: ReturnType<typeof reply>) => void;
