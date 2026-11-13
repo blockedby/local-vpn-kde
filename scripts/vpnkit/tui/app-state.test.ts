@@ -204,3 +204,17 @@ test("profile removal rejects a changed active profile while confirmation is ope
     expect(state.notice).toContain("изменил");
   } finally { await state.close(); }
 });
+
+test("late profile open leaves a newer confirmation in place", async () => {
+  const backend = new FakeBackend();
+  let finish!: (reply: Reply) => void;
+  backend.hold = { action: "profiles/open", promise: new Promise(resolve => { finish = resolve; }) };
+  const state = new AppState(backend);
+  try {
+    const work = state.browseProfile("a");
+    state.confirm("disconnect");
+    finish(reply()); await work;
+    expect(state.screen).toBe("confirm");
+    expect(state.confirmation).toBe("disconnect");
+  } finally { await state.close(); }
+});

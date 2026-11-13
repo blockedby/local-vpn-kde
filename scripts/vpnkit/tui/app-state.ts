@@ -95,21 +95,23 @@ export class AppState {
   }
 
   async browseProfile(id: string) {
+    const navigation = this.navigationRevision;
     const reply = await this.perform("profiles/open", id);
     if (!reply?.ok) return;
     this.resetProfileCatalog();
-    this.open("servers");
+    if (navigation === this.navigationRevision) this.open("servers");
   }
 
   async addProfile(source: string) {
+    const navigation = this.navigationRevision, editor = this.editorRevision;
     const reply = await this.perform(
       "profiles/add",
       JSON.stringify({ name: this.profileName, source }),
     );
     if (!reply?.ok) return;
-    this.editorValue = "";
+    if (navigation === this.navigationRevision && editor === this.editorRevision) this.editorValue = "";
     this.resetProfileCatalog();
-    this.open("profiles");
+    if (navigation === this.navigationRevision && editor === this.editorRevision) this.open("profiles");
   }
 
   async removeProfile() {
@@ -121,10 +123,11 @@ export class AppState {
       this.notify("Профиль изменился. Выберите его заново.", true);
       return;
     }
+    const navigation = this.navigationRevision;
     const reply = await this.perform("profiles/remove", target.id);
     if (!reply?.ok) return;
     this.resetProfileCatalog();
-    this.open("profiles");
+    if (navigation === this.navigationRevision) this.open("profiles");
   }
   tasks = new Map<string, { action: Action; measurement: boolean; started: number; phase: string; value?: string; cancelRequested?: boolean }>();
   nextTask = 0;
@@ -344,7 +347,9 @@ export class AppState {
   onBeforeDispose() {}
   async onDispose() {}
   edit(value: string) {
-    this.editorValue = safeText(value);
+    const next = safeText(value);
+    if (next === this.editorValue) return;
+    this.editorValue = next;
     this.editorRevision++;
     if (this.screen === "subscription") this.draft = this.editorValue;
     this.changed("editor");
@@ -354,7 +359,8 @@ export class AppState {
     this.animationEnabled = true;
     this.syncAnimation();
     this.poll = setInterval(() => this.pollStatus(), 5000);
-    void this.perform("status").then(() => { if (this.screen === "servers" && !this.closing) this.open("servers"); });
+    const navigation = this.navigationRevision;
+    void this.perform("status").then(() => { if (navigation === this.navigationRevision && this.screen === "servers" && !this.closing) this.open("servers"); });
   }
   pollStatus() {
     if (!this.closing && !this.backendOffline && !this.reconnecting && ![...this.tasks.values()].some(task => task.action === "status" || !compatible("status", task.action)))
