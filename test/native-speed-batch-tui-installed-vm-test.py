@@ -246,7 +246,8 @@ try:
         assert len(bridges)==1, 'cannot identify UI-owned bridge for controlled failure'
         os.kill(bridges[0],signal.SIGTERM)
         key('h');key('u')
-        wait(lambda text:'Служба управления недоступна' in text,'controlled status transport failure',30,True)
+        wait(lambda text:'Связь потеряна. Действие могло продолжиться.' in text and 'Восстановить связь' in text,
+             'controlled status transport failure',30,True)
         assert 'NATIVE' in frame() and 'Docker' not in frame(), 'transport failure changed native identity to Docker'
         assert 'Статус недоступен' in frame(), 'failed transport retained stale healthy status'
         key('v');pump(.3)
