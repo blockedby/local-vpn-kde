@@ -464,3 +464,110 @@ test("presentation: failed subscription save retains input and Back works while 
     await app.close();
   }
 });
+
+test("presentation: server table is sorted by name, keeps columns aligned and exposes combined batch actions", async () => {
+  const t = await createTestRenderer({ width: 100, height: 30 });
+  const b = new FakeBackend();
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v");
+    await settle();
+    await t.renderOnce();
+    const frame = t.captureCharFrame();
+    expect(frame.indexOf("Amsterdam")).toBeLessThan(frame.indexOf("Tokyo"));
+    for (const text of [
+      "Ping всех",
+      "Скорость + сайт",
+      "Ping всех + сайт",
+      "Ping мс",
+      "Мбит/с",
+    ])
+      expect(frame).toContain(text);
+    t.mockInput.pressKey("o");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("ping ↑");
+    t.resize(90, 18); await t.renderOnce();
+    const compact = t.captureCharFrame();
+    expect(compact).not.toContain("Docker:");
+    expect(compact).not.toContain("Сортировка [o]");
+    expect(compact).not.toContain("Сайт: https:");
+    expect(compact).toContain("Amsterdam");
+    t.resize(100, 30); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Сортировка [o]");
+    expect(t.captureCharFrame()).toContain("Docker:");
+    t.mockInput.pressArrow("down");
+    t.mockInput.pressEnter();
+    await t.renderOnce();
+  } finally {
+    await app.close();
+  }
+});
+
+test("presentation: batch publishes each result and allows navigation without cancelling", async () => {
+  const t = await createTestRenderer({ width: 100, height: 30 });
+  const b = new FakeBackend();
+  let finish!: (r: Reply) => void;
+  b.hold = {
+    action: "servers/check-batch",
+    promise: new Promise((r) => (finish = r)),
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v");
+    await settle();
+    t.mockInput.pressKey("p");
+    await settle();
+    t.mockInput.pressKey("d");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+    b.hold = undefined;
+    finish({
+      ...reply(),
+      catalog: {
+        status: "ok",
+        servers: rows.map((s) => ({
+          ...s,
+          latency_ms: 24,
+          ping_status: "ready",
+          availability: "ready",
+        })),
+      },
+    });
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("2/2");
+  } finally {
+    finish(reply());
+    await settle();
+    await app.close();
+  }
+});
+
+test("presentation: Cancel stops the remaining batch and preserves its completed rows", async () => {
+  const t = await createTestRenderer({ width: 100, height: 30 });
+  const b = new FakeBackend();
+  let finish!: (r: Reply) => void;
+  b.hold = {
+    action: "servers/speed-batch",
+    promise: new Promise((r) => (finish = r)),
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v");
+    await settle();
+    t.mockInput.pressKey("t");
+    await settle();
+    t.mockInput.pressKey("k");
+    finish({ ...reply(), ok: false, reason: "cancelled" });
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Остановлено");
+  } finally {
+    finish(reply());
+    await settle();
+    await app.close();
+  }
+});
