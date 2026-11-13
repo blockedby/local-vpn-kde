@@ -119,6 +119,8 @@ export class AppState {
   }
   tasks = new Map<string, { action: Action; measurement: boolean; started: number; phase: string; value?: string; cancelRequested?: boolean }>();
   nextTask = 0;
+  statusRevision = 0;
+  readFlights = new Map<Action, { first: Promise<Reply | undefined>; followup?: Promise<Reply | undefined> }>();
   cancelTaskID?: string;
   recovery?: Recovery & { action: Action; value?: string; homeServerID?: string; batchRetry?: { kind: Batch; ids: string[]; target: string } };
   retryOperation?: NonNullable<AppState["recovery"]>;
@@ -577,7 +579,20 @@ export class AppState {
   }
   updateCatalog(reply: Reply, action: Action) { return updateCatalog(this, reply, action); }
   perform(action: Action, value?: string, insideBatch = false): Promise<Reply | undefined> {
-    return perform(this, action, value, insideBatch);
+    if (requestClasses[action] !== "read") return perform(this, action, value, insideBatch);
+    const flight = this.readFlights.get(action);
+    if (flight) {
+      if (!flight.followup) flight.followup = flight.first.then(() => {
+        if (this.readFlights.get(action) === flight) this.readFlights.delete(action);
+        return this.perform(action, value, insideBatch);
+      });
+      return flight.followup;
+    }
+    const first = perform(this, action, value, insideBatch);
+    const entry = { first, followup: undefined as Promise<Reply | undefined> | undefined };
+    this.readFlights.set(action, entry);
+    void first.finally(() => { if (!entry.followup && this.readFlights.get(action) === entry) this.readFlights.delete(action); });
+    return first;
   }
   inlineSpeed() {
     return this.viewport().width < 70 || this.viewport().height < 25;

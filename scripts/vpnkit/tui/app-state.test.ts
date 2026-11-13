@@ -165,3 +165,22 @@ test("fastest confirmation uses session results, rejects unreachable sites and r
     expect(backend.calls.filter(call => call.action === "servers/select").at(-1)?.value).toBe(rows[1]!.server_id);
   } finally { await state.close(); }
 });
+
+test("repeated status reads coalesce into one follow-up", async () => {
+  const backend = new FakeBackend();
+  const pending: ((value: Reply) => void)[] = [];
+  backend.request = (action, value) => {
+    backend.calls.push({ action, value });
+    return new Promise(resolve => pending.push(resolve));
+  };
+  const state = new AppState(backend);
+  try {
+    const first = state.perform("status");
+    const rest = Array.from({ length: 25 }, () => state.perform("status"));
+    expect(backend.calls).toHaveLength(1);
+    pending.shift()!(reply()); await first; await settle();
+    expect(backend.calls).toHaveLength(2);
+    pending.shift()!(reply()); await Promise.all(rest);
+    expect(backend.calls).toHaveLength(2);
+  } finally { await state.close(); }
+});

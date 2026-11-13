@@ -97,6 +97,7 @@ export async function perform(
       return;
     }
     const requestID = `ui-${++state.nextTask}`;
+    const requestRevision = state.nextTask;
     const requestRuntime = state.status?.runtime;
     const nativeSubscriptionSetup = action === "subscription" && state.nativeInstalled();
     state.tasks.set(requestID, { action, measurement: insideBatch, started: Date.now(), phase: "", value });
@@ -109,10 +110,13 @@ export async function perform(
     try {
       reply = await state.backend.request(action, value, requestID);
       if (!action.startsWith("servers/") && !action.startsWith("autostart/") && action !== "subscription/read" && !action.startsWith("profiles/")) {
+        if (requestRevision >= state.statusRevision) {
+        state.statusRevision = requestRevision;
         state.status = reply.status;
         state.checked = Date.now();
         clearTimeout(state.staleTimer);
         state.staleTimer = setTimeout(() => state.paintProgress(), 15001);
+        }
       }
       if (reply.ok && ["servers/refresh", "subscription", "profiles/add", "profiles/open", "profiles/remove"].includes(action)) state.catalogRevision++;
       if (reply.ok && reply.autostart) state.autostart = reply.autostart;
