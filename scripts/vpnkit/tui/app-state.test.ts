@@ -89,6 +89,8 @@ test("action definitions expose identity, availability and the same keyboard pat
   try {
     const speed = state.actions().find(action => action.id === "home:t")!;
     expect(speed.key).toBe("t");
+    expect(speed.keys).toEqual(["t"]);
+    expect(speed.scope).toBe("home");
     expect(speed.available).toBe(false);
     expect(speed.unavailableReason).toContain("Docker");
     key(state, speed.key);

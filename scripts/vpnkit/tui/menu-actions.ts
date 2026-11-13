@@ -7,6 +7,8 @@ import { compatible } from "./request-policy";
 export interface MenuItem { key: string; label: string; run: () => void }
 export interface ActionDefinition extends MenuItem {
   id: string;
+  keys: readonly string[];
+  scope: AppState["screen"];
   available: boolean;
   unavailableReason?: string;
 }
@@ -236,6 +238,6 @@ export function defineMenuActions(state: AppState, items: MenuItem[]): ActionDef
         }
       }
     }
-    return { ...item, id, available: !reason, ...(reason ? { unavailableReason: reason } : {}) };
+    return { ...item, id, keys: [item.key], scope: screen, available: !reason, ...(reason ? { unavailableReason: reason } : {}) };
   });
 }
