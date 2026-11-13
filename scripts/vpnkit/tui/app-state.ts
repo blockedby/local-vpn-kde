@@ -134,6 +134,7 @@ export class AppState {
   statusRevision = 0;
   readFlights = new Map<Action, { first: Promise<Reply | undefined>; followup?: Promise<Reply | undefined> }>();
   cancelTaskID?: string;
+  cancelTaskAction?: Action;
   recovery?: Recovery & { action: Action; value?: string; homeServerID?: string; batchRetry?: { kind: Batch; ids: string[]; target: string } };
   retryOperation?: NonNullable<AppState["recovery"]>;
   backendOffline = false;
@@ -205,6 +206,7 @@ export class AppState {
   error = false;
   selected = 0;
   serverMenu = false;
+  confirmationSnapshot?: string;
   confirmation: "disconnect" | "stop" | "subscription" | "fastest" = "disconnect";
   fastestCandidate?: { id: string; name: string; speed: number; measuredAt: number };
   pendingSubscription?: string;
@@ -512,6 +514,7 @@ export class AppState {
     this.pendingScreenRead = undefined;
     this.selected = screen === "profile-remove" ? 1 : 0;
     if (screen === "details") this.detailsOffset = 0;
+    if (screen === "cancel-confirm") this.cancelTaskAction = this.cancelTaskID ? this.tasks.get(this.cancelTaskID)?.action : undefined;
     if (screen === "profile-remove") {
       const profile = this.profiles?.items.find(item => item.id === this.profiles?.active);
       this.profileRemoval = profile && { id: profile.id, name: profile.name, kind: profile.kind };
@@ -554,12 +557,20 @@ export class AppState {
     this.confirmation = "fastest";
     this.open("confirm");
   }
+  confirmationContext() {
+    return JSON.stringify({ runtime: this.status?.runtime, installed: this.status?.installed,
+      gateway: this.status?.gateway_state ?? this.status?.vpn_state,
+      active: this.status?.networkmanager_active,
+      server: this.servers.find(server => server.selected)?.server_id });
+  }
   confirm(action: "disconnect" | "stop") {
+    this.confirmationSnapshot = this.confirmationContext();
     this.confirmation = action;
     this.open("confirm");
   }
   confirmSubscription(value: string) {
     this.pendingSubscription = value;
+    this.confirmationSnapshot = this.confirmationContext();
     this.confirmation = "subscription";
     this.open("confirm");
   }

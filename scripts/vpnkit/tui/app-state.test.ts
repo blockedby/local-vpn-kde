@@ -233,3 +233,15 @@ test("site check address hides query and fragment outside its editor", async () 
     state.open("target"); expect(state.editorValue).toContain("private-marker");
   } finally { await state.close(); }
 });
+
+test("disconnect confirmation refuses a connection that changed while open", async () => {
+  const backend = new FakeBackend(); backend.status.networkmanager_active = "yes";
+  const state = new AppState(backend);
+  try {
+    await state.perform("status"); state.confirm("disconnect");
+    state.status!.networkmanager_active = "no";
+    key(state, "y"); await settle();
+    expect(backend.calls.filter(call => call.action === "disconnect")).toHaveLength(0);
+    expect(state.notice).toContain("изменил");
+  } finally { await state.close(); }
+});

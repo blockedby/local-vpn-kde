@@ -23,7 +23,7 @@ export function menuItems(state: AppState): MenuItem[] {
       return [{ key: "n", label: "Нет", run: () => state.open(retry ? "recovery" : "tasks") },
         { key: "y", label: "Да", run: () => {
           if (retry) { const r = state.retryOperation; state.retryOperation = undefined; state.open(state.tab, false); if (r) void state.perform(r.action, r.value); }
-          else { const id = state.cancelTaskID; state.open("tasks"); if (id) state.cancelTask(id); }
+          else { const id = state.cancelTaskID; const task = id && state.tasks.get(id); const valid = task && task.action === state.cancelTaskAction && !task.cancelRequested; state.open("tasks"); if (valid && id) state.cancelTask(id); else state.notify("Операция изменилась или уже завершена."); }
         } }];
     }
     if (state.screen === "tasks") {
@@ -95,22 +95,26 @@ export function menuItems(state: AppState): MenuItem[] {
             if (state.confirmation === "subscription") {
               const value = state.pendingSubscription;
               state.pendingSubscription = undefined;
+              const valid = state.confirmationSnapshot === state.confirmationContext() && state.nativeInstalled();
               state.open("home");
-              if (value) void state.perform("subscription", value);
+              if (value && valid) void state.perform("subscription", value);
+              else state.notify("Состояние изменилось. Подтвердите настройку заново.", true);
               return;
             }
             if (state.confirmation === "fastest") {
               const candidate = state.fastestCandidate;
               state.fastestCandidate = undefined;
               state.open(state.tab, false);
-              if (!candidate || !state.ready() || state.catalogStale || !state.servers.some(server => server.server_id === candidate.id)) state.notify("Сервер или состояние изменились. Выберите сервер заново.", true);
+              if (!candidate || !state.ready() || state.catalogStale || !state.servers.some(server => server.server_id === candidate.id && server.display_name === candidate.name && server.status === "ready" && server.availability !== "failed" && server.download_mbps === candidate.speed && state.measurementTimes.get(server.server_id) === candidate.measuredAt)) state.notify("Сервер или состояние изменились. Выберите сервер заново.", true);
               else if (state.servers.find(server => server.server_id === candidate.id)?.selected) state.notify("Этот сервер уже выбран.");
               else void state.perform("servers/select", candidate.id);
               return;
             }
             const action = state.confirmation;
+            const valid = state.confirmationSnapshot === state.confirmationContext();
             state.open(state.tab, false);
-            void state.perform(action);
+            if (valid) void state.perform(action);
+            else state.notify("Состояние изменилось. Подтвердите действие заново.", true);
           },
         },
       ];

@@ -39,8 +39,8 @@ export class SummaryView {
     this.summary.height = state.screen === "diagnostics" ? 6 : 2;
     if (state.screen === "details") this.summary.content = detailsLines(state).join("\n");
     if (state.screen === "tasks") this.summary.content = state.tasks.size || state.queue.length || state.history.length ? "Состояние        Операция               Этап      Время" : "Нет выполняющихся задач";
-    if (state.screen === "cancel-confirm") this.summary.content = "Точно отменить эту операцию?";
-    if (state.screen === "retry-confirm") this.summary.content = "Точно повторить изменение VPN?";
+    if (state.screen === "cancel-confirm") this.summary.content = `Точно отменить: ${state.cancelTaskAction ? state.actionLabel(state.cancelTaskAction) : "операция недоступна"}?`;
+    if (state.screen === "retry-confirm") this.summary.content = `Точно повторить: ${state.retryOperation ? state.actionLabel(state.retryOperation.action) : "операция недоступна"}?`;
     if (state.screen === "recovery") {
       this.summary.height = 3;
       const stages: Record<string, string> = { docker: "Docker", routes: "Маршруты", profile: "Профиль KDE", dns: "DNS", server: "Сервер", management: "Служба управления", input: "Ввод данных", unknown: "Операция" };
