@@ -1508,38 +1508,33 @@ test("held native and Docker lifecycle actions use their own runtime labels", as
 
 for (const width of [48, 100, 140]) {
   test(`native network repair is offered inline and f runs once at ${width} columns`, async () => {
-    const t = await createTestRenderer({ width, height: 28 });
     const b = new FakeBackend();
     b.status = { ...b.status, runtime: "native", installed: true, gateway_state: "inactive", last_attempt: "private-attempt" };
-    const app = new App(t.renderer, b);
+    const app = new AppState(b);
+    const key = (name: string) => app.onKey({ name, preventDefault() {} });
     try {
       await app.perform("status");
       b.hold = { action: "backend/start", promise: Promise.resolve({ ...reply(b.status), ok: false, reason: "native-network-settings-changed" }) };
       await app.perform("backend/start");
-      await t.renderOnce();
-      const frame = t.captureCharFrame();
-      expect(frame).toContain("Сетевые настройки VPN поменялись,");
-      expect(frame).toContain("нажмите [f]");
-      expect(frame).toContain("ещё раз.");
-      expect(frame).not.toContain("Действие не выполнено");
-      expect(frame).not.toContain("[f] Действия");
-      expect(frame).not.toContain("private-attempt");
-      expect(frame).toContain("Запустить сервис");
+      expect(app.noticeIdentity).toEqual({ action: "backend/start", reason: "native-network-settings-changed", ok: false });
+      expect(app.recovery?.actions).toContain("reapply");
+      expect(app.notice).not.toContain("private-attempt");
+      expect(app.noticeAttempt).not.toContain("private-attempt");
       expect(b.calls.filter(c => c.action === "network/reapply")).toHaveLength(0);
       let resolve!: (r: Reply) => void;
       b.hold = { action: "network/reapply", promise: new Promise(r => resolve = r) };
-      t.mockInput.pressKey("f"); await settle();
-      t.mockInput.pressKey("f"); await settle();
+      key("f"); await settle();
+      key("f"); await settle();
       expect(b.calls.filter(c => c.action === "network/reapply")).toHaveLength(1);
       expect(b.calls.some(c => c.action === "start" || c.action === "disconnect")).toBe(false);
-      resolve(reply(b.status)); await settle(); await t.renderOnce();
-      expect(t.captureCharFrame()).toContain("Сетевые настройки VPN применены.");
-      t.mockInput.pressKey("f"); await settle();
+      resolve(reply(b.status)); await settle();
+      expect(app.noticeIdentity).toEqual({ action: "network/reapply", reason: "ok", ok: true });
+      key("f"); await settle();
       expect(b.calls.filter(c => c.action === "network/reapply")).toHaveLength(1);
       b.hold = { action: "backend/start", promise: Promise.resolve({ ...reply(b.status), ok: false, reason: "native-network-settings-changed" }) };
       await app.perform("backend/start");
       await app.perform("disconnect");
-      t.mockInput.pressKey("f"); await settle();
+      key("f"); await settle();
       expect(b.calls.filter(c => c.action === "network/reapply")).toHaveLength(1);
     } finally { await app.close(); }
   });

@@ -1448,3 +1448,37 @@ test("presentation: unknown routing mode is not presented as strict", async () =
     expect((app as any).items().find((item: { key: string }) => item.key === "m").label).toContain("неизвестно");
   } finally { await app.close(); }
 });
+
+for (const width of [48, 100, 140]) {
+  test(`presentation: native network repair is offered inline and f runs once at ${width} columns`, async () => {
+    const t = await createTestRenderer({ width, height: 28 });
+    const b = new FakeBackend();
+    b.status = { ...b.status, runtime: "native", installed: true, gateway_state: "inactive", last_attempt: "private-attempt" };
+    const app = new App(t.renderer, b);
+    try {
+      await app.perform("status");
+      b.hold = { action: "backend/start", promise: Promise.resolve({ ...reply(b.status), ok: false, reason: "native-network-settings-changed" }) };
+      await app.perform("backend/start");
+      await t.renderOnce();
+      const frame = t.captureCharFrame();
+      expect(frame).toContain("Сетевые настройки VPN поменялись,");
+      expect(frame).toContain("нажмите [f]");
+      expect(frame).toContain("ещё раз.");
+      expect(frame).not.toContain("Действие не выполнено");
+      expect(frame).not.toContain("[f] Действия");
+      expect(frame).not.toContain("private-attempt");
+      expect(frame).toContain("Запустить сервис");
+      let resolve!: (r: Reply) => void;
+      b.hold = { action: "network/reapply", promise: new Promise(r => resolve = r) };
+      t.mockInput.pressKey("f"); await settle();
+      t.mockInput.pressKey("f"); await settle();
+      resolve(reply(b.status)); await settle(); await t.renderOnce();
+      expect(t.captureCharFrame()).toContain("Сетевые настройки VPN применены.");
+      t.mockInput.pressKey("f"); await settle();
+      b.hold = { action: "backend/start", promise: Promise.resolve({ ...reply(b.status), ok: false, reason: "native-network-settings-changed" }) };
+      await app.perform("backend/start");
+      await app.perform("disconnect");
+      t.mockInput.pressKey("f"); await settle();
+    } finally { await app.close(); }
+  });
+}
