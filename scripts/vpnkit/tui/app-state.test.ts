@@ -277,3 +277,56 @@ test("details show live samples and bounded per-server session measurements", as
     expect(detailsLines(state).join("\n")).toContain("Замеры этой сессии");
   } finally { await state.close(); }
 });
+
+test("cached reads are bounded and a newer status survives an older reply", async () => {
+  for (const action of ["status", "servers/list", "subscription/read"] as const) {
+    const backend = new FakeBackend(); const pending: ((value: Reply) => void)[] = [];
+    backend.request = (name, value) => { backend.calls.push({ action: name, value }); return new Promise(resolve => pending.push(resolve)); };
+    const state = new AppState(backend);
+    try {
+      const first = state.perform(action);
+      const rest = Array.from({ length: 20 }, () => state.perform(action));
+      expect(backend.calls).toHaveLength(1);
+      pending.shift()!(reply()); await first; await settle();
+      expect(backend.calls).toHaveLength(2);
+      const newer = reply({ ...backend.status, networkmanager_active: "yes" });
+      pending.shift()!(newer); await Promise.all(rest);
+      expect(backend.calls).toHaveLength(2);
+      if (action === "status") expect(state.status?.networkmanager_active).toBe("yes");
+    } finally { await state.close(); }
+  }
+  const backend = new FakeBackend(); let finish!: (value: Reply) => void;
+  backend.hold = { action: "status", promise: new Promise(resolve => { finish = resolve; }) };
+  const state = new AppState(backend);
+  try {
+    const old = state.perform("status");
+    state.status = { ...backend.status, networkmanager_active: "yes" }; state.statusRevision = state.nextTask + 1;
+    finish(reply({ ...backend.status, networkmanager_active: "no" })); await old;
+    expect(state.status.networkmanager_active).toBe("yes");
+  } finally { await state.close(); }
+});
+
+test("session measurement history stays bounded and scoped to its server", async () => {
+  const state = new AppState(new FakeBackend());
+  try {
+    for (let i = 0; i < 12; i++) state.recordMeasurement({ ...rows[0]!, status: "ready", download_mbps: i });
+    state.recordMeasurement({ ...rows[1]!, status: "ready", download_mbps: 99 });
+    expect(state.sessionMeasurements.get(rows[0]!.server_id)?.map(entry => entry.speed)).toEqual([11, 10, 9, 8]);
+    expect(state.sessionMeasurements.get(rows[1]!.server_id)?.map(entry => entry.speed)).toEqual([99]);
+  } finally { await state.close(); }
+});
+
+test("secret sources never appear in new details, palette, notices or history", async () => {
+  const { detailsLines } = await import("./details-view");
+  const backend = new FakeBackend(); const state = new AppState(backend);
+  const source = "hy2://private-source-marker@example.invalid#server";
+  backend.request = async (action, value) => { backend.calls.push({ action, value }); return { ...reply(), ok: false, reason: source }; };
+  try {
+    state.status = { ...backend.status }; state.servers = [{ ...rows[0]!, availability: "ready" }]; state.serverID = rows[0]!.server_id;
+    state.target = "https://example.invalid/path?token=private-query-marker#fragment";
+    await state.perform("profiles/add", JSON.stringify({ name: "Profile", source }));
+    const visible = [state.notice, state.noticeAttempt, ...state.history.map(entry => entry.outcome), ...detailsLines(state), ...state.paletteActions().map(entry => entry.action.label)].join("\n");
+    expect(visible).not.toContain("private-source-marker");
+    expect(visible).not.toContain("private-query-marker");
+  } finally { await state.close(); }
+});
