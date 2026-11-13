@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import { App } from "./app";
 import type { Action, CheckProgress, Reply } from "./bridge";
-import { FakeBackend, settle, reply, rows } from "./app-test-fixtures";
+import { FakeBackend, settle, reply, rows, initial } from "./app-test-fixtures";
 
 test("legacy status without runtime keeps Docker lifecycle wording", async () => {
   const t = await createTestRenderer({ width: 100, height: 28 });
@@ -901,4 +901,133 @@ test("presentation: autostart errors clear a previously healthy actual state", a
   } finally {
     await app.close();
   }
+});
+
+test("presentation: installed native mode failure preserves strict state and retry shows smart then strict", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", installed: true };
+  let fail = true;
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    if (action === "toggle-mode") {
+      if (fail) { fail = false; return { ...reply(b.status), ok: false, reason: "dns-failed" }; }
+      b.status.routing_mode = b.status.routing_mode === "strict" ? "smart" : "strict";
+    }
+    return original(action, value);
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("m"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Проверка DNS после подключения не прошла");
+    expect(t.captureCharFrame()).toContain("Режим: строгий");
+    t.mockInput.pressKey("m"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Режим: умный");
+    expect(t.captureCharFrame()).not.toContain("Проверка DNS после подключения не прошла");
+    t.mockInput.pressKey("m"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Режим: строгий");
+  } finally { await app.close(); }
+});
+
+test("presentation: installed native diagnostics failure can be retried without changing connectivity", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", installed: true, networkmanager_active: "yes" };
+  let attempts = 0;
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "diagnostics") {
+      if (++attempts === 1) return { ...result, ok: false, reason: "diagnostics-unavailable" };
+      b.status.diagnostics = "available";
+      return reply(b.status);
+    }
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("d"); await settle();
+    t.mockInput.pressKey("u"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Не удалось создать журнал");
+    t.mockInput.pressKey("u"); await settle(); await t.renderOnce();
+    const frame = t.captureCharFrame();
+    expect(frame).toContain("Native-служба:");
+    expect(frame).toContain("Проверка: выполнена");
+    expect(frame).not.toContain("Docker");
+    expect(frame).not.toContain("Не удалось создать журнал");
+    t.mockInput.pressKey("h"); await Bun.sleep(60); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("VPN подключён");
+  } finally { await app.close(); }
+});
+
+test("presentation: failed native status polls retain native server screen without stale readiness", async () => {
+  const t = await createTestRenderer({ width: 120, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...initial, runtime: "native", installed: true, vpn_state: "healthy", networkmanager_active: "yes" };
+  const request = b.request.bind(b);
+  b.request = async (action, value) => {
+    const r = await request(action, value);
+    if (action.startsWith("profiles/")) r.profiles = { active: "profile_legacy1", items: [{ id: "profile_legacy1", name: "Fixture", kind: "subscription", count: 2, stale: false }] };
+    return r;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("VPN подключён");
+    t.mockInput.pressKey("v");
+    await settle();
+    t.mockInput.pressKey("1");
+    await settle();
+    b.request = async () => { throw new Error("backend-unavailable"); };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await app.perform("status");
+      await t.renderOnce();
+      const frame = t.captureCharFrame();
+      expect(frame).toContain("Статус недоступен");
+      expect(frame).toContain("NATIVE");
+      expect(frame).toContain("Служба управления недоступна");
+      expect(frame).toContain("Запустить сервис");
+      expect(frame).not.toContain("Docker");
+      expect(frame).not.toContain("VPN подключён");
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test("presentation: an initial status failure does not invent native identity", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  b.request = async () => { throw new Error("backend-unavailable"); };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Служба управления недоступна");
+    expect(t.captureCharFrame()).not.toContain("NATIVE");
+  } finally {
+    await app.close();
+  }
+});
+
+test("presentation: failed reapplication replaces drift instruction with the actual busy failure", async () => {
+  const t = await createTestRenderer({width:100,height:28});
+  const b = new FakeBackend();
+  b.status = {...b.status,runtime:"native",installed:true,gateway_state:"inactive"};
+  const app = new App(t.renderer,b);
+  try {
+    await app.perform("status");
+    b.hold = {action:"backend/start",promise:Promise.resolve({...reply(b.status),ok:false,reason:"native-network-settings-changed"})};
+    await app.perform("backend/start");
+    b.hold = {action:"network/reapply",promise:Promise.resolve({...reply(b.status),ok:false,reason:"native-network-busy"})};
+    t.mockInput.pressKey("f"); await settle(); await t.renderOnce();
+    const frame=t.captureCharFrame();
+    expect(frame).toContain("другая системная служба");
+    expect(frame).not.toContain("настройки VPN поменялись");
+    expect(frame).not.toContain("применить их ещё раз");
+    t.mockInput.pressKey("f"); await settle();
+  } finally { await app.close(); }
 });

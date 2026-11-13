@@ -1397,7 +1397,6 @@ test("installed native separates service startup, connection, disconnect and shu
 });
 
 test("installed native mode failure preserves strict state and retry shows smart then strict", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true };
   let fail = true;
@@ -1409,23 +1408,23 @@ test("installed native mode failure preserves strict state and retry shows smart
     }
     return original(action, value);
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("m"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Проверка DNS после подключения не прошла");
-    expect(t.captureCharFrame()).toContain("Режим: строгий");
-    t.mockInput.pressKey("m"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Режим: умный");
-    expect(t.captureCharFrame()).not.toContain("Проверка DNS после подключения не прошла");
-    t.mockInput.pressKey("m"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Режим: строгий");
+    key("m"); await settle();
+    expect(app.noticeIdentity).toEqual({ action: "toggle-mode", reason: "dns-failed", ok: false });
+    expect(app.status?.routing_mode).toBe("strict");
+    key("m"); await settle();
+    expect(app.status?.routing_mode).toBe("smart");
+    expect(app.noticeIdentity).toEqual({ action: "toggle-mode", reason: "ok", ok: true });
+    key("m"); await settle();
+    expect(app.status?.routing_mode).toBe("strict");
     expect(b.calls.some(call => ["start", "backend/start", "disconnect", "stop"].includes(call.action))).toBe(false);
   } finally { await app.close(); }
 });
 
 test("installed native diagnostics failure can be retried without changing connectivity", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true, networkmanager_active: "yes" };
   let attempts = 0;
@@ -1439,26 +1438,24 @@ test("installed native diagnostics failure can be retried without changing conne
     }
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("d"); await settle();
-    t.mockInput.pressKey("u"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Не удалось создать журнал");
-    t.mockInput.pressKey("u"); await settle(); await t.renderOnce();
-    const frame = t.captureCharFrame();
-    expect(frame).toContain("Native-служба:");
-    expect(frame).toContain("Проверка: выполнена");
-    expect(frame).not.toContain("Docker");
-    expect(frame).not.toContain("Не удалось создать журнал");
-    t.mockInput.pressKey("h"); await Bun.sleep(60); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("VPN подключён");
+    key("d"); await settle();
+    key("u"); await settle();
+    expect(app.noticeIdentity).toEqual({ action: "diagnostics", reason: "diagnostics-unavailable", ok: false });
+    key("u"); await settle();
+    expect(app.status?.diagnostics).toBe("available");
+    expect(app.noticeIdentity).toEqual({ action: "diagnostics", reason: "ok", ok: true });
+    key("h"); await Bun.sleep(60);
+    expect(app.status?.networkmanager_active).toBe("yes");
+    expect(app.screen).toBe("home");
     expect(b.calls.some(call => ["start", "backend/start", "disconnect", "stop"].includes(call.action))).toBe(false);
   } finally { await app.close(); }
 });
 
 test("failed native status polls retain native server screen without stale readiness", async () => {
-  const t = await createTestRenderer({ width: 120, height: 30 });
   const b = new FakeBackend();
   b.status = { ...initial, runtime: "native", installed: true, vpn_state: "healthy", networkmanager_active: "yes" };
   const request = b.request.bind(b);
@@ -1467,26 +1464,24 @@ test("failed native status polls retain native server screen without stale readi
     if (action.startsWith("profiles/")) r.profiles = { active: "profile_legacy1", items: [{ id: "profile_legacy1", name: "Fixture", kind: "subscription", count: 2, stale: false }] };
     return r;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("VPN подключён");
-    t.mockInput.pressKey("v");
+
+    expect(app.status?.networkmanager_active).toBe("yes");
+    key("v");
     await settle();
-    t.mockInput.pressKey("1");
+    key("1");
     await settle();
     b.request = async () => { throw new Error("backend-unavailable"); };
     for (let attempt = 0; attempt < 2; attempt++) {
       await app.perform("status");
-      await t.renderOnce();
-      const frame = t.captureCharFrame();
-      expect(frame).toContain("Статус недоступен");
-      expect(frame).toContain("NATIVE");
-      expect(frame).toContain("Служба управления недоступна");
-      expect(frame).toContain("Запустить сервис");
-      expect(frame).not.toContain("Docker");
-      expect(frame).not.toContain("VPN подключён");
+
+      expect(app.screen).toBe("servers");
+      expect(app.status).toMatchObject({ runtime: "native", installed: true, gateway_state: "unknown", networkmanager_active: "unknown" });
+      expect(app.ready()).toBe(false);
+      expect(app.backendOffline).toBe(true);
     }
   } finally {
     await app.close();
@@ -1494,15 +1489,15 @@ test("failed native status polls retain native server screen without stale readi
 });
 
 test("an initial status failure does not invent native identity", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   b.request = async () => { throw new Error("backend-unavailable"); };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
   try {
     await app.perform("status");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Служба управления недоступна");
-    expect(t.captureCharFrame()).not.toContain("NATIVE");
+
+    expect(app.status).toBeUndefined();
+    expect(app.backendOffline).toBe(true);
+    expect(app.recovery).toMatchObject({ action: "status" });
   } finally {
     await app.close();
   }
@@ -1575,21 +1570,19 @@ for (const width of [48, 100, 140]) {
 }
 
 test("failed reapplication replaces drift instruction with the actual busy failure", async () => {
-  const t = await createTestRenderer({width:100,height:28});
   const b = new FakeBackend();
   b.status = {...b.status,runtime:"native",installed:true,gateway_state:"inactive"};
-  const app = new App(t.renderer,b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
     b.hold = {action:"backend/start",promise:Promise.resolve({...reply(b.status),ok:false,reason:"native-network-settings-changed"})};
     await app.perform("backend/start");
     b.hold = {action:"network/reapply",promise:Promise.resolve({...reply(b.status),ok:false,reason:"native-network-busy"})};
-    t.mockInput.pressKey("f"); await settle(); await t.renderOnce();
-    const frame=t.captureCharFrame();
-    expect(frame).toContain("другая системная служба");
-    expect(frame).not.toContain("настройки VPN поменялись");
-    expect(frame).not.toContain("применить их ещё раз");
-    t.mockInput.pressKey("f"); await settle();
+    key("f"); await settle();
+    expect(app.noticeIdentity).toEqual({ action: "network/reapply", reason: "native-network-busy", ok: false });
+    expect(app.recovery?.actions).not.toContain("reapply");
+    key("f"); await settle();
     expect(b.calls.filter(c=>c.action==="network/reapply")).toHaveLength(1);
   } finally { await app.close(); }
 });
