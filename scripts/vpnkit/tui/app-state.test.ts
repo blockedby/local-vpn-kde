@@ -132,9 +132,9 @@ test("polling overlaps measurements, avoids duplicate polls and resumes after ex
     const busy = state.perform("diagnostics");
     state.poll = setInterval(() => {}, 60000);
     state.pollStatus();
-    expect(backend.calls.filter(call => call.action === "status")).toHaveLength(2);
-    finishExclusive(reply()); await busy; await settle();
     expect(backend.calls.filter(call => call.action === "status")).toHaveLength(3);
+    finishExclusive(reply()); await busy; await settle();
+    expect(backend.calls.filter(call => call.action === "status")).toHaveLength(4);
   } finally { await state.close(); }
 });
 
@@ -244,4 +244,18 @@ test("disconnect confirmation refuses a connection that changed while open", asy
     expect(backend.calls.filter(call => call.action === "disconnect")).toHaveLength(0);
     expect(state.notice).toContain("изменил");
   } finally { await state.close(); }
+});
+
+test("poll during an in-flight status schedules one fresh follow-up", async () => {
+  const backend = new FakeBackend();
+  const pending: ((value: Reply) => void)[] = [];
+  backend.request = (action, value) => { backend.calls.push({ action, value }); return new Promise(resolve => pending.push(resolve)); };
+  const state = new AppState(backend);
+  try {
+    const first = state.perform("status");
+    state.pollStatus(); state.pollStatus();
+    expect(backend.calls).toHaveLength(1);
+    pending.shift()!(reply()); await first; await settle();
+    expect(backend.calls).toHaveLength(2);
+  } finally { pending.shift()?.(reply()); await settle(); await state.close(); }
 });

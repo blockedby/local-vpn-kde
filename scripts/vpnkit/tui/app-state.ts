@@ -366,7 +366,7 @@ export class AppState {
     void this.perform("status").then(() => { if (navigation === this.navigationRevision && this.screen === "servers" && !this.closing) this.open("servers"); });
   }
   pollStatus() {
-    if (!this.closing && !this.backendOffline && !this.reconnecting && ![...this.tasks.values()].some(task => task.action === "status" || !compatible("status", task.action)))
+    if (!this.closing && !this.backendOffline && !this.reconnecting && ![...this.tasks.values()].some(task => task.action !== "status" && !compatible("status", task.action)))
       void this.perform("status");
   }
   ready() {
