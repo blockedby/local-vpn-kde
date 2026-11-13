@@ -238,6 +238,11 @@ test("shell: mode survives a long server name and table columns have gutters", a
     expect(lines[0]).toContain("…");
     expect(lines[2]).toMatch(/Мбит\/с\s{2,}Сайт/);
     expect(lines[3]).toMatch(/—\s{2,}—/);
+    t.resize(60, 16);
+    app.tasks.set("measurement", { action: "servers/ping", measurement: true, started: 0, phase: "" });
+    app.paint(); await t.renderOnce();
+    expect(t.captureCharFrame().split("\n").at(-2)).toContain("k отменить");
+    app.tasks.clear();
   } finally { await app.close(); }
 });
 

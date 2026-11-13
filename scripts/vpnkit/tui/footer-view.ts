@@ -19,7 +19,7 @@ export class FooterView {
       this.footer.content = hints.join(" · "); return;
     }
     const priorities = editor ? ["editor:submit", "global:back", "global:quit-control"] : state.screen === "servers"
-      ? ["global:recovery", "servers:select", "servers:p", "servers:t", "servers:r", "servers:details", "home:connect", "home:start-service", "home:x", "global:cancel", "servers:sort"]
+      ? ["global:recovery", "servers:select", "global:cancel", "servers:details", "servers:p", "servers:t", "servers:r", "home:connect", "home:start-service", "home:x", "servers:sort"]
       : ["global:recovery", "menu:select", "diagnostics:u", "home:connect", "home:start-service", "home:x", "global:cancel", "global:back", "global:tasks"];
     const short: Record<string,string> = { "global:recovery": "восстановить", "servers:select": "выбрать", "servers:p": "ping", "servers:t": "скорость", "servers:r": "обновить", "servers:details": "подробно", "home:connect": "подключить", "home:start-service": "запустить", "home:x": "отключить", "global:cancel": "отменить", "servers:sort": "сортировка", "menu:select": "выбрать", "diagnostics:u": "обновить", "global:back": "назад", "global:tasks": "задачи", "editor:submit": "сохранить", "global:quit-control": "выход" };
     const hints = priorities.flatMap(id => { const a = actions.find(a => a.id === id); return a ? [`${a.keyHints[0]} ${short[id] ?? a.label.toLowerCase()}`] : []; });
