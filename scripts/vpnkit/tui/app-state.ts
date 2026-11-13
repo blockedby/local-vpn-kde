@@ -1,6 +1,7 @@
 import type { Action, Backend, CheckProgress, Reply, Server, Status, AutostartOptions, AutostartServiceState } from "./bridge";
 import { recoveryFor, type Recovery } from "./recovery";
 import { compatible } from "./request-policy";
+import { wrapText } from "./formatting";
 import { frames } from "./animation-frames";
 import { serverViewport, sortedServers, type ServerSort } from "./catalog-order";
 import { safeText } from "./formatting";
@@ -15,7 +16,7 @@ export type Screen =
   | "tasks" | "cancel-confirm" | "recovery" | "retry-confirm"
  | "profiles" | "profile-name" | "profile-source" | "profile-remove"
   | "autostart"
-  | "home"
+  | "home" | "settings"
   | "servers"
   | "subscription"
   | "diagnostics"
@@ -63,7 +64,11 @@ export class AppState {
   status?: Status;
   autostart?: AutostartOptions;
   serviceState?: AutostartServiceState;
-  screen: Screen = "home";
+  screen: Screen = "servers";
+  tab: "servers" | "profiles" | "diagnostics" | "settings" = "servers";
+  helpOpen = false;
+  helpOffset = 0;
+  measurementTimes = new Map<string, number>();
   profiles?: Reply["profiles"];
   profileName = "";
   profilePage = 0;
@@ -208,6 +213,7 @@ export class AppState {
       batch.pinged.add(row.server_id);
       if (row.stage === "speed" && batch.target === this.target) server.availability = row.availability;
       if (row.stage === "complete") {
+        this.measurementTimes.set(row.server_id, Date.now());
         if (batch.target === this.target) server.availability = row.availability;
         if (batch.kind === "speed") { server.status = row.status ?? "failed"; server.download_mbps = row.download_mbps; server.download_seconds = row.download_seconds; server.downloaded_bytes = row.downloaded_bytes; }
         batch.running.delete(row.server_id);
@@ -234,7 +240,7 @@ export class AppState {
       if (!task || task.action !== "servers/speed" || task.value !== row.server_id || this.cancelled || this.closing) return;
       this.liveSpeeds.set(row.server_id, row.download_mbps);
       if (this.homeTesting && this.homeSpeedServer?.id === row.server_id) this.homeSpeed = row.download_mbps;
-      if (this.screen === "home") this.paintMeasurement();
+      this.paintMeasurement();
       if (this.screen === "servers") this.paintTable();
     };
   }
@@ -269,7 +275,7 @@ export class AppState {
       if (!this.busy && !this.batch && !this.closing && !this.backendOffline && !this.reconnecting)
         void this.perform("status");
     }, 5000);
-    void this.perform("status");
+    void this.perform("status").then(() => { if (this.screen === "servers" && !this.closing) this.open("servers"); });
   }
   ready() {
     return (this.status?.gateway_state ?? this.status?.vpn_state) === "healthy";
@@ -401,8 +407,8 @@ export class AppState {
     this.error = error;
     this.paint();
   }
-  open(screen: Screen) {
-    if(screen==="servers" && this.nativeInstalled() && !this.profiles && this.status?.subscription==="configured") screen="profiles";
+  open(screen: Screen, load = true) {
+    if (screen === "home") screen = "servers";
     if (this.closing) return;
     if (screen === "subscription" && !this.subscriptionAvailable()) {
       this.notify(this.nativeUnavailable("subscription"), true);
@@ -410,6 +416,8 @@ export class AppState {
     }
     if (this.screen === "subscription") this.draft = this.editorValue;
     this.screen = screen;
+    if (["servers", "profiles", "diagnostics", "settings"].includes(screen)) this.tab = screen as typeof this.tab;
+    this.helpOpen = false;
     this.pendingScreenRead = undefined;
     this.selected = 0;
     this.serverMenu = false;
@@ -427,7 +435,7 @@ export class AppState {
     if (screen === "target") this.editorValue = this.target;
     this.paint();
     if (
-      screen === "servers" &&
+      load && screen === "servers" &&
       this.ready() &&
       this.status?.subscription === "configured" &&
       !this.catalogLoaded &&
@@ -457,7 +465,8 @@ export class AppState {
     return sortedServers(this.servers, this.sort, this.frozenOrder);
   }
   rowCount() {
-    return Math.max(1, Math.min(100, this.viewport().terminalHeight - (this.inlineSpeed() ? (this.catalogStale || this.status?.subscription !== "configured" ? 14 : 12) : 15)));
+    const message = this.closing ? "Завершаем текущую операцию перед выходом…" : this.notice;
+    return Math.max(1, Math.min(100, this.viewport().height - 4 - wrapText(message, Math.max(1, this.viewport().width - 2)).length));
   }
   syncServerViewport() {
     this.viewStart = serverViewport(this.sortedServers(), this.serverID, this.viewStart, this.rowCount()).start;

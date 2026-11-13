@@ -156,7 +156,7 @@ test("checkout native and native status without installed=true keep subscription
       state.onKey({ name: "c", preventDefault() {} });
       await settle();
       expect(state.subscriptionAvailable()).toBe(false);
-      expect(state.screen).toBe("home");
+      expect(state.screen).toBe("servers");
       expect(state.error).toBe(true);
       expect(b.calls.map(call => call.action)).toEqual(["status"]);
     } finally { await state.close(); }
@@ -247,7 +247,7 @@ test("navigation and diagnostics Back are immediate during a held mutation", asy
     key("escape");
     await Bun.sleep(60);
     expect(performance.now() - before).toBeLessThan(150);
-    expect(app.screen).toBe("home");
+    expect(app.screen).toBe("servers");
     key("c");
     expect(app.screen).toBe("subscription");
     finish(reply());
@@ -274,7 +274,7 @@ test("completed diagnostics never reopen a screen the user left", async () => {
     await Bun.sleep(60);
     finish(reply());
     await task;
-    expect(app.screen).toBe("home");
+    expect(app.screen).toBe("servers");
   } finally {
     finish(reply());
     await settle();
@@ -321,7 +321,7 @@ test("failed subscription save retains input and Back works while saving", async
     await settle();
     key("escape");
     await Bun.sleep(60);
-    expect(app.screen).toBe("home");
+    expect(app.screen).toBe("servers");
     finish({ ...reply(), ok: false, reason: "invalid-request" });
     await settle();
     key("c");
@@ -438,7 +438,7 @@ test("combined batch uses the configured URL without running the speed benchmark
     await t.mockInput.pasteBracketedText("https://example.com/");
     t.mockInput.pressEnter();
     await settle();
-    t.mockInput.pressKey("a");
+    t.mockInput.pressKey("p");
     await settle();
     const calls = b.calls.filter((c) => c.action === "servers/check-batch");
     expect(calls).toHaveLength(1);
@@ -464,7 +464,7 @@ test("actions during polling are serialized once", async () => {
     t.mockInput.pressKey("s");
     finish(reply());
     await task;
-    expect(b.calls.map((c) => c.action)).toEqual(["status", "backend/start"]);
+    expect(b.calls.map((c) => c.action)).toEqual(["status", "backend/start", "servers/list"]);
   } finally {
     finish(reply());
     await settle();
@@ -477,6 +477,7 @@ test("mouse navigation works; non-primary clicks do not mutate", async () => {
   const app = new App(t.renderer, b);
   try {
     await app.perform("status");
+    t.mockInput.pressKey("i");
     await t.renderOnce();
     const at = actionTarget(app, t.renderer.root, "home:m");
     await t.mockMouse.click(at.x, at.y, 2);
@@ -565,8 +566,7 @@ test("server actions are reachable with Tab and Enter, including before Docker s
     await app.perform("status");
     t.mockInput.pressKey("v");
     await settle();
-    t.mockInput.pressTab();
-    t.mockInput.pressEnter();
+    t.mockInput.pressKey("p");
     await settle();
     expect(
       b.calls.filter((c) => c.action === "servers/check-batch"),
@@ -643,7 +643,7 @@ test("a successful site check marks a server ready without claiming a speed resu
     await app.perform("status");
     key("v");
     await settle();
-    key("a");
+    key("p");
     await settle();
 
     expect(app.servers.find(server => server.server_id === rows[1]!.server_id)).toMatchObject({
@@ -847,7 +847,7 @@ test("failed current ping overrides an earlier successful speed result", async (
     await app.perform("servers/speed",rows[0]!.server_id);
     let finish!: (r: Reply) => void;
     b.hold = { action: "servers/check-batch", promise: new Promise(r => finish=r) };
-    key("a");
+    key("p");
     await settle();
     b.onCheckProgress?.({ event:"server-check",server_id:rows[0]!.server_id,stage:"complete",ping_status:"failed",latency_ms:0,availability:"untested" });
 
@@ -866,7 +866,7 @@ test("only assigned workers spin while remaining servers wait in the queue", asy
  const event = (i:number,stage:"start"|"complete"): CheckProgress => ({event:"server-check",server_id:b.rows[i]!.server_id,stage,ping_status:stage==="start"?"untested":"ready",latency_ms:stage==="start"?0:12,availability:stage==="start"?"untested":"ready"});
  try {
   await app.perform("status"); key("v"); await settle();
-  key("a"); await settle();
+  key("p"); await settle();
   for(let i=0;i<5;i++) b.onCheckProgress?.(event(i,"start"));
 
   expect(app.batch?.running.size).toBe(5);
@@ -942,8 +942,9 @@ test("home speedometer measures the selected server after ping and removes redun
   const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    key("t"); await settle();
-    expect(b.calls.filter(c => c.action.startsWith("servers/")).map(c => c.action)).toEqual(["servers/list", "servers/ping", "servers/speed"]);
+    key("v"); await settle();
+    key("T"); await settle();
+    expect(b.calls.filter(c => c.action.startsWith("servers/")).map(c => c.action)).toEqual(["servers/list", "servers/list", "servers/ping", "servers/speed"]);
     expect(b.calls.find(c => c.action === "servers/speed")?.value).toBe(rows[1]!.server_id);
     expect(app.homeSpeed).toBe(50);
     expect(app.homePing).toBe(24);
@@ -961,14 +962,15 @@ test("home speed test skips download after failed ping and allows navigation", a
   const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    key("t"); await settle();
+    key("v"); await settle();
+    key("T"); await settle();
     expect(app.homeTesting).toBe(true);
     key("d");
     expect(app.screen).toBe("diagnostics");
     finish({ ...reply(), ok: false, reason: "failed" }); await settle();
     expect(b.calls.some(c => c.action === "servers/speed")).toBe(false);
     key("escape");
-    expect(app.screen).toBe("home");
+    expect(app.screen).toBe("servers");
     expect(app.homeSpeed).toBeUndefined();
     expect(app.homeTesting).toBe(false);
     expect(app.error).toBe(true);
@@ -985,7 +987,8 @@ test("switching completes during a held home speed test; late result belongs to 
   const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    key("t");
+    key("v"); await settle();
+    key("T");
     await settle();
     expect(b.calls.some(c => c.action === "servers/speed")).toBe(true);
     key("v");
@@ -1339,7 +1342,7 @@ test("removing the active source browses its fallback without changing the VPN",
   try {
     await app.perform("status");
     key("c"); await settle();
-    key("x"); await settle();
+    key("X"); await settle();
     expect(b.calls.some(call => call.action === "profiles/remove")).toBe(false);
     key("y"); await settle();
     expect(app.profiles?.active).toBe("profile_two");
@@ -1369,7 +1372,7 @@ test("installed native separates service startup, connection, disconnect and shu
     key("s"); await settle();
     expect(app.status?.networkmanager_active).toBe("no");
     expect(app.status?.gateway_state).toBe("healthy");
-    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start"]);
+    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start", "servers/list"]);
     key("s"); await settle();
     expect(app.status?.networkmanager_active).toBe("yes");
     key("x"); await settle();
@@ -1385,7 +1388,7 @@ test("installed native separates service startup, connection, disconnect and shu
     key("y"); await settle();
     expect(app.status?.gateway_state).toBe("stopped");
     expect(app.noticeIdentity).toEqual({action:"stop",reason:"ok",ok:true});
-    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start", "start", "disconnect", "stop"]);
+    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start", "servers/list", "start", "disconnect", "stop"]);
   } finally { await app.close(); }
 });
 
@@ -1443,7 +1446,7 @@ test("installed native diagnostics failure can be retried without changing conne
     expect(app.noticeIdentity).toEqual({ action: "diagnostics", reason: "ok", ok: true });
     key("h"); await Bun.sleep(60);
     expect(app.status?.networkmanager_active).toBe("yes");
-    expect(app.screen).toBe("home");
+    expect(app.screen).toBe("servers");
     expect(b.calls.some(call => ["start", "backend/start", "disconnect", "stop"].includes(call.action))).toBe(false);
   } finally { await app.close(); }
 });

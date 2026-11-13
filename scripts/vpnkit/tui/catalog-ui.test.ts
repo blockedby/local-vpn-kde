@@ -38,7 +38,7 @@ test("refresh retains measured fields only for unchanged identity, including ren
 });
 
 test("refresh retains viewport anchor and moves removed cursor to nearest row",async()=>{
- const b=new CatalogBackend(); b.rows=Array.from({length:15},(_,i)=>row(i+1)); const app=new AppState(b); app.viewport=()=>({width:100,height:20,terminalHeight:20}); const s=app;
+ const b=new CatalogBackend(); b.rows=Array.from({length:30},(_,i)=>row(i+1)); const app=new AppState(b); app.viewport=()=>({width:100,height:20,terminalHeight:20}); const s=app;
  try {
   await app.perform("status"); await app.perform("servers/list"); s.screen="servers"; s.serverID=row(7).server_id; s.viewStart=4; expect(s.visibleServers()[0]?.server_id).toBe(row(5).server_id);
   b.rows=b.rows.filter(v=>v.server_id!==row(7).server_id); await app.perform("servers/refresh");

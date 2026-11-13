@@ -11,10 +11,18 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
     actions.push({ id, key: keys[0]!, keys, label, scope, run, available: !reason,
       ...(reason ? { unavailableReason: reason, unavailableBehavior } : {}), preventDefault });
   };
+  if (state.helpOpen) {
+    add("help:close", ["escape", "?"], "Закрыть помощь", "global", () => { state.helpOpen = false; state.paint(); }, undefined, "none", true);
+    add("help:up", ["up", "pageup"], "Вверх", "global", () => { state.helpOffset = Math.max(0, state.helpOffset - 1); state.paint(); }, state.helpOffset === 0 ? "Начало списка." : undefined);
+    add("help:down", ["down", "pagedown"], "Вниз", "global", () => { state.helpOffset++; state.paint(); });
+    return actions;
+  }
+  if (!editor) add("global:help", ["?"], "Помощь", "global", () => { state.helpOffset = 0; state.helpOpen = true; state.paint(); }, undefined, "none", true);
   add("global:back", ["escape"], "Назад", editor ? "editor" : "global", () => state.open(
-    state.screen.startsWith("profile-") || state.screen === "servers" && !!state.profiles ? "profiles"
-      : state.screen === "target" ? "servers"
-      : state.screen === "confirm" && state.confirmation === "subscription" ? "subscription" : "home"), state.closing ? "Закрываем приложение." : undefined, "none", true);
+    state.screen.startsWith("profile-") ? "profiles"
+      : state.screen === "target" ? state.tab
+      : state.screen === "confirm" && state.confirmation === "subscription" ? "subscription"
+      : ["confirm", "cancel-confirm", "retry-confirm", "tasks", "recovery"].includes(state.screen) ? state.tab : "servers", state.screen !== "confirm"), state.closing ? "Закрываем приложение." : undefined, "none", true);
   add("global:quit-control", ["ctrl+c"], "Выход", "global", () => void state.close(), state.closing || state.disposed ? "Закрываем приложение." : undefined, "none", true);
   if (editor) {
     add("editor:submit", ["return"], "Сохранить", "editor", () => {
@@ -34,7 +42,7 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
         try {
           const u = new URL(state.editorValue.trim());
           if (u.protocol !== "https:" || u.username || u.password || u.href.length > 2048) throw new Error();
-          state.target = u.href; state.servers.forEach(s => s.availability = "untested"); state.syncServerViewport(); state.open("servers"); state.notify("Адрес сайта сохранён.");
+          state.target = u.href; state.servers.forEach(s => s.availability = "untested"); state.syncServerViewport(); state.open(state.tab); state.notify("Адрес сайта сохранён.");
         } catch { state.notify("Нужен HTTPS-адрес без логина и пароля.", true); }
       }
     }, undefined, "none", true);
@@ -56,27 +64,42 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
   const cancellable = [...state.tasks.values()].some(task => !["status", "subscription", "subscription/read"].includes(task.action));
   add("global:cancel", ["k"], "Отменить", "global", () => state.cancel(), cancellable ? undefined : "Нет операции для отмены.");
   const screens: [string, string, string, () => Screen][] = [
-    ["home", "h", "Главная", () => "home"], ["servers", "v", "Серверы", () => "servers"],
+    ["servers", "v", "Серверы", () => "servers"],
     ["subscription", "c", state.nativeInstalled() && state.status?.subscription === "configured" ? "Профили · подписки и серверы" : "Подписка", () => state.nativeInstalled() && state.status?.subscription === "configured" ? "profiles" : "subscription"],
     ["diagnostics", "d", "Диагностика", () => "diagnostics"],
+    ["settings", "i", "Настройки", () => "settings"],
   ];
   for (const [id, key, label, target] of screens) add(`global:${id}`, [key], label, "global", () => state.open(target()), id === "subscription" && !state.subscriptionAvailable() ? state.nativeUnavailable("subscription") : undefined, "notice", true);
+  const serverNavigation = actions.find(action => action.id === "global:servers")!;
+  serverNavigation.keys = ["v", "h"];
+  const tabs = ["servers", "profiles", "diagnostics", "settings"] as const;
+  for (const [key, delta] of [["tab", 1], ["shift+tab", -1]] as const) add(`global:${key}`, [key], "Сменить вкладку", "global", () => state.open(tabs[(tabs.indexOf(state.tab) + delta + tabs.length) % tabs.length]!), undefined, "none", true);
+  if (state.screen !== "autostart") add("global:autostart", ["a"], "Автозапуск", "global", () => state.open("autostart"));
+  // Reuse the established lifecycle actions and their availability rules on every tab.
+  const originalScreen = state.screen;
+  state.screen = "home";
+  const lifecycle = state.items().filter(item => ["s", "x", "z", "m"].includes(item.key));
+  state.screen = originalScreen;
+  if (!["confirm", "profile-remove", "retry-confirm", "cancel-confirm"].includes(state.screen))
+    for (const item of lifecycle) actions.push({ ...item, scope: "global", run: () => { item.run(); state.paint(); } });
   const items = state.items();
   if (state.screen === "servers") {
     const ping = items.find(item => item.key === "p");
-    add(ping?.id ?? "servers:ping-alias", ping ? ["p", "a"] : ["a"], "Ping всех + сайт", "server-table", () => void state.runBatch("ping"),
+    add(ping?.id ?? "servers:ping-alias", ["p"], "Ping всех + сайт", "server-table", () => void state.runBatch("ping"),
       state.busy || state.batch || state.homeTesting ? "Дождитесь завершения или отмените текущую операцию [k]."
-        : state.nativePreviewOnly() ? state.nativeUnavailable("servers/check-batch") : !state.ready() ? `Сначала запустите ${state.serviceObject()}.` : undefined, "notice");
+        : state.nativePreviewOnly() ? state.nativeUnavailable("servers/check-batch") : !state.ready() ? `Сначала запустите ${state.serviceObject()}.`
+        : state.status?.subscription !== "configured" ? "Сначала добавьте подписку."
+        : state.catalogLoaded && !state.servers.length ? "Список серверов пуст." : undefined, "notice");
     if (ping) actions[actions.length - 1]!.preventDefaultKeys = ["p"];
-    if (state.servers.length) add("servers:focus", ["tab", "shift+tab"], "Меню/список", "server-table", () => { state.serverMenu = !state.serverMenu; state.paint(); });
+    add("servers:single-speed", ["shift+t"], "Скорость сервера", "server-table", () => { if (!state.serverID) state.notify("Нет выбранного сервера.", true); else void state.testHomeSpeed(state.serverID); }, !state.serverID ? "Нет выбранного сервера." : [...state.tasks.values()].some(task => task.action !== "status") || state.batch || state.homeTesting ? "Дождитесь завершения текущей операции." : state.nativePreviewOnly() ? state.nativeUnavailable("servers/speed") : !state.ready() ? `Сначала запустите ${state.serviceObject()}.` : state.catalogStale ? "Подписка изменена. Обновите список серверов." : undefined, "notice");
     add("servers:sort", ["o"], "Сортировка", "server-table", () => {
       const sorts = ["name", "ping", "speed", "availability"] as const;
       state.frozenOrder = undefined; state.sort = sorts[(sorts.indexOf(state.sort) + 1) % sorts.length]; state.viewStart = 0;
       if (state.batch) state.frozenOrder = state.sortedServers().map(s => s.server_id);
       state.syncServerViewport(); state.paint();
-    });
-    if (!state.serverMenu && state.servers.length) {
-      for (const [name, delta] of [["up", -1], ["down", 1], ["pageup", -state.rowCount()], ["pagedown", state.rowCount()]] as const) {
+    }, state.servers.length ? undefined : "Список серверов пуст.");
+    if (state.servers.length && state.ready() && !state.nativePreviewOnly()) {
+      for (const [name, delta] of [["up", -1], ["down", 1], ["pageup", -state.rowCount()], ["pagedown", state.rowCount()], ["home", -Infinity], ["end", Infinity]] as const) {
         const list = state.sortedServers(), at = Math.max(0, list.findIndex(s => s.server_id === state.serverID));
         const next = Math.max(0, Math.min(list.length - 1, at + delta));
         add(`servers:${name}`, [name], name.startsWith("page") ? "Страница" : "Выбор", "server-table", () => {
@@ -93,10 +116,10 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
   // The list is ordered in the same precedence as the former dispatch path.
   const menuScope: ActionScope = ["confirm", "profile-remove", "retry-confirm", "cancel-confirm"].includes(state.screen) ? "confirmation" : "menu";
   const menuMove = (delta: number) => { state.selected = (state.selected + items.length + delta) % Math.max(1, items.length); state.paint(); };
-  add("menu:previous", ["up", "shift+tab"], "Выбор", menuScope, () => menuMove(-1), items.length <= 1 ? "Нет другого пункта." : undefined);
-  add("menu:next", ["down", "tab"], "Выбор", menuScope, () => menuMove(1), items.length <= 1 ? "Нет другого пункта." : undefined);
+  if (state.screen !== "servers") add("menu:previous", ["up"], "Выбор", menuScope, () => menuMove(-1), items.length <= 1 ? "Нет другого пункта." : undefined);
+  if (state.screen !== "servers") add("menu:next", ["down"], "Выбор", menuScope, () => menuMove(1), items.length <= 1 ? "Нет другого пункта." : undefined);
   const current = items[state.selected];
-  add("menu:select", ["return"], "Выбрать", menuScope, () => { current?.run(); state.paint(); }, current ? current.unavailableReason : "Нет выбранного пункта.", current?.unavailableBehavior ?? "none");
+  if (state.screen !== "servers" || !state.ready() || state.nativePreviewOnly()) add("menu:select", ["return"], "Выбрать", menuScope, () => { current?.run(); state.paint(); }, current ? current.unavailableReason : "Нет выбранного пункта.", current?.unavailableBehavior ?? "none");
   if (!items.some(item => item.key === "u")) add("global:refresh", ["u"], state.screen === "diagnostics" ? "Обновить диагностику" : "Обновить состояние", "global", () => { void state.perform(state.screen === "diagnostics" ? "diagnostics" : "status"); state.paint(); }, state.backendOffline ? "Служба управления недоступна." : [...state.tasks.values()].some(task => !compatible(state.screen === "diagnostics" ? "diagnostics" : "status", task.action)) ? "Эта операция конфликтует с текущей." : undefined, state.backendOffline ? "notice" : "none");
   for (const item of items) actions.push({ ...item, preventDefault: true, run: () => { item.run(); state.paint(); } });
   // A shortcut has one effective owner. Earlier definitions have the same
@@ -110,12 +133,12 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
 }
 
 export function matchesAction(action: ActionDefinition, key: AppKeyEvent): boolean {
-  return action.keys.some(candidate => candidate === (key.ctrl && key.name === "c" ? "ctrl+c" : key.shift && key.name === "tab" ? "shift+tab" : key.name));
+  return action.keys.some(candidate => candidate === (key.ctrl && key.name === "c" ? "ctrl+c" : key.shift && key.name === "tab" ? "shift+tab" : (key.name === "T" || key.shift && key.name.toLowerCase() === "t") ? "shift+t" : key.shift && key.name.toLowerCase() === "x" ? "X" : key.shift && key.name === "/" ? "?" : key.name));
 }
 
 /** Stable, ordered groups usable by a footer, help screen or command palette. */
 export function groupedActions(state: AppState) {
-  const hint: Record<string, string> = { escape: "Esc", return: "Enter", tab: "Tab", "shift+tab": "Shift+Tab", "ctrl+c": "Ctrl+C", up: "↑", down: "↓", pageup: "PgUp", pagedown: "PgDn" };
+  const hint: Record<string, string> = { escape: "Esc", return: "Enter", tab: "Tab", "shift+tab": "Shift+Tab", "ctrl+c": "Ctrl+C", up: "↑", down: "↓", pageup: "PgUp", pagedown: "PgDn", "shift+t": "T", home: "Home", end: "End" };
   const groups: { scope: ActionScope; actions: (ActionDefinition & { keyHints: string[] })[] }[] = [];
   for (const action of actionRegistry(state)) {
     let group = groups.find(group => group.scope === action.scope);

@@ -83,12 +83,15 @@ test("server movement and catalog changes keep the cursor in the viewport", () =
   expect(state.visibleServers().some(server => server.server_id === state.serverID)).toBe(true);
 });
 
-test("ping shortcut and its alias retain their default-prevention behavior", () => {
-  for (const [name, expected] of [["p", true], ["a", false]] as const) {
-    const {state} = fixture("servers", "docker");
-    let prevented = false;
-    state.runBatch = async () => {};
-    state.onKey({...event(name), preventDefault() { prevented = true; }});
-    expect(prevented).toBe(expected);
-  }
+test("ping and autostart shortcuts have distinct owners", () => {
+  const {state} = fixture("servers", "docker");
+  let batches = 0;
+  state.runBatch = async () => { batches++; };
+  let prevented = false;
+  state.onKey({ ...event("p"), preventDefault() { prevented = true; } });
+  expect(prevented).toBe(true);
+  expect(batches).toBe(1);
+  state.onKey(event("a"));
+  expect(state.screen).toBe("autostart");
+  expect(batches).toBe(1);
 });

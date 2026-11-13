@@ -13,3 +13,16 @@ export function cell(text: string, width: number) {
   }
   return out + " ".repeat(Math.max(0, width - Bun.stringWidth(out)));
 }
+
+export function wrapText(text: string, width: number): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of safeText(text.replace(/\s+/g, " ")).trim().split(" ")) {
+    if (!word) continue;
+    const next = line ? `${line} ${word}` : word;
+    if (line && Bun.stringWidth(next) > width) { lines.push(line); line = word; }
+    else line = next;
+  }
+  if (line) lines.push(line);
+  return lines.map(value => cell(value, width).trimEnd());
+}

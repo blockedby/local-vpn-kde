@@ -22,7 +22,7 @@ export function menuItems(state: AppState): MenuItem[] {
       const retry = state.screen === "retry-confirm";
       return [{ key: "n", label: "Нет", run: () => state.open(retry ? "recovery" : "tasks") },
         { key: "y", label: "Да", run: () => {
-          if (retry) { const r = state.retryOperation; state.retryOperation = undefined; state.open("home"); if (r) void state.perform(r.action, r.value); }
+          if (retry) { const r = state.retryOperation; state.retryOperation = undefined; state.open(state.tab, false); if (r) void state.perform(r.action, r.value); }
           else { const id = state.cancelTaskID; state.open("tasks"); if (id) state.cancelTask(id); }
         } }];
     }
@@ -61,7 +61,7 @@ export function menuItems(state: AppState): MenuItem[] {
       return [
         ...profiles.slice(state.profilePage*4,state.profilePage*4+4).map((profile,i)=>({key:String(i+1),label:`${profile.id===state.profiles?.active?"● ":""}${profile.name} · ${profile.kind==="server"?"сервер":"подписка"} · ${profile.count}${profile.stale?" · сохранённый список":""}`,run:()=>void state.browseProfile(profile.id)})),
         {key:"n",label:"Добавить профиль",run:()=>state.open("profile-name")},
-        ...(state.profiles?.active?[{key:"x",label:"Удалить выбранный профиль",run:()=>state.open("profile-remove")}]:[]),
+        ...(state.profiles?.active?[{key:"X",label:"Удалить выбранный профиль",run:()=>state.open("profile-remove")}]:[]),
         ...(pages>1?[{key:"[",label:"Предыдущие профили",run:()=>{state.profilePage=(state.profilePage+pages-1)%pages;state.selected=0;state.paint()}},{key:"]",label:"Следующие профили",run:()=>{state.profilePage=(state.profilePage+1)%pages;state.selected=0;state.paint()}}]:[]),
       ];
     }
@@ -74,7 +74,7 @@ export function menuItems(state: AppState): MenuItem[] {
             if (state.confirmation === "subscription") {
               state.pendingSubscription = undefined;
               state.open("subscription");
-            } else state.open("home");
+            } else state.open(state.tab, false);
           },
         },
         {
@@ -89,7 +89,7 @@ export function menuItems(state: AppState): MenuItem[] {
               return;
             }
             const action = state.confirmation;
-            state.open("home");
+            state.open(state.tab, false);
             void state.perform(action);
           },
         },
@@ -146,6 +146,14 @@ export function menuItems(state: AppState): MenuItem[] {
             ]
           : []),
       ];
+    if (state.screen === "settings") return [
+      { key: "a", label: "Автозапуск", run: () => state.open("autostart") },
+      { key: "m", label: `Режим: ${state.status?.routing_mode === "smart" ? "умный" : state.status?.routing_mode === "strict" ? "строгий" : "неизвестно"}`, run: () => void state.perform("toggle-mode") },
+      { key: "c", label: "Профили и источники", run: () => state.open(state.nativeInstalled() && state.status?.subscription === "configured" ? "profiles" : "subscription") },
+      { key: "e", label: "Адрес сайта для проверки", run: () => state.open("target") },
+      ...(!state.ready() ? [{ key: "s", label: `Запустить ${state.serviceObject()}`, run: run("backend/start") }] : []),
+      ...(["healthy", "unhealthy", "running", "stopped", "starting"].includes(state.status?.gateway_state ?? state.status?.vpn_state ?? "") ? [{ key: "z", label: state.nativeMode() ? "Остановить сервис" : "Остановить Docker и VPN", run: () => state.confirm("stop") }] : []),
+    ];
     if (state.screen === "autostart") {
       if (!state.autostart) return [{ key: "u", label: "Загрузить настройки", run: run("autostart/read") }];
       return [
@@ -221,6 +229,7 @@ export function defineMenuActions(state: AppState, items: MenuItem[]): ActionDef
         reason = "Дождитесь завершения или отмените текущую операцию [k].";
       else if (state.nativePreviewOnly()) reason = state.nativeUnavailable(speed ? "servers/speed" : "servers/check-batch");
       else if (!state.ready()) reason = `Сначала запустите ${state.serviceObject()}.`;
+      else if (batch && state.catalogLoaded && !state.servers.length) reason = "Список серверов пуст.";
     } else if (screen === "servers" && item.key === "i") {
       reason = state.nativeUnavailable("servers/list");
     } else if (screen === "home" && item.key === "m" && !state.nativeMode() && !state.ready()) {

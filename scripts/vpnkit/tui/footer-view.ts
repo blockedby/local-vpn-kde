@@ -4,15 +4,21 @@ import { palette as p } from "./model";
 
 export class FooterView {
   private footer: TextRenderable;
-  constructor(renderer: CliRenderer, root: BoxRenderable) {
-    this.footer = new TextRenderable(renderer, { content: "", fg: p.muted, height: 1, flexShrink: 0 });
-    root.add(this.footer);
+  constructor(private renderer: CliRenderer, root: BoxRenderable) {
+    this.footer = new TextRenderable(renderer, { content: "", fg: p.muted, height: 1, flexShrink: 0 }); root.add(this.footer);
   }
   update(state: AppState, editor: boolean) {
-    this.footer.content = editor
-      ? "Esc назад · Ctrl+C выход"
-      : state.screen === "servers"
-        ? "Tab меню/список · ↑↓ · Enter · o сортировка · j задачи · Esc назад · q выход"
-        : "↑↓ / Tab выбор · Enter · Esc назад · k отменить · q выход";
+    if (state.helpOpen) { this.footer.content = "↑↓ прокрутка · Esc / ? закрыть"; return; }
+    const actions = state.groupedActions().flatMap(group => group.actions).filter(action => action.available);
+    const priorities = editor ? ["editor:submit", "global:back", "global:quit-control"] : state.screen === "servers"
+      ? ["global:recovery", "servers:select", "servers:p", "servers:t", "servers:r", "home:connect", "home:start-service", "home:x", "global:cancel", "servers:sort"]
+      : ["global:recovery", "menu:select", "diagnostics:u", "home:connect", "home:start-service", "home:x", "global:cancel", "global:back", "global:tasks"];
+    const short: Record<string,string> = { "global:recovery": "восстановить", "servers:select": "выбрать", "servers:p": "ping", "servers:t": "скорость", "servers:r": "обновить", "home:connect": "подключить", "home:start-service": "запустить", "home:x": "отключить", "global:cancel": "отменить", "servers:sort": "сортировка", "menu:select": "выбрать", "diagnostics:u": "обновить", "global:back": "назад", "global:tasks": "задачи", "editor:submit": "сохранить", "global:quit-control": "выход" };
+    const hints = priorities.flatMap(id => { const a = actions.find(a => a.id === id); return a ? [`${a.keyHints[0]} ${short[id] ?? a.label.toLowerCase()}`] : []; });
+    const help = actions.find(a => a.id === "global:help");
+    const suffix = help ? "? помощь" : "";
+    const width = this.renderer.terminalWidth - 2;
+    while (hints.length && Bun.stringWidth([...hints, suffix].filter(Boolean).join(" · ")) > width) hints.pop();
+    this.footer.content = [...hints, suffix].filter(Boolean).join(" · ");
   }
 }

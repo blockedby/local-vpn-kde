@@ -9,8 +9,8 @@ export class SummaryView {
     this.summary.minHeight = 0;
     parent.add(this.summary);
   }
+  hide() { this.summary.visible = false; this.summary.height = 0; }
   update(state: AppState) {
-    const compactServers = state.screen === "servers" && state.inlineSpeed();
     const gateway = state.status?.gateway_state ?? state.status?.vpn_state;
     const gatewayNames: Record<string, string> = { healthy: "готов", absent: "не запущен", inactive: "не запущен", stopped: "остановлен", starting: "запускается", unhealthy: "ошибка", running: "проверяется" };
     this.summary.height = state.screen === "diagnostics" ? 6 : 2;
@@ -30,8 +30,8 @@ export class SummaryView {
       } else {
         this.summary.content =
           state.confirmation === "disconnect"
-            ? "Точно хотите отключить VPN?"
-            : `Точно хотите остановить ${state.serviceObject()} и отключить VPN?`;
+            ? "Подтверждение · Точно хотите отключить VPN?"
+            : `Подтверждение · Точно хотите остановить ${state.serviceObject()} и отключить VPN?`;
       }
     }
     if (state.screen === "home")
@@ -80,15 +80,14 @@ export class SummaryView {
       this.summary.content = state.nativePreviewOnly()
         ? !state.ready()
           ? `Native-служба не готова. Запустите ${state.serviceObject()} для жизненного цикла VPN.\nВыбор серверов и проверки пока не подключены.`
-          : "Native preview: выбор серверов и проверки пока не подключены.\nЗапуск/остановка VPN и автозапуск доступны на главной."
+          : "Native preview: выбор серверов и проверки пока не подключены.\nЗапуск/остановка VPN и автозапуск доступны с клавиатуры."
         : !state.ready()
           ? `Для проверок запустите ${state.serviceObject()}. VPN подключать не требуется.`
           : state.status?.subscription !== "configured"
             ? "Добавьте подписку для загрузки серверов."
-            : `${state.profiles?.items.find(p=>p.id===state.profiles?.active)?.name ?? "Серверы"} · ${state.servers.length} серверов · Сортировка [o]: ${{ name: "имя ↑", ping: "ping ↑", speed: "скорость ↓", availability: "доступность ↓" }[state.sort]}${state.catalogStale ? " · каталог устарел" : ""}\nСайт: ${state.target}`;
-    if (compactServers && !state.profiles && !state.nativePreviewOnly() && state.ready() && state.status?.subscription === "configured" && !state.catalogStale) {
-      this.summary.visible = false;
-      this.summary.height = 0;
-    }
+            : state.catalogLoaded ? "Список серверов пуст. Обновите источник [r] или откройте профили [c]." : "Загружаем серверы… Обновить список [r].";
+    if (state.screen === "settings") { this.summary.content = "Настройки"; this.summary.height = 1; }
+    if (state.screen === "servers" && state.ready() && !state.nativePreviewOnly() && state.status?.subscription === "configured" && state.servers.length) { this.summary.visible = false; this.summary.height = 0; }
+
   }
 }

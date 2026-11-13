@@ -104,7 +104,8 @@ test("presentation: live speed belongs to measured server and late samples canno
   const f = await fixture();
   f.b.holds.add("servers/speed");
   try {
-    await f.key("t");
+    await f.key("v");
+    await f.key("T");
     const id = f.b.calls.find(c => c.action === "servers/speed")!.id;
     const sample: SpeedProgress = { event: "speed-progress", server_id: rows[0].server_id, downloaded_bytes: 2000000, elapsed_seconds: 1, download_mbps: 16 };
     f.b.onSpeedProgress?.(sample, id);

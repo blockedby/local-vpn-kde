@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """PTY acceptance for the installed compiled UI in a disposable container."""
 import errno
+import fcntl
+import struct
+import termios
 import os
 import pty
 import select
@@ -35,6 +38,7 @@ def descendants(pid):
 
 for arguments in (['--demo'], []):
     master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 80, 0, 0))
     child = subprocess.Popen(['runuser', '-u', 'builder', '--', '/usr/bin/local-vpn-kde', 'ui', *arguments],
                              stdin=slave, stdout=slave, stderr=slave,
                              env={**os.environ, 'TERM': 'xterm-256color'}, start_new_session=True)

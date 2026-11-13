@@ -1,13 +1,13 @@
-import { BoxRenderable, type CliRenderer } from "@opentui/core";
+import { BoxRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
 import type { Backend } from "./bridge";
 import { palette as p } from "./model";
 import { observeRendererClose } from "./renderer-lifecycle";
 import { ServerTableView } from "./server-table-view";
 import { MenuView } from "./menu-view";
-import { MeasurementView } from "./measurement-view";
 import { HeaderView } from "./header-view";
+import { TabView } from "./tab-view";
+import { OverlayView } from "./overlay-view";
 import { SummaryView } from "./summary-view";
-import { ProgressView } from "./progress-view";
 import { NoticeView } from "./notice-view";
 import { FooterView } from "./footer-view";
 import { EditorView } from "./editor-view";
@@ -17,113 +17,68 @@ export { cell } from "./formatting";
 export class App extends AppState {
   private root: BoxRenderable;
   private headerView: HeaderView;
+  private tabView: TabView;
+  private overlayView: OverlayView;
   private content: BoxRenderable;
+  private tooSmall: TextRenderable;
   private summaryView: SummaryView;
   private menuView: MenuView;
   private tableView: ServerTableView;
   private editorView: EditorView;
-  private progressView: ProgressView;
   private noticeView: NoticeView;
   private footerView: FooterView;
-
-  private measurementView: MeasurementView;
   private readonly rendererClosed: Promise<void>;
-  constructor(
-    private renderer: CliRenderer,
-    backend: Backend,
-    private demo = false,
-  ) {
+  constructor(private renderer: CliRenderer, backend: Backend, private demo = false) {
     super(backend);
     this.paint = this.paint.bind(this);
     this.rendererClosed = observeRendererClose(renderer);
-    this.root = new BoxRenderable(renderer, {
-      width: "100%",
-      height: "100%",
-      paddingX: 1,
-      flexDirection: "column",
-      backgroundColor: p.base,
-    });
+    this.root = new BoxRenderable(renderer, { width: "100%", height: "100%", paddingX: 1, flexDirection: "column", backgroundColor: p.base });
     renderer.root.add(this.root);
     this.headerView = new HeaderView(renderer, this.root);
-    this.content = new BoxRenderable(renderer, {
-      flexDirection: "column",
-      flexGrow: 1,
-      minHeight: 0,
-      overflow: "hidden",
-      marginTop: 1,
-    });
-    this.root.add(this.content);
+    this.tabView = new TabView(renderer, this.root, tab => this.open(tab));
+    this.content = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, minHeight: 0, overflow: "hidden" }); this.root.add(this.content);
+    this.tooSmall = new TextRenderable(renderer, { content: "Увеличьте терминал минимум до 60 × 16.", height: 1, fg: p.amber, visible: false }); this.content.add(this.tooSmall);
     this.summaryView = new SummaryView(renderer, this.content);
-    this.menuView = new MenuView(renderer, this.content, (index) => {
-      this.serverMenu = true;
+    this.menuView = new MenuView(renderer, this.content, index => {
       this.selected = index;
-      this.items()[index]?.run();
+      const item = this.items()[index];
+      const action = item && this.actions().find(candidate => candidate.keys.includes(item.key));
+      if (action?.available) action.run();
+      else if (action?.unavailableBehavior === "notice" && action.unavailableReason) this.notify(action.unavailableReason, true);
       this.paint();
     });
-    this.measurementView = new MeasurementView(renderer, this.content);
-    this.tableView = new ServerTableView(renderer, this.content, (index) => {
-      const server = this.visibleServers()[index];
-      if (server) {
-        this.serverMenu = false;
-        this.serverID = server.server_id;
-        this.syncServerViewport();
-        this.paint();
-      }
-    });
+    this.tableView = new ServerTableView(renderer, this.content, index => { const server = this.visibleServers()[index]; if (server) { this.serverID = server.server_id; this.syncServerViewport(); this.paint(); } });
     this.editorView = new EditorView(renderer, this.content, value => this.edit(value));
-    this.progressView = new ProgressView(renderer, this.root);
     this.noticeView = new NoticeView(renderer, this.root);
     this.footerView = new FooterView(renderer, this.root);
-    renderer.keyInput.on("keypress", this.onKey);
-    renderer.on("resize", this.onResize);
+    this.overlayView = new OverlayView(renderer, this.root);
+    renderer.keyInput.on("keypress", this.onKey); renderer.on("resize", this.onResize);
     this.paint();
   }
-
   private onResize = () => { this.syncServerViewport(); this.paint(); };
   override viewport() { return { width: this.renderer.width, height: this.renderer.height, terminalHeight: this.renderer.terminalHeight }; }
-  override paintMeasurement() {
-    super.paintMeasurement();
-    this.measurementView.update({
-      home: this.screen === "home", inline: this.inlineSpeed(), servers: this.servers,
-      testing: this.homeTesting, speed: this.homeSpeed, speedAt: this.homeSpeedAt,
-      speedServer: this.homeSpeedServer, speedLabel: this.homeSpeedLabel,
-    });
-  }
+  override paintMeasurement() { super.paintMeasurement(); this.headerView.update(this, this.demo); }
   override paintTable() {
     super.paintTable();
-    this.tableView.update({
-      visible: this.screen === "servers" && this.ready() && !this.nativePreviewOnly(),
-      servers: this.visibleServers(), rowCount: this.rowCount(), serverID: this.serverID,
-      batch: this.batch, frame: this.frame, liveSpeeds: this.liveSpeeds,
-    });
+    this.tableView.update({ visible: this.renderer.width >= 60 && this.renderer.height >= 16 && this.screen === "servers" && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0, servers: this.visibleServers(), rowCount: this.rowCount(), serverID: this.serverID, batch: this.batch, frame: this.frame, liveSpeeds: this.liveSpeeds, sort: this.sort });
+    this.headerView.update(this, this.demo);
   }
-  override paintProgress() {
-    super.paintProgress();
-    this.progressView.update(this);
-  }
+  override paintProgress() { super.paintProgress(); this.tabView.update(this); this.headerView.update(this, this.demo); }
   override paint() {
     if (this.disposed) return;
     super.paint();
-    this.headerView.update(this, this.demo);
-    const editor = this.screen === "subscription" || this.screen === "target" || this.screen === "profile-name" || this.screen === "profile-source";
-    this.editorView.update(this.editorValue, editor, this.closing);
-    const items = this.items();
-    this.menuView.update(items, editor, this.selected,
-      this.screen !== "servers" || this.serverMenu || !this.servers.length);
+    this.headerView.update(this, this.demo); this.tabView.update(this);
+    const small = this.renderer.width < 60 || this.renderer.height < 16;
+    this.tooSmall.visible = small;
+    const editor = !small && ["subscription", "target", "profile-name", "profile-source"].includes(this.screen);
+    this.editorView.update(this.editorValue, editor && !this.helpOpen, this.closing);
+    const items = small || this.screen === "servers" && this.ready() && !this.nativePreviewOnly() && this.status?.subscription === "configured" ? [] : this.items();
+    this.menuView.update(items, editor || small, this.selected, true);
     this.summaryView.update(this);
-    this.paintMeasurement();
-    this.paintTable();
-    this.paintProgress();
-    this.noticeView.update(this);
-    this.footerView.update(this, editor);
+    if (small) this.summaryView.hide();
+    this.paintTable(); this.noticeView.update(this); this.footerView.update(this, editor); this.overlayView.update(this);
   }
   override onClosing() { this.editorView.blur(); }
-  override onBeforeDispose() {
-    this.renderer.keyInput.off("keypress", this.onKey);
-    this.renderer.off("resize", this.onResize);
-  }
-  override async onDispose() {
-    this.renderer.destroy();
-    await this.rendererClosed;
-  }
+  override onBeforeDispose() { this.renderer.keyInput.off("keypress", this.onKey); this.renderer.off("resize", this.onResize); }
+  override async onDispose() { this.renderer.destroy(); await this.rendererClosed; }
 }

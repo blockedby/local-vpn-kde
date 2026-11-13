@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { AppState } from "./app-state";
-import { FakeBackend, reply, settle } from "./app-test-fixtures";
+import { FakeBackend, reply, rows, settle } from "./app-test-fixtures";
 import type { Reply } from "./bridge";
 
 const key = (state: AppState, name: string) => state.onKey({ name, preventDefault() {} });
@@ -21,7 +21,7 @@ test("renderer-free state navigates while a mutation is held and confirms discon
     expect(state.screen).toBe("confirm");
     expect(state.confirmation).toBe("disconnect");
     key(state, "return");
-    expect(state.screen).toBe("home");
+    expect(state.screen).toBe("servers");
     expect(backend.calls.filter(call => call.action === "disconnect")).toHaveLength(0);
     finish(reply(backend.status)); await work;
   } finally { await state.close(); }
@@ -87,16 +87,18 @@ test("action definitions expose identity, availability and the same keyboard pat
   const backend = new FakeBackend();
   const state = new AppState(backend);
   try {
-    const speed = state.actions().find(action => action.id === "home:t")!;
-    expect(speed.key).toBe("t");
-    expect(speed.keys).toEqual(["t"]);
-    expect(speed.scope).toBe("home");
+    state.servers = structuredClone(rows);
+    state.serverID = rows[1]!.server_id;
+    const speed = state.actions().find(action => action.id === "servers:single-speed")!;
+    expect(speed.key).toBe("shift+t");
+    expect(speed.keys).toEqual(["shift+t"]);
+    expect(speed.scope).toBe("server-table");
     expect(speed.available).toBe(false);
     expect(speed.unavailableReason).toContain("Docker");
-    key(state, speed.key);
+    key(state, "T");
     expect(state.notice).toBe(speed.unavailableReason!);
     await state.perform("status");
-    expect(state.actions().find(action => action.id === "home:t")?.available).toBe(true);
+    expect(state.actions().find(action => action.id === "servers:single-speed")?.available).toBe(true);
     key(state, "v");
     expect(state.screen).toBe("servers");
     expect(state.actions().map(action => action.id)).toContain("servers:p");

@@ -26,7 +26,7 @@ test("legacy status without runtime keeps Docker lifecycle wording", async () =>
   }
 });
 
-test("compact home has state-specific actions, no stale generic hints or refresh timestamp", async () => {
+test("shell footer has state-specific actions and no stale hints or refresh timestamp", async () => {
   const t = await createTestRenderer({ width: 80, height: 24 });
   const b = new FakeBackend();
   b.status.gateway_state = "absent";
@@ -42,22 +42,20 @@ test("compact home has state-specific actions, no stale generic hints or refresh
     b.status.gateway_state = "healthy";
     await app.perform("status");
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Подключить VPN");
+    expect(t.captureCharFrame()).toContain("s подключить");
     b.status.networkmanager_active = "yes";
     await app.perform("status");
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Отключить VPN");
-    const lines = t.captureCharFrame().split("\n");
-    expect(lines.findIndex(line => line.includes("[x] Отключить VPN"))).toBe(3);
+    expect(t.captureCharFrame()).toContain("x отключить");
     t.resize(60, 20);
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("q выход");
+    expect(t.captureCharFrame()).toContain("? помощь");
   } finally {
     await app.close();
   }
 });
 
-test("home has one list of navigation entries and no top tabs", async () => {
+test("shell has one clickable tab row", async () => {
   const t = await createTestRenderer({ width: 80, height: 24 });
   const app = new App(t.renderer, new FakeBackend());
   try {
@@ -65,12 +63,12 @@ test("home has one list of navigation entries and no top tabs", async () => {
     await t.renderOnce();
     const frame = t.captureCharFrame();
     expect(frame).not.toContain("[h] Главная");
-    for (const label of ["[v] Серверы", "[c] Подписка", "[d] Диагностика"])
+    for (const label of ["[Серверы]", "Профили", "Диагностика", "Настройки"])
       expect(frame.split(label)).toHaveLength(2);
     const row = frame
       .split("\n")
-      .findIndex((line) => line.includes("[d] Диагностика"));
-    await t.mockMouse.click(5, row);
+      .findIndex((line) => line.includes("Диагностика"));
+    await t.mockMouse.click(26, row);
     await t.renderOnce();
     expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
   } finally {
@@ -151,7 +149,7 @@ test("presentation: completed diagnostics never reopen a screen the user left", 
     await task;
     await t.renderOnce();
     expect(t.captureCharFrame()).not.toContain("OpenVPN / KDE");
-    expect(t.captureCharFrame()).toContain("Подключить VPN");
+    expect(t.captureCharFrame()).toContain("s подключить");
   } finally {
     finish(reply());
     await settle();
@@ -175,10 +173,10 @@ test("presentation: installed native separates service startup, connection, disc
   try {
     await app.perform("status");
     t.mockInput.pressKey("s"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("VPN отключён");
-    expect(t.captureCharFrame()).toContain("Подключить VPN");
+    expect(t.captureCharFrame()).toContain("○ отключён");
+    expect(t.captureCharFrame()).toContain("s подключить");
     t.mockInput.pressKey("s"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("VPN подключён");
+    expect(t.captureCharFrame()).toContain("● подключён");
     t.mockInput.pressKey("x"); await settle();
     t.mockInput.pressKey("n"); await settle();
     t.mockInput.pressKey("x"); t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
@@ -265,7 +263,7 @@ test("presentation: checkout native and native status without installed=true kee
       t.mockInput.pressKey("c");
       await settle();
       await t.renderOnce();
-      expect(t.captureCharFrame()).toContain("недоступна в native preview");
+      expect(t.captureCharFrame()).toContain("доступна только в установленном native-пакете");
       expect(t.captureCharFrame()).not.toContain("Enter сохранить");
     } finally {
       await app.close();
@@ -308,7 +306,7 @@ test("presentation: installed native subscription setup uses the private editor 
     await t.renderOnce();
     frame = t.captureCharFrame();
     expect(frame).toContain("Native-пакет настроен");
-    expect(frame).toContain("нажмите «Подключить VPN» отдельно");
+    expect(frame.replace(/\s+/g, " ")).toContain("нажмите «Подключить VPN» отдельно");
     expect(frame).not.toContain(value);
   } finally {
     await app.close();
@@ -472,9 +470,8 @@ test("presentation: server table is sorted by name, keeps columns aligned and ex
     const frame = t.captureCharFrame();
     expect(frame.indexOf("Amsterdam")).toBeLessThan(frame.indexOf("Tokyo"));
     for (const text of [
-      "Ping всех",
-      "Скорость + сайт",
-      "Ping всех + сайт",
+      "p ping",
+      "t скорость",
       "Ping мс",
       "Мбит/с",
     ])
@@ -489,8 +486,7 @@ test("presentation: server table is sorted by name, keeps columns aligned and ex
     expect(compact).not.toContain("Сайт: https:");
     expect(compact).toContain("Amsterdam");
     t.resize(100, 30); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Сортировка [o]");
-    expect(t.captureCharFrame()).toContain("Docker:");
+    expect(t.captureCharFrame()).toContain("ping ↑");
     t.mockInput.pressArrow("down");
     t.mockInput.pressEnter();
     await t.renderOnce();
@@ -674,23 +670,24 @@ test("presentation: speed batch shows parallel preparation and speed stage, canc
  }finally{finish(reply());await settle();await app.close();}
 });
 
-test("presentation: home speedometer measures the selected server after ping and removes redundant labels", async () => {
+test("presentation: single-server speed appears in the table and status line", async () => {
   const t = await createTestRenderer({ width: 90, height: 35 });
   const b = new FakeBackend();
   b.rows = rows.map((s, i) => ({ ...s, selected: i === 1 }));
   const app = new App(t.renderer, b);
   try {
     await app.perform("status");
-    t.mockInput.pressKey("t"); await settle(); await t.renderOnce();
+    t.mockInput.pressKey("v"); await settle();
+    t.mockInput.pressKey("T"); await settle(); await t.renderOnce();
     const frame = t.captureCharFrame();
     expect(frame).toContain("50.0 Мбит/с");
     expect(frame).not.toContain("Подписка: есть");
     expect(frame).not.toContain("Проверки и выбор серверов");
     t.resize(60, 24); await t.renderOnce();
     expect(t.captureCharFrame()).not.toContain("СКОРОСТЬ СЕРВЕРА");
-    expect(t.captureCharFrame()).toContain("Тест скорости · 24ms, 50.0 Мбит/с");
+    expect(t.captureCharFrame().split("\n").slice(2).find(line => line.includes("Amsterdam"))).toMatch(/24\s+50\.0/);
     t.resize(90, 35); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("СКОРОСТЬ СЕРВЕРА");
+    expect(t.captureCharFrame().split("\n")[0]).toContain("50.0 Мбит/с");
 
   } finally { await app.close(); }
 });
@@ -704,7 +701,8 @@ test("presentation: switching completes during a held home speed test; late resu
   const app = new App(t.renderer, b);
   try {
     await app.perform("status");
-    t.mockInput.pressKey("t");
+    t.mockInput.pressKey("v"); await settle();
+    t.mockInput.pressKey("T");
     await settle();
     t.mockInput.pressKey("v");
     await settle();
@@ -916,12 +914,12 @@ test("presentation: installed native mode failure preserves strict state and ret
     await app.perform("status");
     t.mockInput.pressKey("m"); await settle(); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Проверка DNS после подключения не прошла");
-    expect(t.captureCharFrame()).toContain("Режим: строгий");
+    expect(t.captureCharFrame()).toContain("режим: строгий");
     t.mockInput.pressKey("m"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Режим: умный");
+    expect(t.captureCharFrame()).toContain("режим: умный");
     expect(t.captureCharFrame()).not.toContain("Проверка DNS после подключения не прошла");
     t.mockInput.pressKey("m"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Режим: строгий");
+    expect(t.captureCharFrame()).toContain("режим: строгий");
   } finally { await app.close(); }
 });
 
@@ -953,7 +951,7 @@ test("presentation: installed native diagnostics failure can be retried without 
     expect(frame).not.toContain("Docker");
     expect(frame).not.toContain("Не удалось создать журнал");
     t.mockInput.pressKey("h"); await Bun.sleep(60); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("VPN подключён");
+    expect(t.captureCharFrame()).toContain("● подключён");
   } finally { await app.close(); }
 });
 
@@ -971,7 +969,7 @@ test("presentation: failed native status polls retain native server screen witho
   try {
     await app.perform("status");
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("VPN подключён");
+    expect(t.captureCharFrame()).toContain("● подключён");
     t.mockInput.pressKey("v");
     await settle();
     t.mockInput.pressKey("1");
@@ -986,7 +984,7 @@ test("presentation: failed native status polls retain native server screen witho
       expect(frame).toContain("Служба управления недоступна");
       expect(frame).toContain("Запустить сервис");
       expect(frame).not.toContain("Docker");
-      expect(frame).not.toContain("VPN подключён");
+      expect(frame).not.toContain("● подключён");
     }
   } finally {
     await app.close();
@@ -1040,7 +1038,7 @@ test("presentation: installed native reuses the server table, selection, checks 
     t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
     const frame=t.captureCharFrame();
     expect(frame).toContain("Amsterdam");
-    expect(frame).toContain("Ping всех");
+    expect(frame).toContain("p ping");
     expect(frame).not.toContain("пока не подключены");
     t.mockInput.pressEnter(); await settle();
 
@@ -1135,7 +1133,7 @@ test("presentation: removing the active source browses its fallback without chan
   try {
     await app.perform("status");
     t.mockInput.pressKey("c"); await settle();
-    t.mockInput.pressKey("x"); await settle();
+    t.mockInput.pressKey("X"); await settle();
 
     t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
     expect(t.captureCharFrame()).not.toContain("First profile");
@@ -1175,7 +1173,7 @@ test("presentation: cached errors do not masquerade as tests in the current sess
     await settle();
     await t.renderOnce();
     expect(t.captureCharFrame()).not.toContain("ошибка");
-    expect(t.captureCharFrame()).toContain("не пров.");
+    expect(t.captureCharFrame()).toContain("не проверен");
     await app.perform("servers/ping", server.server_id);
     await t.renderOnce();
     expect(t.captureCharFrame()).not.toContain("ошибка");
@@ -1195,7 +1193,7 @@ test("presentation: a successful site check marks a server ready without claimin
     await app.perform("status");
     t.mockInput.pressKey("v");
     await settle();
-    t.mockInput.pressKey("a");
+    t.mockInput.pressKey("p");
     await settle();
     await t.renderOnce();
     const row = t
@@ -1295,7 +1293,7 @@ test("presentation: failed current ping overrides an earlier successful speed re
     await app.perform("servers/speed",rows[0]!.server_id);
     let finish!: (r: Reply) => void;
     b.hold = { action: "servers/check-batch", promise: new Promise(r => finish=r) };
-    t.mockInput.pressKey("a");
+    t.mockInput.pressKey("p");
     await settle();
     b.onCheckProgress?.({ event:"server-check",server_id:rows[0]!.server_id,stage:"complete",ping_status:"failed",latency_ms:0,availability:"untested" });
     await t.renderOnce();
@@ -1316,7 +1314,7 @@ test("presentation: only assigned workers spin while remaining servers wait in t
  const event = (i:number,stage:"start"|"complete"): CheckProgress => ({event:"server-check",server_id:b.rows[i]!.server_id,stage,ping_status:stage==="start"?"untested":"ready",latency_ms:stage==="start"?0:12,availability:stage==="start"?"untested":"ready"});
  try {
   await app.perform("status"); t.mockInput.pressKey("v"); await settle();
-  t.mockInput.pressKey("a"); await settle();
+  t.mockInput.pressKey("p"); await settle();
   for(let i=0;i<5;i++) b.onCheckProgress?.(event(i,"start"));
   await t.renderOnce();
   let lines=t.captureCharFrame().split("\n").filter(s=>s.includes("Node "));
@@ -1389,20 +1387,21 @@ test("presentation: home speed test skips download after failed ping and allows 
   const app = new App(t.renderer, b);
   try {
     await app.perform("status");
-    t.mockInput.pressKey("t"); await settle();
-    t.resize(60, 14); await t.renderOnce();
+    t.mockInput.pressKey("v"); await settle();
+    t.mockInput.pressKey("T"); await settle();
+    t.resize(60, 16); await t.renderOnce();
     const narrow = t.captureCharFrame();
-    expect(narrow).toContain("[m] Режим:");
-    expect(narrow).toContain("[z] Остановить Docker");
+    expect(narrow).toContain("режим: строгий");
+    expect(narrow).toContain("k отменить");
     expect(narrow).not.toContain("Ping · выполняется");
-    expect(narrow).toContain("ping");
+    expect(narrow).toContain("Ping");
     t.mockInput.pressKey("d"); await t.renderOnce();
     expect(t.captureCharFrame()).not.toContain("СКОРОСТЬ СЕРВЕРА");
     finish({ ...reply(), ok: false, reason: "failed" }); await settle();
 
     t.mockInput.pressEscape(); await Bun.sleep(60); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("— Мбит/с");
-    expect(t.captureCharFrame()).toContain("q выход");
+    expect(t.captureCharFrame()).toContain("Серверы");
+    expect(t.captureCharFrame()).toContain("? помощь");
   } finally { finish(reply()); await settle(); await app.close(); }
 });
 
@@ -1439,7 +1438,7 @@ test("presentation: unknown routing mode is not presented as strict", async () =
   const app = new App(t.renderer, b);
   try {
     await app.perform("status"); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Режим: неизвестно");
+    expect(t.captureCharFrame()).toContain("режим: неизвестно");
     expect(app.actions().find(item => item.key === "m")?.label).toContain("неизвестно");
   } finally { await app.close(); }
 });
@@ -1462,7 +1461,7 @@ for (const width of [48, 100, 140]) {
       expect(frame).not.toContain("Действие не выполнено");
       expect(frame).not.toContain("[f] Действия");
       expect(frame).not.toContain("private-attempt");
-      expect(frame).toContain("Запустить сервис");
+      expect(frame).toContain("s запустить");
       let resolve!: (r: Reply) => void;
       b.hold = { action: "network/reapply", promise: new Promise(r => resolve = r) };
       t.mockInput.pressKey("f"); await settle();

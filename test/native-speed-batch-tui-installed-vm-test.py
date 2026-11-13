@@ -152,7 +152,11 @@ def site(url):
     wait(lambda text:'HTTPS' in text or 'Адрес сайта' in text,'site editor')
     # End + backspaces is independent of editor Ctrl+A/selection bindings.
     key('\x1b[F'+'\x7f'*200+url+'\r')
-    wait(lambda text:'Ping всех' in text and re.search(r'Сайт:\s*'+re.escape(url)+r'\s*(?:\n|$)',text),'saved exact site')
+    wait(lambda text:'Адрес сайта сохранён.' in text and 'Серверы' in text,'saved site')
+    key('e')
+    wait(lambda text:'HTTPS' in text and url in text,'reopened exact site')
+    key('\x1b')
+    wait(lambda text:'Серверы' in text and 'Ping мс' in text,'returned to server table')
 
 
 def completed(errors=None):
@@ -174,7 +178,7 @@ def second_action():
     wait(lambda text:'Состояние компонентов обновлено.' in text,'second diagnostic action')
     assert 'Docker' not in frame(), 'native diagnostics displays Docker wording'
     key('v')
-    wait(lambda text:'Ping всех' in text,'return to server table')
+    wait(lambda text:'Ping мс' in text and expected_display_name in text,'return to server table')
 
 
 try:
@@ -190,10 +194,17 @@ try:
         print(json.dumps({'ui_alive_mem_available_kib':memory['MemAvailable'],'swap_free_kib':memory['SwapFree'],'ui_rss_kib':int(rss),'kernel_oom_kill_lines':sum('Killed process' in line or 'Out of memory:' in line for line in kernel.splitlines())}),flush=True)
         pump(.5)
     assert 'Docker' not in frame(), 'native UI displays Docker wording'
-    key('v')
+    key('c')
     wait(lambda text:'Lab compiled speed acceptance' in text,'loaded profile list',30)
     key(str(active_index+1))
-    wait(lambda text:'Ping всех' in text and 'Lab compiled speed acceptance' in text and '1 серверов' in text and 'Lab compiled real node' in text,'loaded fixture server table',30)
+    table = wait(lambda text:'Ping мс' in text and 'Lab compiled real node' in text,'loaded fixture server table',30)
+    lines = table.splitlines()
+    header = next(i for i, line in enumerate(lines) if 'Ping мс' in line)
+    data_rows = []
+    for line in lines[header + 1:]:
+        if not line.strip(): break
+        data_rows.append(line)
+    assert len(data_rows) == expected_count and expected_display_name in data_rows[0], 'fixture catalog not fully displayed'
     site('https://www.gstatic.com/generate_204')
     seen_speed=False
     if '--trace-requests' in sys.argv:

@@ -7,6 +7,7 @@ import { failure } from "./model";
 export function updateCatalog(state: AppState, reply: Reply, action: Action) {
     if ((action === "servers/check-batch" || action === "servers/speed-batch") && reply.catalog?.servers) {
       for (const row of reply.catalog.servers) {
+        state.measurementTimes.set(row.server_id, Date.now());
         const at = state.servers.findIndex((s) => s.server_id === row.server_id);
         if (at >= 0)
           state.servers[at] = {
@@ -231,7 +232,7 @@ export async function perform(
       );
     } finally {
       state.tasks.delete(requestID);
-      if (action === "servers/speed" && value) state.liveSpeeds.delete(value);
+      if (action === "servers/speed" && value) { state.liveSpeeds.delete(value); if (reply?.ok) state.measurementTimes.set(value, Date.now()); }
       state.paint();
       if (state.closing && !state.batch && !state.homeTesting && !state.tasks.size) await state.finishClose();
       else if (state.queued) {

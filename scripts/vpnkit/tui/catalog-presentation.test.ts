@@ -47,19 +47,19 @@ test("presentation: ping sort freezes during progress and reorders when the pass
   await app.perform("status"); await app.perform("servers/list"); s.screen="servers"; s.sort="ping"; s.servers=s.servers.map((v:Server,i:number)=>({...v,latency_ms:10+i*10,ping_status:"ready"}));
   const run=s.runBatch("ping"); await Bun.sleep(10);
   b.onCheckProgress?.({event:"server-check",server_id:row(3).server_id,stage:"complete",ping_status:"ready",latency_ms:1,availability:"ready"}); await t.renderOnce();
-  expect(t.captureCharFrame().indexOf("Node 1")).toBeLessThan(t.captureCharFrame().indexOf("Node 3"));
+  expect(t.captureCharFrame().split("\n").slice(2).join("\n").indexOf("Node 1")).toBeLessThan(t.captureCharFrame().split("\n").slice(2).join("\n").indexOf("Node 3"));
   finish({...success(),catalog:{status:"ok",servers:b.rows.map((v,i)=>({...v,ping_status:"ready",latency_ms:i===2?1:10+i*10,availability:"ready"}))}}); await run; await t.renderOnce();
-  expect(t.captureCharFrame().indexOf("Node 3")).toBeLessThan(t.captureCharFrame().indexOf("Node 1"));
+  expect(t.captureCharFrame().split("\n").slice(2).join("\n").indexOf("Node 3")).toBeLessThan(t.captureCharFrame().split("\n").slice(2).join("\n").indexOf("Node 1"));
  } finally {finish(success()); await app.close();}
 });
 
 test("presentation: home result retains source and completion time after selection and resize",async()=>{
  const t=await createTestRenderer({width:65,height:24}); const b=new CatalogBackend(); const app=new App(t.renderer,b); const s=app as any;
  try {
-  await app.perform("status"); await s.testHomeSpeed(); const at=s.homeSpeedAt; const stamp=new Date(at).toLocaleTimeString("ru-RU",{hour12:false});
-  await t.renderOnce(); expect(t.captureCharFrame()).toContain(stamp); expect(t.captureCharFrame()).toContain("Node 1");
-  await app.perform("servers/select",row(2).server_id); await t.renderOnce(); expect(t.captureCharFrame()).toContain("другой сервер"); expect(t.captureCharFrame()).toContain("Node 1");
-  t.resize(100,35); await t.renderOnce(); expect(t.captureCharFrame()).toContain("Node 1"); expect(t.captureCharFrame()).toContain(stamp); expect(t.captureCharFrame()).toContain("СКОРОСТЬ СЕРВЕРА");
-  t.resize(65,24); await t.renderOnce(); expect(t.captureCharFrame()).toContain("другой сервер"); expect(t.captureCharFrame()).toContain(stamp);
+  await app.perform("status"); await s.testHomeSpeed(); const at=s.homeSpeedAt;
+  await t.renderOnce(); expect(t.captureCharFrame().split("\n").find((line:string)=>line.includes("Node 1") && line.includes("80.0"))).toBeDefined(); expect(t.captureCharFrame()).toContain("Node 1");
+  await app.perform("servers/select",row(2).server_id); await t.renderOnce(); expect(t.captureCharFrame().split("\n").find((line:string)=>line.includes("Node 2") && line.includes("●"))).toBeDefined(); expect(t.captureCharFrame()).toContain("Node 1");
+  t.resize(100,35); await t.renderOnce(); expect(t.captureCharFrame()).toContain("Node 1"); expect(t.captureCharFrame().split("\n").find((line:string)=>line.includes("Node 1") && line.includes("80.0"))).toBeDefined(); expect(s.homeSpeedAt).toBe(at);
+  t.resize(65,24); await t.renderOnce(); expect(t.captureCharFrame().split("\n").find((line:string)=>line.includes("Node 2") && line.includes("●"))).toBeDefined(); expect(t.captureCharFrame().split("\n").find((line:string)=>line.includes("Node 1") && line.includes("80.0"))).toBeDefined();
  } finally {await app.close();}
 });
