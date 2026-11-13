@@ -326,11 +326,13 @@ try:
                 bridges.append(pid)
         assert len(bridges)==1, 'cannot identify UI-owned bridge for controlled failure'
         os.kill(bridges[0],signal.SIGTERM)
-        key(KEY['servers_alias']);key(KEY['refresh'])
+        # Let the automatic status poll detect the failure. Sending refresh
+        # first can overwrite its loss notice if the poll wins the race.
         wait(lambda text:SCREEN['connection_lost'] in text and SCREEN['restore_connection'] in text,
              'controlled status transport failure',30,True)
         assert SCREEN['native'] in frame() and SCREEN['docker'] not in frame(), 'transport failure changed native identity to Docker'
         assert SCREEN['status_unavailable'] in frame(), 'failed transport retained stale healthy status'
+        key(KEY['servers_alias']);key(KEY['refresh'])
         key(KEY['servers']);pump(.3)
         assert SCREEN['native'] in frame() and SCREEN['docker'] not in frame(), 'unavailable native server controls display Docker'
         assert SCREEN['status_unavailable'] in frame(), 'server screen retained stale healthy status'
