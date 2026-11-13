@@ -71,6 +71,8 @@ export interface AppKeyEvent {
   preventDefault(): void;
 }
 
+export type StateRegion = "all" | "measurement" | "table" | "progress" | "editor";
+
 /** Renderer-independent application and request lifecycle. */
 export class AppState {
   status?: Status;
@@ -249,11 +251,19 @@ export class AppState {
     };
   }
 
+  private listeners = new Set<(region: StateRegion) => void>();
+  subscribe(listener: (region: StateRegion) => void) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+  private changed(region: StateRegion) {
+    for (const listener of this.listeners) listener(region);
+  }
   viewport() { return { width: 100, height: 28, terminalHeight: 28 }; }
-  paint() { this.syncAnimation(); }
-  paintMeasurement() {}
-  paintTable() {}
-  paintProgress() {}
+  paint() { this.syncAnimation(); this.changed("all"); }
+  paintMeasurement() { this.changed("measurement"); }
+  paintTable() { this.changed("table"); }
+  paintProgress() { this.changed("progress"); }
   onClosing() {}
   onBeforeDispose() {}
   async onDispose() {}
@@ -261,6 +271,7 @@ export class AppState {
     this.editorValue = safeText(value);
     this.editorRevision++;
     if (this.screen === "subscription") this.draft = this.editorValue;
+    this.changed("editor");
   }
 
   start() {

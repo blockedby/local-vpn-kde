@@ -62,3 +62,23 @@ test("renderer-free deferred subscription read preserves a newer editor value", 
     expect(state.draft).toBe("https://example.invalid/typed");
   } finally { await state.close(); }
 });
+
+test("renderer-free subscribers receive scoped updates and can unsubscribe", async () => {
+  const backend = new FakeBackend();
+  const state = new AppState(backend);
+  const regions: string[] = [];
+  const unsubscribe = state.subscribe(region => regions.push(region));
+  try {
+    state.edit("value");
+    expect(regions).toEqual(["editor"]);
+    regions.length = 0;
+    const work = state.perform("start");
+    backend.onProgress?.("runtime-wait");
+    expect(regions).toContain("progress");
+    await work;
+    unsubscribe();
+    regions.length = 0;
+    state.edit("other");
+    expect(regions).toEqual([]);
+  } finally { await state.close(); }
+});

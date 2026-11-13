@@ -109,6 +109,7 @@ export class App extends AppState {
 
   override viewport() { return { width: this.renderer.width, height: this.renderer.height, terminalHeight: this.renderer.terminalHeight }; }
   override paintMeasurement() {
+    super.paintMeasurement();
     this.measurementView.update({
       home: this.screen === "home", inline: this.inlineSpeed(), servers: this.servers,
       testing: this.homeTesting, speed: this.homeSpeed, speedAt: this.homeSpeedAt,
@@ -116,6 +117,7 @@ export class App extends AppState {
     });
   }
   override paintTable() {
+    super.paintTable();
     this.tableView.update({
       visible: this.screen === "servers" && this.ready() && !this.nativePreviewOnly(),
       servers: this.visibleServers(), rowCount: this.rowCount(), serverID: this.serverID,
@@ -123,6 +125,7 @@ export class App extends AppState {
     });
   }
   override paintProgress() {
+    super.paintProgress();
     const width = Math.max(10, this.renderer.terminalWidth - 2);
     const activeTask = [...this.tasks.values()].find(task => task.measurement) ??
       [...this.tasks.values()].find(task => task.action !== "status");
@@ -151,7 +154,7 @@ export class App extends AppState {
   override paint() {
     if (this.disposed) return;
     if (this.input.value !== this.editorValue) this.input.value = this.editorValue;
-    this.syncAnimation();
+    super.paint();
     const width = Math.max(10, this.renderer.terminalWidth - 2),
       state = connection(this.status);
     this.headline.content = cell(
