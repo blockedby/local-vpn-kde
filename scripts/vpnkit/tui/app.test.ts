@@ -1720,3 +1720,19 @@ test("idle stops animation and progress updates do not repaint the whole screen"
     expect(state.timer).toBeUndefined();
   } finally { await app.close(); }
 });
+
+test("deferred screen read runs after a batch catalog failure", async () => {
+  const t = await createTestRenderer({ width: 100, height: 30 });
+  const b = new FakeBackend(); const app = new App(t.renderer, b); const state = app as any;
+  try {
+    await app.perform("status");
+    let finish!: (result: Reply) => void;
+    b.hold = { action: "servers/list", promise: new Promise(resolve => { finish = resolve; }) };
+    const batch = state.runBatch("availability");
+    state.open("profiles");
+    expect(b.calls.some(call => call.action === "profiles/list")).toBe(false);
+    finish({ ...reply(), ok: false, reason: "unavailable" });
+    await batch;
+    expect(b.calls.filter(call => call.action === "profiles/list")).toHaveLength(1);
+  } finally { await app.close(); }
+});

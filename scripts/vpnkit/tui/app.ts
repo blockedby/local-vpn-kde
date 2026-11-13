@@ -1281,6 +1281,7 @@ export class App {
           true,
         );
         if (this.closing && !this.tasks.size && !this.homeTesting && !this.batch) await this.finishClose();
+        else await this.loadPendingScreenRead();
         return;
       }
     }
@@ -1288,6 +1289,7 @@ export class App {
     if (ids.some(id => !this.servers.some(s => s.server_id === id))) {
       this.batch = undefined;
       this.notify("Сервер удалён из подписки. Обновите список перед проверкой.", true);
+      await this.loadPendingScreenRead();
       return;
     }
     this.frozenOrder = ids;
@@ -1366,7 +1368,11 @@ export class App {
       }
       this.notify("Связь восстановлена. Состояние обновлено; действия не повторялись.");
     } catch { this.backendOffline = true; this.notify("Не удалось восстановить связь. Можно повторить [u].", true); }
-    finally { this.reconnecting = false; this.paint(); }
+    finally {
+      this.reconnecting = false;
+      this.paint();
+      if (!this.backendOffline) await this.loadPendingScreenRead();
+    }
   }
   private syncAnimation() {
     const animated = this.animationEnabled && !this.disposed &&
