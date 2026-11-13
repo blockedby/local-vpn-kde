@@ -160,7 +160,7 @@ assert (p/'ns/net').stat().st_ino==pathlib.Path('/run/netns/vpnkit-native').stat
             network_result = remote('systemctl show local-vpn-kde-network.service -p Result --value').stdout.strip()
             assert network_result == 'exit-code', 'held network unit did not refuse cleanup'
             guard_log = remote('sudo -n journalctl -b -u local-vpn-kde-network.service -n 12 --no-pager -o cat').stdout
-            assert 'still has running processes' in guard_log, 'stop failed for a different reason than owned holder protection'
+            assert 'native namespace is held by another process; cleanup was not performed' in guard_log, 'stop failed for a different reason than owned holder protection'
             remote('sudo -n test -e /run/netns/vpnkit-native && sudo -n test -s /var/lib/local-vpn-kde-network/journal.json')
         at_reboot = snapshot()
         booted = reboot(baseline['boot'], abrupt=kind == 'abrupt')
