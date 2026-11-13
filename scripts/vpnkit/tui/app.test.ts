@@ -1865,3 +1865,53 @@ test("failed reapplication replaces drift instruction with the actual busy failu
     expect(b.calls.filter(c=>c.action==="network/reapply")).toHaveLength(1);
   } finally { await app.close(); }
 });
+
+test("home speed starts during status polling and reports other conflicts", async () => {
+  const t = await createTestRenderer({ width: 100, height: 30 });
+  const b = new FakeBackend();
+  b.rows = rows.map((row, i) => ({ ...row, selected: i === 0 }));
+  const app = new App(t.renderer, b);
+  const state = app as any;
+  try {
+    await app.perform("status");
+    let finish!: (result: Reply) => void;
+    b.hold = { action: "status", promise: new Promise(resolve => { finish = resolve; }) };
+    const poll = app.perform("status");
+    await state.testHomeSpeed();
+    expect(b.calls.some(call => call.action === "servers/speed")).toBe(true);
+    finish(reply()); await poll;
+    b.hold = { action: "start", promise: new Promise(resolve => { finish = resolve; }) };
+    const mutation = app.perform("start");
+    await state.testHomeSpeed();
+    expect(state.notice).toContain("Дождитесь завершения");
+    finish(reply()); await mutation;
+  } finally { await app.close(); }
+});
+
+test("profiles and autostart reads wait for conflicting work while their screen remains open", async () => {
+  for (const [screen, read] of [["profiles", "profiles/list"], ["autostart", "autostart/read"]] as const) {
+    const t = await createTestRenderer({ width: 100, height: 30 });
+    const b = new FakeBackend(); const app = new App(t.renderer, b); const state = app as any;
+    try {
+      await app.perform("status");
+      let finish!: (result: Reply) => void;
+      b.hold = { action: "start", promise: new Promise(resolve => { finish = resolve; }) };
+      const mutation = app.perform("start");
+      state.open(screen);
+      expect(b.calls.filter(call => call.action === read)).toHaveLength(0);
+      finish(reply()); await mutation;
+      expect(b.calls.filter(call => call.action === read)).toHaveLength(1);
+    } finally { await app.close(); }
+  }
+});
+
+test("unknown routing mode is not presented as strict", async () => {
+  const t = await createTestRenderer({ width: 100, height: 30 });
+  const b = new FakeBackend(); b.status.routing_mode = "unknown";
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status"); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Режим: неизвестно");
+    expect((app as any).items().find((item: { key: string }) => item.key === "m").label).toContain("неизвестно");
+  } finally { await app.close(); }
+});

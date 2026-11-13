@@ -154,6 +154,7 @@ export class App {
   private compatible(action: Action, other: Action): boolean {
     const probe = (a: Action) => ["servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch"].includes(a);
     const read = (a: Action) => ["status", "subscription/read"].includes(a);
+    if ((action === "status" && other === "servers/list") || (other === "status" && action === "servers/list")) return true;
     return (read(action) && action !== other && (probe(other) || other === "servers/select")) ||
       (read(other) && action !== other && (probe(action) || action === "servers/select")) ||
       (action === "servers/select" && probe(other)) ||
@@ -199,6 +200,7 @@ export class App {
   private navigationRevision = 0;
   private loadedSubscription = false;
   private pendingSubscriptionRevision?: number;
+  private pendingScreenRead?: "profiles/list" | "autostart/read";
   private draft = "";
   private timer?: ReturnType<typeof setInterval>;
   private poll?: ReturnType<typeof setInterval>;
@@ -512,6 +514,14 @@ export class App {
         this.screen === "subscription" && !this.loadedSubscription)
       await this.perform("subscription/read");
   }
+  private async loadPendingScreenRead() {
+    const action = this.pendingScreenRead;
+    if (!action || this.closing || this.disposed || this.backendOffline || this.reconnecting ||
+        this.batch || this.homeTesting || [...this.tasks.values()].some(task => !this.compatible(action, task.action))) return;
+    this.pendingScreenRead = undefined;
+    if ((action === "profiles/list" && this.screen === "profiles") ||
+        (action === "autostart/read" && this.screen === "autostart")) await this.perform(action);
+  }
   private notify(text: string, error = false) {
     this.notice = text;
     this.noticeAttempt = "";
@@ -527,6 +537,7 @@ export class App {
     }
     if (this.screen === "subscription") this.draft = this.input.value;
     this.screen = screen;
+    this.pendingScreenRead = undefined;
     this.selected = 0;
     this.serverMenu = false;
     this.navigationRevision++;
@@ -537,9 +548,9 @@ export class App {
         void this.loadPendingSubscription();
       }
     }
-    if(screen==="profiles") void this.perform("profiles/list");
+    if (screen === "profiles") { this.pendingScreenRead = "profiles/list"; void this.loadPendingScreenRead(); }
     if(screen==="profile-name" || screen==="profile-source") this.input.value="";
-    if (screen === "autostart") void this.perform("autostart/read");
+    if (screen === "autostart") { this.pendingScreenRead = "autostart/read"; void this.loadPendingScreenRead(); }
     if (screen === "target") this.input.value = this.target;
     this.paint();
     if (
@@ -673,7 +684,7 @@ export class App {
         { key: "a", label: "Автозапуск", run: () => this.open("autostart") },
         {
           key: "m",
-          label: `Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}${this.nativePreviewOnly() ? " · недоступен в native" : ""}`,
+          label: `Режим: ${this.status?.routing_mode === "smart" ? "умный" : this.status?.routing_mode === "strict" ? "строгий" : "неизвестно"}${this.nativePreviewOnly() ? " · недоступен в native" : ""}`,
           run: () => {
             if (this.nativeMode()) void this.perform("toggle-mode");
             else if (this.ready()) void this.perform("toggle-mode");
@@ -1187,13 +1198,17 @@ export class App {
       if(this.profiles.items.find(p=>p.id===this.profiles?.active)?.stale) this.notify("Источник недоступен. Показаны ранее сохранённые серверы.");
     }
     await this.loadPendingSubscription();
+    await this.loadPendingScreenRead();
     return reply;
   }
   private inlineSpeed() {
     return this.renderer.width < 70 || this.renderer.height < 25;
   }
   private async testHomeSpeed(sourceID?: string) {
-    if (this.busy || this.batch || this.homeTesting) return;
+    if ([...this.tasks.values()].some(task => task.action !== "status") || this.batch || this.homeTesting) {
+      this.notify("Дождитесь завершения или отмените текущую операцию [k].");
+      return;
+    }
     if (this.nativePreviewOnly()) { this.notify(this.nativeUnavailable("servers/speed"), true); return; }
     if (!this.ready()) { this.notify(`Сначала запустите ${this.serviceObject()}.`, true); return; }
     this.homeTesting = true;
@@ -1235,7 +1250,7 @@ export class App {
       this.homeTesting = false;
       this.paint();
       if (this.closing && !this.tasks.size) await this.finishClose();
-      else await this.loadPendingSubscription();
+      else { await this.loadPendingSubscription(); await this.loadPendingScreenRead(); }
     }
   }
 
@@ -1318,7 +1333,7 @@ export class App {
       failed > 0 || !!stoppedReason,
     );
     if (this.closing && !this.tasks.size && !this.homeTesting && !this.batch) await this.finishClose();
-    else await this.loadPendingSubscription();
+    else { await this.loadPendingSubscription(); await this.loadPendingScreenRead(); }
   }
   private cancelTask(id: string) {
     const task = this.tasks.get(id);
@@ -1393,8 +1408,8 @@ export class App {
     };
     this.facts.content = cell(
       this.nativeMode()
-        ? `Native-служба: ${gatewayNames[gateway ?? ""] ?? "неизвестно"} · runtime: native · Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}`
-        : `Docker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"} · Режим: ${this.status?.routing_mode === "smart" ? "умный" : "строгий"}`,
+        ? `Native-служба: ${gatewayNames[gateway ?? ""] ?? "неизвестно"} · runtime: native · Режим: ${this.status?.routing_mode === "smart" ? "умный" : this.status?.routing_mode === "strict" ? "строгий" : "неизвестно"}`
+        : `Docker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"} · Режим: ${this.status?.routing_mode === "smart" ? "умный" : this.status?.routing_mode === "strict" ? "строгий" : "неизвестно"}`,
       width,
     );
     const editor = this.screen === "subscription" || this.screen === "target" || this.screen === "profile-name" || this.screen === "profile-source";
