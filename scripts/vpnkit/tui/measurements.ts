@@ -14,6 +14,7 @@ export async function testHomeSpeed(state: AppState, sourceID?: string) {
     state.homePing = undefined;
     state.homeSpeedAt = 0;
     state.homeSpeedServer = undefined;
+    state.noticeIdentity = undefined;
     state.notice = "";
     state.noticeAttempt = "";
     state.error = false;
@@ -65,6 +66,7 @@ export async function runBatch(state: AppState, kind: Batch, retry?: { ids: stri
       return;
     }
     state.cancelled = false;
+    state.noticeIdentity = undefined;
     state.notice = "";
     state.noticeAttempt = "";
     state.error = false;

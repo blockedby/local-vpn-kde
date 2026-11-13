@@ -144,6 +144,7 @@ export class AppState {
   started = 0;
   checked = 0;
   notice = "";
+  noticeIdentity?: { action: Action; reason: string; ok: boolean };
   noticeAttempt = "";
   error = false;
   selected = 0;
@@ -391,6 +392,7 @@ export class AppState {
         (action === "autostart/read" && this.screen === "autostart")) await this.perform(action);
   }
   notify(text: string, error = false) {
+    this.noticeIdentity = undefined;
     this.notice = text;
     this.noticeAttempt = "";
     this.error = error;

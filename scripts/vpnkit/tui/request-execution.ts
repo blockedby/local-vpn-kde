@@ -146,6 +146,7 @@ export async function perform(
         batchRetry: state.batch ? { kind: state.batch.kind, ids: [...(state.batch.ids ?? [])], target: state.batch.target ?? state.target } : undefined,
       };
       if (!reply.ok && !insideBatch) {
+        state.noticeIdentity = { action, reason: reply.reason, ok: false };
         state.notice = nativeSubscriptionSetup
           ? "Не удалось настроить native-пакет. Проверьте подтверждение администратора и повторите."
           : reply.reason === "autostart-unavailable" ? "Не удалось настроить автозапуск. Проверьте пользовательскую службу systemd." : state.recovery?.message ?? failure(reply.reason, reply.code, state.status?.runtime);
@@ -189,6 +190,7 @@ export async function perform(
           diagnostics: "Состояние компонентов обновлено.",
           "toggle-mode": "Режим изменён.",
         };
+        state.noticeIdentity = { action, reason: reply.reason, ok: true };
         state.notice = done[action] ?? "Готово.";
         state.noticeAttempt = "";
         state.error = false;
