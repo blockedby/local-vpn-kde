@@ -1,8 +1,8 @@
 import { test, expect } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
-import { Renderable, TextRenderable } from "@opentui/core";
+import { Renderable } from "@opentui/core";
 import { App } from "./app";
-import { AppState } from "./app-state";
+import { AppState, isOverlay } from "./app-state";
 import {
   Bridge,
   type Action,
@@ -16,13 +16,11 @@ import { initial, rows, reply, FakeBackend, settle } from "./app-test-fixtures";
 
 // Resolve the current action's rendered hit target without relying on its wording or row.
 function actionTarget(app: App, root: Renderable, id: string) {
-  const action = app.actions().find(item => item.id === id);
-  if (!action) throw new Error(`Missing action: ${id}`);
-  const visit = (node: Renderable): TextRenderable | undefined => {
-    if (node instanceof TextRenderable && node.chunks.map(chunk => chunk.text).join("").includes(action.label)) {
-      const parent = node.parent as unknown as { _mouseListeners?: { down?: unknown } } | null;
-      if (parent?._mouseListeners?.down) return node;
-    }
+  if (!app.actions().some(item => item.id === id)) throw new Error(`Missing action: ${id}`);
+  const action = app.actions().find(item => item.id === id)!;
+  const rendered = app.items().find(item => item.key === action.key);
+  const visit = (node: Renderable): Renderable | undefined => {
+    if (node.id === `action:${isOverlay(app.screen) ? "overlay" : "workspace"}:${rendered?.id}` && node.visible) return node;
     for (const child of node.getChildren()) {
       const found = visit(child);
       if (found) return found;

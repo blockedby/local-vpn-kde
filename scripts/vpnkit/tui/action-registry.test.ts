@@ -95,3 +95,84 @@ test("ping and autostart shortcuts have distinct owners", () => {
   expect(state.screen).toBe("autostart");
   expect(batches).toBe(1);
 });
+
+test("connection-affecting shortcuts send the named action and target", async () => {
+  const cases = [
+    { screen: "home-stopped", key: "s", action: "backend/start", value: undefined },
+    { screen: "home", key: "s", action: "start", value: undefined },
+    { screen: "home", key: "m", action: "toggle-mode", value: undefined },
+    { screen: "servers", key: "return", action: "servers/select", value: rows[1]!.server_id },
+    { screen: "autostart-loaded", key: "g", action: "autostart/set", value: JSON.stringify({ gateway: true, connect: false }) },
+    { screen: "autostart-loaded", key: "a", action: "autostart/set", value: JSON.stringify({ gateway: true, connect: true }) },
+    { screen: "subscription", key: "return", action: "subscription", value: "https://example.invalid/" },
+  ] as const;
+  for (const example of cases) {
+    const { state, backend } = fixture(example.screen, "docker");
+    try {
+      state.onKey(event(example.key));
+      expect(backend.calls[0]).toEqual({ action: example.action, value: example.value });
+      for (let tick = 0; tick < 10; tick++) await Promise.resolve();
+    } finally { await state.close(); }
+  }
+  for (const [key, action] of [["x", "disconnect"], ["z", "stop"]] as const) {
+    const { state, backend } = fixture("home-connected", "docker");
+    try {
+      state.onKey(event(key));
+      expect(backend.calls).toEqual([]);
+      state.onKey(event("y"));
+      expect(backend.calls[0]).toEqual({ action, value: undefined });
+    } finally { await state.close(); }
+  }
+});
+
+test("profile, repair and fastest shortcuts retain their exact targets", async () => {
+  {
+    const { state, backend } = fixture("recovery", "native");
+    state.recovery = { ...recoveryFor("backend/start", "native-network-settings-changed", "native"), action: "backend/start" };
+    state.onKey(event("f"));
+    expect(backend.calls[0]).toEqual({ action: "network/reapply", value: undefined });
+    await state.close();
+  }
+  {
+    const { state, backend } = fixture("profiles", "native");
+    state.profiles!.active = "profile_0";
+    state.onKey(event("1"));
+    expect(backend.calls[0]).toEqual({ action: "profiles/open", value: "profile_0" });
+    await state.close();
+  }
+  {
+    const { state, backend } = fixture("profiles", "native");
+    state.profiles!.active = "profile_0";
+    state.onKey(event("X"));
+    expect(backend.calls).toEqual([]);
+    state.onKey(event("y"));
+    expect(backend.calls[0]).toEqual({ action: "profiles/remove", value: "profile_0" });
+    await state.close();
+  }
+  {
+    const { state, backend } = fixture("profile-source", "native");
+    state.profileName = "Example"; state.editorValue = "hy2://secret@example.invalid";
+    state.onKey(event("return"));
+    expect(backend.calls[0]).toEqual({ action: "profiles/add", value: JSON.stringify({ name: "Example", source: "hy2://secret@example.invalid" }) });
+    await state.close();
+  }
+  {
+    const { state, backend } = fixture("servers", "docker");
+    state.measurementTimes.set(rows[1]!.server_id, Date.now());
+    state.onKey(event("b")); expect(backend.calls).toEqual([]);
+    state.onKey(event("y"));
+    expect(backend.calls[0]).toEqual({ action: "servers/select", value: rows[1]!.server_id });
+    await state.close();
+  }
+});
+
+test("native subscription confirmation submits only its captured source", async () => {
+  const { state, backend } = fixture("subscription", "native");
+  state.editorValue = "https://example.invalid/private";
+  try {
+    state.onKey(event("return")); expect(backend.calls).toEqual([]);
+    state.editorValue = "https://example.invalid/other";
+    state.onKey(event("y"));
+    expect(backend.calls[0]).toEqual({ action: "subscription", value: "https://example.invalid/private" });
+  } finally { await state.close(); }
+});

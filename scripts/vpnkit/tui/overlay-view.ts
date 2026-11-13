@@ -33,7 +33,7 @@ export class OverlayView {
       if (action?.available) action.run();
       else if (action?.unavailableBehavior === "notice" && action.unavailableReason) state.notify(action.unavailableReason, true);
       state.paint();
-    });
+    }, "overlay");
     this.dialogEditor = new EditorView(renderer, this.dialog, value => this.current?.edit(value));
     this.backdrop = new BoxRenderable(renderer, { position: "absolute", top: 2, left: 0, width: "100%", height: 1, zIndex: 99, backgroundColor: p.base, visible: false });
     root.add(this.backdrop);
@@ -83,7 +83,7 @@ export class OverlayView {
       this.dialogSummary.update(state);
       const summaryHeight = this.dialogSummary.fit(width - 2);
       const items = state.items();
-      let displayItems = items.map(item => ({ key: item.key, label: item.label }));
+      let displayItems: { key: string; label: string; id?: string }[] = items.map(item => ({ key: item.key, label: item.label, id: item.id }));
       this.taskRows = [];
       if (state.screen === "tasks") {
         displayItems = [];
@@ -92,7 +92,7 @@ export class OverlayView {
         for (const [title, count] of [["Выполняются", running], ["В очереди", state.queue.length], ["Завершены", state.history.length]] as const) {
           if (!count) continue;
           displayItems.push({ key: "", label: title }); this.taskRows.push(-1);
-          for (let i = 0; i < count; i++, at++) { const item = items[at]; if (item) { displayItems.push({ key: item.key, label: item.label }); this.taskRows.push(at); } }
+          for (let i = 0; i < count; i++, at++) { const item = items[at]; if (item) { displayItems.push({ key: item.key, label: item.label, id: item.id }); this.taskRows.push(at); } }
         }
       }
       const height = Math.min(this.renderer.terminalHeight - 4, Math.max(5, 2 + summaryHeight + (editor ? 3 : displayItems.length)));
