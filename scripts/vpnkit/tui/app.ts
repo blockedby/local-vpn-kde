@@ -7,7 +7,8 @@ import { ServerTableView } from "./server-table-view";
 import { MenuView } from "./menu-view";
 import { MeasurementView } from "./measurement-view";
 import { frames } from "./animation-frames";
-import { AppState, names } from "./app-state";
+import { AppState } from "./app-state";
+import { names } from "./action-labels";
 export { cell } from "./formatting";
 
 export class App extends AppState {

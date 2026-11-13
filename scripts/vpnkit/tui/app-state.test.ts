@@ -82,3 +82,21 @@ test("renderer-free subscribers receive scoped updates and can unsubscribe", asy
     expect(regions).toEqual([]);
   } finally { await state.close(); }
 });
+
+test("action definitions expose identity, availability and the same keyboard path", async () => {
+  const backend = new FakeBackend();
+  const state = new AppState(backend);
+  try {
+    const speed = state.actions().find(action => action.id === "home:t")!;
+    expect(speed.key).toBe("t");
+    expect(speed.available).toBe(false);
+    expect(speed.unavailableReason).toContain("Docker");
+    key(state, speed.key);
+    expect(state.notice).toBe(speed.unavailableReason!);
+    await state.perform("status");
+    expect(state.actions().find(action => action.id === "home:t")?.available).toBe(true);
+    key(state, "v");
+    expect(state.screen).toBe("servers");
+    expect(state.actions().map(action => action.id)).toContain("servers:p");
+  } finally { await state.close(); }
+});
