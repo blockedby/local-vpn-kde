@@ -124,3 +124,40 @@ test("palette excludes finished task history", async () => {
     expect(state.filteredPaletteActions()).toHaveLength(0);
   } finally { await state.close(); }
 });
+
+test("every available palette action avoids conflicts with reads it starts", async () => {
+  function prepared() {
+    const { state, backend } = fixture();
+    state.autostart = { gateway: false, connect: false };
+    state.profiles = { active: "one", items: [{ id: "one", name: "Example", kind: "server", count: 1, stale: false }] };
+    const original = backend.request.bind(backend);
+    const pending: (() => void)[] = [];
+    backend.request = (action, value) => {
+      if (["autostart/read", "profiles/list", "servers/list", "subscription/read"].includes(action)) {
+        backend.calls.push({ action, value });
+        return new Promise<Reply>(resolve => pending.push(() => resolve({ ...reply(), catalog: { status: "ok", servers: structuredClone(backend.rows) }, profiles: state.profiles, autostart: state.autostart })));
+      }
+      return original(action, value);
+    };
+    return { state, pending };
+  }
+  const seed = prepared();
+  const ids = seed.state.paletteActions().filter(entry => entry.action.available).map(entry => entry.action.id);
+  await seed.state.close();
+  for (const id of ids) {
+    const { state, pending } = prepared();
+    state.paletteOpen = true;
+    state.paletteIndex = state.filteredPaletteActions().findIndex(entry => entry.action.id === id);
+    try {
+      expect(state.paletteIndex).toBeGreaterThanOrEqual(0);
+      state.runPaletteAction();
+      for (let tick = 0; tick < 10; tick++) await Promise.resolve();
+      expect({ id, conflict: state.notice.includes("конфликт") }).toEqual({ id, conflict: false });
+    } finally {
+      while (pending.length) pending.shift()!();
+      for (let tick = 0; tick < 20; tick++) await Promise.resolve();
+      while (pending.length) pending.shift()!();
+      await state.close();
+    }
+  }
+});
