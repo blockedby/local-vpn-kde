@@ -115,3 +115,12 @@ test("palette autostart toggle does not start a conflicting screen read", async 
     expect(state.notice).not.toContain("конфликт");
   } finally { finish(reply()); await settle(); await state.close(); }
 });
+
+test("palette excludes finished task history", async () => {
+  const { state } = fixture();
+  try {
+    state.history.push({ action: "diagnostics", started: Date.now(), ended: Date.now(), phase: "", outcome: "Завершено" });
+    state.paletteQuery = "завершено";
+    expect(state.filteredPaletteActions()).toHaveLength(0);
+  } finally { await state.close(); }
+});

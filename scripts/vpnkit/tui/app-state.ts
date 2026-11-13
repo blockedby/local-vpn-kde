@@ -231,8 +231,9 @@ export class AppState {
       this.screen = target;
       for (const action of actionRegistry(this)) {
         if (seen.has(action.id) || /^(help:|editor:|filter:)/.test(action.id) || action.id === "global:palette") continue;
+        if (target === "tasks" && action.id.startsWith("task:cancel:") && Number(action.key) > [...this.tasks.values()].filter(task => task.action !== "status").length + this.queue.length) continue;
         const labels: Record<string, string> = { "global:back": "Вернуться или закрыть уведомление", "global:quit-control": "Выйти из приложения", "global:quit": "Выйти из приложения", "global:tab": "Следующая вкладка", "global:shift+tab": "Предыдущая вкладка", "menu:previous": "Предыдущий пункт", "menu:next": "Следующий пункт", "menu:select": "Выбрать пункт меню", "servers:up": "Предыдущий сервер", "servers:down": "Следующий сервер", "servers:pageup": "Предыдущая страница серверов", "servers:pagedown": "Следующая страница серверов", "servers:home": "Первый сервер", "servers:end": "Последний сервер" };
-        seen.add(action.id); result.push({ action: { ...action, label: labels[action.id] ?? action.label }, screen: target });
+        seen.add(action.id); result.push({ action: { ...action, label: action.id.startsWith("task:cancel:") ? `Отменить: ${action.label}` : labels[action.id] ?? action.label }, screen: target });
       }
     }
     this.screen = screen; this.tab = tab; this.paletteOpen = open;
