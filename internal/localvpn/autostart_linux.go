@@ -23,6 +23,25 @@ type AutostartOptions struct {
 	Connect    bool   `json:"connect"`
 	Runtime    string `json:"runtime,omitempty"`
 	LastResult string `json:"last_result,omitempty"`
+	LastReason string `json:"last_reason,omitempty"`
+}
+
+type autostartFailure struct{ reason string }
+
+func (e *autostartFailure) Error() string { return "native autostart failed" }
+
+// AutostartFailureMessage only publishes fixed labels, never wrapped output.
+func AutostartFailureMessage(err error) string {
+	var failure *autostartFailure
+	if errors.As(err, &failure) {
+		switch failure.reason {
+		case "gateway-start-failed":
+			return "autostart_failure=gateway-start-failed: native gateway did not start; inspect gateway and network journals"
+		case "network-connect-failed":
+			return "autostart_failure=network-connect-failed: desktop VPN connection failed"
+		}
+	}
+	return "autostart_failure=failed: login autostart failed"
 }
 
 // Autostart is opt-in at user login. It never enables linger or changes routing
@@ -127,15 +146,18 @@ func (a Autostart) Status(ctx context.Context) (AutostartOptions, error) {
 		return options, errors.New("autoconnect requires gateway autostart")
 	}
 	options.LastResult = ""
+	options.LastReason = ""
 	result, resultErr := readAt(fd, "autostart-result.json")
 	if resultErr == nil {
 		var state struct {
 			Result string `json:"result"`
+			Reason string `json:"reason"`
 		}
-		if json.Unmarshal(result, &state) != nil || !autostartResultAllowed(state.Result) {
+		if json.Unmarshal(result, &state) != nil || !autostartResultAllowed(state.Result) || !autostartReasonAllowed(state.Reason) {
 			return options, errors.New("invalid autostart result")
 		}
 		options.LastResult = state.Result
+		options.LastReason = state.Reason
 	} else if !errors.Is(resultErr, unix.ENOENT) {
 		return options, resultErr
 	}
@@ -148,8 +170,21 @@ func autostartResultAllowed(result string) bool {
 	}
 	return false
 }
-func (a Autostart) recordResult(result string) error {
-	if !autostartResultAllowed(result) {
+func autostartReasonAllowed(reason string) bool {
+	switch reason {
+	case "", "gateway-start-failed", "network-connect-failed":
+		return true
+	}
+	return false
+}
+func (a Autostart) recordResult(result string, reasons ...string) error {
+	reason := ""
+	if len(reasons) == 1 {
+		reason = reasons[0]
+	} else if len(reasons) != 0 {
+		return errors.New("invalid autostart reason")
+	}
+	if !autostartResultAllowed(result) || !autostartReasonAllowed(reason) {
 		return errors.New("invalid autostart result")
 	}
 	fd, err := directory(a.Base, true, true)
@@ -157,7 +192,7 @@ func (a Autostart) recordResult(result string) error {
 		return err
 	}
 	defer unix.Close(fd)
-	data, _ := json.Marshal(map[string]string{"result": result})
+	data, _ := json.Marshal(map[string]string{"result": result, "reason": reason})
 	return atomicWrite(fd, "autostart-result.json", data)
 }
 func (a Autostart) validateBase() error {
@@ -215,7 +250,7 @@ Type=oneshot
 TimeoutStartSec=6min
 RemainAfterExit=yes
 StandardOutput=null
-StandardError=null
+StandardError=journal
 
 [Install]
 WantedBy=%s
@@ -240,6 +275,7 @@ func (a Autostart) Configure(ctx context.Context, options AutostartOptions) erro
 		return err
 	}
 	options.LastResult = ""
+	options.LastReason = ""
 	if options.Connect && !options.Gateway {
 		return errors.New("autoconnect requires gateway autostart")
 	}
@@ -318,13 +354,14 @@ func (a Autostart) Run(ctx context.Context) (runErr error) {
 		return err
 	}
 	result := "failed"
+	reason := ""
 	defer func() {
 		if errors.Is(runErr, context.Canceled) {
 			result = "cancelled"
 		} else if errors.Is(runErr, context.DeadlineExceeded) {
 			result = "failed"
 		}
-		if err := a.recordResult(result); runErr == nil && err != nil {
+		if err := a.recordResult(result, reason); runErr == nil && err != nil {
 			runErr = err
 		}
 	}()
@@ -414,7 +451,8 @@ func (a Autostart) Run(ctx context.Context) (runErr error) {
 			if contextErr := ctx.Err(); contextErr != nil {
 				return contextErr
 			}
-			return errors.New("native gateway autostart failed")
+			reason = "gateway-start-failed"
+			return &autostartFailure{reason: reason}
 		}
 		// Starting the notify service can take time. Re-read immediately before
 		// the optional desktop VPN mutation so a concurrent disable wins.
@@ -437,7 +475,8 @@ func (a Autostart) Run(ctx context.Context) (runErr error) {
 				if contextErr := ctx.Err(); contextErr != nil {
 					return contextErr
 				}
-				return errors.New("NetworkManager autoconnect failed")
+				reason = "network-connect-failed"
+				return &autostartFailure{reason: reason}
 			}
 		}
 	} else {

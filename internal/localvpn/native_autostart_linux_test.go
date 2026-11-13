@@ -216,6 +216,18 @@ func TestNativeAutostartErrorsAreCoarse(t *testing.T) {
 			if err == nil || strings.Contains(err.Error(), secret) {
 				t.Fatal(err)
 			}
+			wantReason := "gateway-start-failed"
+			if tc.connect {
+				wantReason = "network-connect-failed"
+			}
+			status, statusErr := a.Status(context.Background())
+			if statusErr != nil || status.LastResult != "failed" || status.LastReason != wantReason {
+				t.Fatal(status, statusErr)
+			}
+			message := AutostartFailureMessage(err)
+			if !strings.Contains(message, wantReason) || strings.Contains(message, secret) {
+				t.Fatal(message)
+			}
 			data, readErr := os.ReadFile(filepath.Join(a.Base, "autostart-result.json"))
 			if readErr != nil || strings.Contains(string(data), secret) || !strings.Contains(string(data), `"failed"`) {
 				t.Fatal(string(data), readErr)
