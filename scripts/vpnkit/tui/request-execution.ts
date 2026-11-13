@@ -101,6 +101,7 @@ export async function perform(
     const requestRuntime = state.status?.runtime;
     const nativeSubscriptionSetup = action === "subscription" && state.nativeInstalled();
     state.tasks.set(requestID, { action, measurement: insideBatch, started: Date.now(), phase: "", value });
+    if (action === "servers/speed" && value) state.speedSamples.delete(value);
     const selectionRevision = state.selectionRevision;
     const revision = state.editorRevision,
       navigation = state.navigationRevision;
@@ -128,6 +129,10 @@ export async function perform(
         ? new Map(state.servers.map(row => [row.server_id, row])) : undefined;
       const currentSelection = state.servers.find(row => row.selected)?.server_id;
       state.updateCatalog(reply, action);
+      if (reply.ok && ["servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch"].includes(action)) {
+        const ids = new Set([...(reply.catalog?.servers ?? []).map(row => row.server_id), ...(reply.catalog?.server ? [reply.catalog.server.server_id] : [])]);
+        for (const server of state.servers) if (ids.has(server.server_id)) state.recordMeasurement(server);
+      }
       if (selectionRevision !== state.selectionRevision && reply.catalog?.servers)
         state.servers.forEach(row => row.selected = row.server_id === currentSelection);
       if (previousMeasurements) state.servers = state.servers.map(row => {
@@ -245,7 +250,7 @@ export async function perform(
         state.history.length = Math.min(20, state.history.length);
       }
       if (state.poll && !cancelRequested && requestClasses[action] === "exclusive" && !state.closing && !state.backendOffline && !state.reconnecting && ![...state.tasks.values()].some(task => task.action === "status")) void state.perform("status");
-      if (action === "servers/speed" && value) { state.liveSpeeds.delete(value); if (reply?.ok && reply.catalog?.server?.status === "ready" && reply.catalog.server.download_mbps !== undefined && Number.isFinite(reply.catalog.server.download_mbps) && reply.catalog.server.download_mbps >= 0) state.measurementTimes.set(value, Date.now()); }
+      if (action === "servers/speed" && value) { state.liveSpeeds.delete(value); state.speedSamples.delete(value); if (reply?.ok && reply.catalog?.server?.status === "ready" && reply.catalog.server.download_mbps !== undefined && Number.isFinite(reply.catalog.server.download_mbps) && reply.catalog.server.download_mbps >= 0) state.measurementTimes.set(value, Date.now()); }
       state.paint();
       if (state.closing && !state.batch && !state.homeTesting && !state.tasks.size) await state.finishClose();
       else if (

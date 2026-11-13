@@ -1,4 +1,4 @@
-import type { Action, Backend, Reply, Status, Server, CheckProgress } from "./bridge";
+import type { Action, Backend, Reply, Status, Server, CheckProgress, SpeedProgress } from "./bridge";
 export const initial: Status = {
   vpn_state: "inactive",
   gateway_state: "healthy",
@@ -36,7 +36,8 @@ export class FakeBackend implements Backend {
   hold?: { action: Action; promise: Promise<Reply> };
   cancelled = 0;
   onProgress?: (phase: string) => void;
-  onCheckProgress?: (result: CheckProgress) => void;
+  onCheckProgress?: (result: CheckProgress, requestId?: string) => void;
+  onSpeedProgress?: (result: SpeedProgress, requestId?: string) => void;
   async request(action: Action, value?: string): Promise<Reply> {
     this.calls.push({ action, value });
     if (this.hold?.action === action) return this.hold.promise;

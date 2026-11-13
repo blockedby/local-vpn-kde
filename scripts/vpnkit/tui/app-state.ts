@@ -72,6 +72,17 @@ export class AppState {
   helpOffset = 0;
   detailsOffset = 0;
   measurementTimes = new Map<string, number>();
+  speedSamples = new Map<string, number[]>();
+  sessionMeasurements = new Map<string, { at: number; ping?: number; speed?: number; site: string }[]>();
+  recordMeasurement(server: Server) {
+    if (!this.sessionMeasurements.has(server.server_id) && this.sessionMeasurements.size >= 100)
+      this.sessionMeasurements.delete(this.sessionMeasurements.keys().next().value!);
+    const entries = this.sessionMeasurements.get(server.server_id) ?? [];
+    entries.unshift({ at: Date.now(), ping: server.ping_status === "ready" ? server.latency_ms : undefined,
+      speed: server.status === "ready" ? server.download_mbps : undefined, site: server.availability ?? "untested" });
+    entries.length = Math.min(entries.length, 4);
+    this.sessionMeasurements.set(server.server_id, entries);
+  }
   profiles?: Reply["profiles"];
   profileName = "";
   profileRemoval?: { id: string; name: string; kind: "subscription" | "server" };
@@ -325,7 +336,12 @@ export class AppState {
     this.backend.onSpeedProgress = (row, id) => {
       const task = id ? this.tasks.get(id) : undefined;
       if (!task || task.action !== "servers/speed" || task.value !== row.server_id || this.cancelled || this.closing) return;
+      if (!Number.isFinite(row.download_mbps) || row.download_mbps < 0) return;
       this.liveSpeeds.set(row.server_id, row.download_mbps);
+      const samples = this.speedSamples.get(row.server_id) ?? [];
+      samples.push(row.download_mbps);
+      if (samples.length > 12) samples.shift();
+      this.speedSamples.set(row.server_id, samples);
       if (this.homeTesting && this.homeSpeedServer?.id === row.server_id) this.homeSpeed = row.download_mbps;
       this.paintMeasurement();
       if (this.screen === "servers") this.paintTable();

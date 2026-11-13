@@ -18,8 +18,17 @@ export function detailsLines(state: AppState): string[] {
   const stage = state.batch?.stages.get(server.server_id);
   const status = queued ? "в очереди" : active ? ({ start: "подготовка", ping: "проверка ping", speed: "замер скорости", complete: "завершение" }[stage ?? "start"]) : state.homeTesting && state.homeSpeedServer?.id === server.server_id ? (state.measurementAction === "servers/ping" ? "проверка ping" : "замер скорости") : server.ping_status === "failed" || server.status === "failed" || server.availability === "failed" ? "ошибка проверки" : server.availability === "ready" || server.status === "ready" ? "готов" : "не проверен";
   const site = server.availability === "ready" ? "доступен" : server.availability === "failed" ? "недоступен" : "не проверен";
-  const speed = live !== undefined ? `~${live.toFixed(1)} Мбит/с · сейчас` : server.download_mbps === undefined ? "нет данных" : `${server.download_mbps.toFixed(1)} Мбит/с${time ? ` · ${new Date(time).toLocaleString("ru-RU")}` : " · время неизвестно"}`;
-  return [server.display_name, `Профиль: ${profile ?? "неизвестен"}`, `Выбран для VPN: ${server.selected ? "да" : "нет"}`, `Ping: ${server.ping_status === "failed" ? "ошибка" : server.latency_ms === undefined ? "нет данных" : `${server.latency_ms} мс`}`, `Скорость: ${speed}`, `Сайт: ${site}`, ...(server.availability === "ready" || server.availability === "failed" ? [`Адрес проверки: ${displayCheckAddress(state.target, 18)}`] : []), `Состояние: ${status}`];
+  const samples = state.speedSamples.get(server.server_id) ?? [];
+  const peak = Math.max(1, ...samples);
+  const spark = samples.map(sample => "▁▂▃▄▅▆▇█"[Math.min(7, Math.floor(sample / peak * 7))]).join("");
+  const speed = live !== undefined ? `~${live.toFixed(1)} Мбит/с ${spark}` : server.download_mbps === undefined ? "нет данных" : `${server.download_mbps.toFixed(1)} Мбит/с${time ? ` · ${new Date(time).toLocaleString("ru-RU")}` : " · время неизвестно"}`;
+  const history = state.sessionMeasurements.get(server.server_id) ?? [];
+  const recent = history.map(entry => {
+    const age = Math.max(0, Math.floor((Date.now() - entry.at) / 1000));
+    const ago = age < 60 ? `${age} с` : age < 3600 ? `${Math.floor(age / 60)} мин` : `${Math.floor(age / 3600)} ч`;
+    return `${ago}: ${entry.ping === undefined ? "—" : `${entry.ping}мс`} · ${entry.speed === undefined ? "—" : `${entry.speed.toFixed(1)}М`} · ${{ ready: "да", failed: "нет" }[entry.site] ?? "—"}`;
+  });
+  return [server.display_name, `Профиль: ${profile ?? "неизвестен"}`, `Выбран для VPN: ${server.selected ? "да" : "нет"}`, `Ping: ${server.ping_status === "failed" ? "ошибка" : server.latency_ms === undefined ? "нет данных" : `${server.latency_ms} мс`}`, `Скорость: ${speed}`, `Сайт: ${site}`, ...(server.availability === "ready" || server.availability === "failed" ? [`Адрес проверки: ${displayCheckAddress(state.target, 18)}`] : []), `Состояние: ${status}`, ...(recent.length ? ["Замеры этой сессии:", ...recent] : [])];
 }
 
 export class DetailsView {

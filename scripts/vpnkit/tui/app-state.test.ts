@@ -259,3 +259,21 @@ test("poll during an in-flight status schedules one fresh follow-up", async () =
     expect(backend.calls).toHaveLength(2);
   } finally { pending.shift()?.(reply()); await settle(); await state.close(); }
 });
+
+test("details show live samples and bounded per-server session measurements", async () => {
+  const { detailsLines } = await import("./details-view");
+  const backend = new FakeBackend(); const state = new AppState(backend);
+  let finish!: (result: Reply) => void;
+  backend.hold = { action: "servers/speed", promise: new Promise(resolve => { finish = resolve; }) };
+  try {
+    state.status = { ...backend.status }; state.servers = structuredClone(rows); state.serverID = rows[0]!.server_id;
+    const work = state.perform("servers/speed", rows[0]!.server_id, true);
+    const taskID = [...state.tasks.keys()][0]!;
+    backend.onSpeedProgress?.({ event: "speed-progress", server_id: rows[0]!.server_id, downloaded_bytes: 100, elapsed_seconds: 1, download_mbps: 12 }, taskID);
+    backend.onSpeedProgress?.({ event: "speed-progress", server_id: rows[0]!.server_id, downloaded_bytes: 200, elapsed_seconds: 2, download_mbps: 24 }, taskID);
+    expect(detailsLines(state).join("\n")).toMatch(/[▁▂▃▄▅▆▇█]{2}/);
+    finish({ ...reply(), catalog: { status: "ok", server: { ...rows[0]!, status: "ready", ping_status: "ready", latency_ms: 12, availability: "ready", download_mbps: 24 } } });
+    await work;
+    expect(detailsLines(state).join("\n")).toContain("Замеры этой сессии");
+  } finally { await state.close(); }
+});
