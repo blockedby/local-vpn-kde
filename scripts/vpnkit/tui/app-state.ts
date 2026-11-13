@@ -246,7 +246,7 @@ export class AppState {
     const entry = this.filteredPaletteActions()[this.paletteIndex];
     if (!entry?.action.available) return;
     this.paletteOpen = false;
-    if (entry.action.scope !== "global" && this.screen !== entry.screen) this.open(entry.screen, false);
+    if (entry.action.scope !== "global" && this.screen !== entry.screen) this.open(entry.screen, false, false);
     entry.action.run(); this.paint();
   }
   target = "https://www.youtube.com/";
@@ -496,7 +496,7 @@ export class AppState {
     this.error = error;
     this.paint();
   }
-  open(screen: Screen, load = true) {
+  open(screen: Screen, load = true, loadScreen = true) {
     if (screen === "home") screen = "servers";
     if (this.closing) return;
     if (screen === "subscription" && !this.subscriptionAvailable()) {
@@ -524,9 +524,9 @@ export class AppState {
         void this.loadPendingSubscription();
       }
     }
-    if (screen === "profiles") { this.pendingScreenRead = "profiles/list"; void this.loadPendingScreenRead(); }
+    if (loadScreen && screen === "profiles") { this.pendingScreenRead = "profiles/list"; void this.loadPendingScreenRead(); }
     if(screen==="profile-name" || screen==="profile-source") this.editorValue="";
-    if (screen === "autostart") { this.pendingScreenRead = "autostart/read"; void this.loadPendingScreenRead(); }
+    if (loadScreen && screen === "autostart") { this.pendingScreenRead = "autostart/read"; void this.loadPendingScreenRead(); }
     if (screen === "target") this.editorValue = this.target;
     this.paint();
     if (

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { AppState } from "./app-state";
-import { FakeBackend, initial, rows, reply } from "./app-test-fixtures";
+import { FakeBackend, initial, rows, reply, settle } from "./app-test-fixtures";
+import type { Reply } from "./bridge";
 import { sortedServers } from "./catalog-order";
 
 const key = (name: string) => ({ name, preventDefault() {} });
@@ -98,4 +99,19 @@ test("palette filters actions, ignores text hotkeys, and preserves confirmations
   const index = state.filteredPaletteActions().findIndex(v => !v.action.available); expect(index).toBeGreaterThanOrEqual(0);
   state.paletteIndex = index; state.onKey(key("return")); expect(state.paletteOpen).toBe(true);
   state.paletteOpen = false; await state.close();
+});
+
+test("palette autostart toggle does not start a conflicting screen read", async () => {
+  const { state, backend } = fixture();
+  state.autostart = { gateway: false, connect: false };
+  let finish!: (r: Reply) => void;
+  backend.hold = { action: "autostart/read", promise: new Promise(resolve => { finish = resolve; }) };
+  try {
+    state.paletteOpen = true; state.paletteQuery = "";
+    state.paletteIndex = state.filteredPaletteActions().findIndex(entry => entry.action.id === "autostart:g");
+    expect(state.paletteIndex).toBeGreaterThanOrEqual(0);
+    state.runPaletteAction(); await settle();
+    expect(backend.calls.some(call => call.action === "autostart/set")).toBe(true);
+    expect(state.notice).not.toContain("конфликт");
+  } finally { finish(reply()); await settle(); await state.close(); }
 });
