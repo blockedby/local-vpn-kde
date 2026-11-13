@@ -567,7 +567,7 @@ export class AppState {
       this.status?.subscription === "configured" &&
       !this.catalogLoaded &&
       !this.catalogStale &&
-      !this.busy &&
+      ![...this.tasks.values()].some(task => !compatible("servers/list", task.action)) &&
       !this.batch &&
       !this.nativePreviewOnly()
     )

@@ -219,6 +219,25 @@ test("late profile open leaves a newer confirmation in place", async () => {
   } finally { await state.close(); }
 });
 
+test("opening a profile loads its servers while the automatic status refresh is in flight", async () => {
+  const backend = new FakeBackend();
+  let finish!: (reply: Reply) => void;
+  backend.hold = { action: "status", promise: new Promise(resolve => { finish = resolve; }) };
+  const state = new AppState(backend);
+  state.status = { ...backend.status };
+  state.poll = setInterval(() => {}, 60_000);
+  try {
+    await state.browseProfile("a");
+    await settle();
+    expect(backend.calls.map(call => call.action)).toContain("servers/list");
+    expect(state.catalogLoaded).toBe(true);
+  } finally {
+    finish(reply());
+    await settle();
+    await state.close();
+  }
+});
+
 test("site check address hides query and fragment outside its editor", async () => {
   const { detailsLines } = await import("./details-view");
   const state = new AppState(new FakeBackend());
