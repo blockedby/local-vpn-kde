@@ -1235,29 +1235,26 @@ test("autostart errors clear a previously healthy actual state", async () => {
 });
 
 test("installed native reuses the server table, selection, checks and mode controls", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true };
   const original=b.request.bind(b);
   b.request=async(action,value)=>{const r=await original(action,value);if(action.startsWith("profiles/"))r.profiles={active:"profile_legacy1",items:[{id:"profile_legacy1",name:"Existing",kind:"subscription",count:2,stale:false}]};return r};
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v"); await settle();
-    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
-    const frame=t.captureCharFrame();
-    expect(frame).toContain("Amsterdam");
-    expect(frame).toContain("Ping всех");
-    expect(frame).not.toContain("пока не подключены");
-    t.mockInput.pressEnter(); await settle();
+    key("v"); await settle();
+    key("1"); await settle();
+    expect(app.servers.map(server => server.server_id)).toContain(rows[1]!.server_id);
+    expect(app.nativeInstalled()).toBe(true);
+    key("return"); await settle();
     expect(b.calls.at(-1)?.action).toBe("servers/select");
     await app.perform("servers/ping",rows[0]!.server_id);
     expect(b.calls.at(-1)?.action).toBe("servers/ping");
-    t.mockInput.pressKey("h"); await Bun.sleep(60);
-    t.mockInput.pressKey("m"); await settle();
+    key("h"); await Bun.sleep(60);
+    key("m"); await settle();
     expect(b.calls.at(-1)?.action).toBe("toggle-mode");
-    t.resize(70,18);await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("недоступен в native");
+    expect(app.status?.runtime).toBe("native");
   } finally { await app.close(); }
 });
 
@@ -1272,21 +1269,22 @@ test("native profiles show separate server lists and adding a link does not conn
  const app=new App(t.renderer,b);
  try{
   await app.perform("status");t.mockInput.pressKey("c");await settle();await t.renderOnce();
-  expect(t.captureCharFrame()).toContain("My VPS");expect(t.captureCharFrame()).toContain("сохранённый список");
+  expect(app.profiles?.items).toMatchObject([{ id: "profile_one", stale: true }, { id: "profile_two" }]);
   t.mockInput.pressKey("2");await settle();await t.renderOnce();
-  expect(t.captureCharFrame()).toContain("Amsterdam");expect(t.captureCharFrame()).not.toContain("Tokyo");
+  expect(app.profiles?.active).toBe("profile_two");
+  expect(app.servers.map(server => server.server_id)).toEqual([rows[1]!.server_id]);
   expect(b.calls.some(c=>c.action==="start" || c.action==="servers/select")).toBe(false);
   t.mockInput.pressKey("c");await settle();t.mockInput.pressKey("n");await settle();
   t.mockInput.typeText("Other VPS");t.mockInput.pressEnter();await settle();
   t.mockInput.typeText("hy2://private-marker@example.invalid#VPS");t.mockInput.pressEnter();await settle();await t.renderOnce();
   const added=b.calls.find(c=>c.action==="profiles/add");expect(JSON.parse(added!.value!).name).toBe("Other VPS");
-  expect(t.captureCharFrame()).not.toContain("private-marker");
-  t.resize(70,18);await t.renderOnce();expect(t.captureCharFrame()).toContain("Добавить профиль");
+  expect(app.editorValue).not.toContain("private-marker");
+  expect(app.notice).not.toContain("private-marker");
+  expect(app.noticeAttempt).not.toContain("private-marker");
  }finally{await app.close()}
 });
 
 test("failed profile open retains the current source and avoids catalog reload", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true };
   b.rows = [{ ...rows[0]!, profile_id: "profile_one" }, { ...rows[1]!, profile_id: "profile_two" }];
@@ -1302,26 +1300,26 @@ test("failed profile open retains the current source and avoids catalog reload",
     if (action.startsWith("profiles/")) result.profiles = { active: "profile_one", items };
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("c"); await settle();
-    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Tokyo");
-    t.mockInput.pressKey("c"); await settle();
+    key("c"); await settle();
+    key("1"); await settle();
+    expect(app.servers.map(server => server.server_id)).toEqual([rows[0]!.server_id]);
+    key("c"); await settle();
     const listsBefore = b.calls.filter(call => call.action === "servers/list").length;
-    t.mockInput.pressKey("2"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Не удалось сохранить профиль");
+    key("2"); await settle();
+    expect(app.noticeIdentity).toEqual({ action: "profiles/open", reason: "profiles-failed", ok: false });
+    expect(app.profiles?.active).toBe("profile_one");
     expect(b.calls.filter(call => call.action === "servers/list")).toHaveLength(listsBefore);
-    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Tokyo");
-    expect(t.captureCharFrame()).not.toContain("Amsterdam");
+    key("1"); await settle();
+    expect(app.servers.map(server => server.server_id)).toEqual([rows[0]!.server_id]);
     expect(b.calls.some(call => ["start", "stop", "servers/select"].includes(call.action))).toBe(false);
   } finally { await app.close(); }
 });
 
 test("removing the active source browses its fallback without changing the VPN", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true, networkmanager_active: "yes" };
   b.rows = [{ ...rows[0]!, profile_id: "profile_one" }, { ...rows[1]!, profile_id: "profile_two" }];
@@ -1341,18 +1339,18 @@ test("removing the active source browses its fallback without changing the VPN",
     if (action.startsWith("profiles/")) result.profiles = { active, items };
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("c"); await settle();
-    t.mockInput.pressKey("x"); await settle();
+    key("c"); await settle();
+    key("x"); await settle();
     expect(b.calls.some(call => call.action === "profiles/remove")).toBe(false);
-    t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("First profile");
-    expect(t.captureCharFrame()).toContain("Second profile");
-    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Amsterdam");
-    expect(t.captureCharFrame()).not.toContain("Tokyo");
+    key("y"); await settle();
+    expect(app.profiles?.active).toBe("profile_two");
+    expect(app.profiles?.items.map(profile => profile.id)).toEqual(["profile_two"]);
+    key("1"); await settle();
+    expect(app.servers.map(server => server.server_id)).toEqual([rows[1]!.server_id]);
     expect(b.calls.filter(call => call.action === "profiles/remove")).toHaveLength(1);
     expect(b.calls.some(call => ["start", "stop", "disconnect", "servers/select"].includes(call.action))).toBe(false);
   } finally { await app.close(); }

@@ -1031,3 +1031,124 @@ test("presentation: failed reapplication replaces drift instruction with the act
     t.mockInput.pressKey("f"); await settle();
   } finally { await app.close(); }
 });
+
+test("presentation: installed native reuses the server table, selection, checks and mode controls", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", installed: true };
+  const original=b.request.bind(b);
+  b.request=async(action,value)=>{const r=await original(action,value);if(action.startsWith("profiles/"))r.profiles={active:"profile_legacy1",items:[{id:"profile_legacy1",name:"Existing",kind:"subscription",count:2,stale:false}]};return r};
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v"); await settle();
+    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
+    const frame=t.captureCharFrame();
+    expect(frame).toContain("Amsterdam");
+    expect(frame).toContain("Ping всех");
+    expect(frame).not.toContain("пока не подключены");
+    t.mockInput.pressEnter(); await settle();
+
+    await app.perform("servers/ping",rows[0]!.server_id);
+
+    t.mockInput.pressKey("h"); await Bun.sleep(60);
+    t.mockInput.pressKey("m"); await settle();
+
+    t.resize(70,18);await t.renderOnce();
+    expect(t.captureCharFrame()).not.toContain("недоступен в native");
+  } finally { await app.close(); }
+});
+
+test("presentation: native profiles show separate server lists and adding a link does not connect", async () => {
+ const t=await createTestRenderer({width:100,height:28});const b=new FakeBackend();
+ b.status={...b.status,runtime:"native",installed:true};
+ let active="profile_one";
+ const items=[{id:"profile_one",name:"Subscription",kind:"subscription" as const,count:1,stale:true},{id:"profile_two",name:"My VPS",kind:"server" as const,count:1,stale:false}];
+ b.rows=[{...rows[0]!,profile_id:"profile_one"},{...rows[1]!,profile_id:"profile_two"}];
+ const original=b.request.bind(b);
+ b.request=async(action,value)=>{const r=await original(action,value);if(action==="profiles/open")active=value!;if(action.startsWith("profiles/"))r.profiles={active,items};return r};
+ const app=new App(t.renderer,b);
+ try{
+  await app.perform("status");t.mockInput.pressKey("c");await settle();await t.renderOnce();
+  expect(t.captureCharFrame()).toContain("My VPS");expect(t.captureCharFrame()).toContain("сохранённый список");
+  t.mockInput.pressKey("2");await settle();await t.renderOnce();
+  expect(t.captureCharFrame()).toContain("Amsterdam");expect(t.captureCharFrame()).not.toContain("Tokyo");
+
+  t.mockInput.pressKey("c");await settle();t.mockInput.pressKey("n");await settle();
+  t.mockInput.typeText("Other VPS");t.mockInput.pressEnter();await settle();
+  t.mockInput.typeText("hy2://private-marker@example.invalid#VPS");t.mockInput.pressEnter();await settle();await t.renderOnce();
+  expect(t.captureCharFrame()).not.toContain("private-marker");
+  t.resize(70,18);await t.renderOnce();expect(t.captureCharFrame()).toContain("Добавить профиль");
+ }finally{await app.close()}
+});
+
+test("presentation: failed profile open retains the current source and avoids catalog reload", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", installed: true };
+  b.rows = [{ ...rows[0]!, profile_id: "profile_one" }, { ...rows[1]!, profile_id: "profile_two" }];
+  const items = [
+    { id: "profile_one", name: "First profile", kind: "subscription" as const, count: 1, stale: false },
+    { id: "profile_two", name: "Second profile", kind: "server" as const, count: 1, stale: false },
+  ];
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "profiles/open" && value === "profile_two")
+      return { ...result, ok: false, reason: "profiles-failed" };
+    if (action.startsWith("profiles/")) result.profiles = { active: "profile_one", items };
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("c"); await settle();
+    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Tokyo");
+    t.mockInput.pressKey("c"); await settle();
+    t.mockInput.pressKey("2"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Не удалось сохранить профиль");
+
+    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Tokyo");
+    expect(t.captureCharFrame()).not.toContain("Amsterdam");
+
+  } finally { await app.close(); }
+});
+
+test("presentation: removing the active source browses its fallback without changing the VPN", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", installed: true, networkmanager_active: "yes" };
+  b.rows = [{ ...rows[0]!, profile_id: "profile_one" }, { ...rows[1]!, profile_id: "profile_two" }];
+  let items = [
+    { id: "profile_one", name: "First profile", kind: "subscription" as const, count: 1, stale: false },
+    { id: "profile_two", name: "Second profile", kind: "server" as const, count: 1, stale: false },
+  ];
+  let active = "profile_one";
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "profiles/remove") {
+      items = items.slice(1);
+      active = "profile_two";
+    }
+    if (action.startsWith("profiles/")) result.profiles = { active, items };
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("c"); await settle();
+    t.mockInput.pressKey("x"); await settle();
+
+    t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).not.toContain("First profile");
+    expect(t.captureCharFrame()).toContain("Second profile");
+    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Amsterdam");
+    expect(t.captureCharFrame()).not.toContain("Tokyo");
+
+
+  } finally { await app.close(); }
+});
