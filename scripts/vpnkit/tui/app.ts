@@ -9,14 +9,13 @@ import {
 import type { Action, Backend, CheckProgress, Reply, Server, Status, AutostartOptions, AutostartServiceState } from "./bridge";
 import { connection, failure, palette as p } from "./model";
 
-import { StyledText, t } from "@opentui/core";
-import { speedometer } from "./speedometer";
 import { recoveryFor, type Recovery } from "./recovery";
 import { observeRendererClose } from "./renderer-lifecycle";
 import { cell, safeText } from "./formatting";
 import { compatible } from "./request-policy";
 import { ServerTableView } from "./server-table-view";
 import { MenuView } from "./menu-view";
+import { MeasurementView } from "./measurement-view";
 import { frames } from "./animation-frames";
 export { cell } from "./formatting";
 
@@ -200,13 +199,12 @@ export class App {
   private notification: TextRenderable;
   private footer: TextRenderable;
 
-  private gauge: TextRenderable;
+  private measurementView: MeasurementView;
   private homeTesting = false;
   private homeSpeed?: number;
   private homePing?: number;
   private homeSpeedAt = 0;
   private homeSpeedServer?: { id: string; name: string };
-  private measurementInfo: TextRenderable;
   private homeSpeedLabel = "[t] Проверить скорость выбранного сервера";
   private readonly rendererClosed: Promise<void>;
 
@@ -258,9 +256,7 @@ export class App {
       this.items()[index]?.run();
       this.paint();
     });
-    this.measurementInfo = text(this.content, "", p.muted, 2);
-    this.gauge = text(this.content, "", p.accent, 14);
-    this.gauge.marginTop = 1;
+    this.measurementView = new MeasurementView(renderer, this.content);
     this.tableView = new ServerTableView(renderer, this.content, (index) => {
       const server = this.visibleServers()[index];
       if (server) {
@@ -1361,21 +1357,11 @@ export class App {
     else if (!animated && this.timer) { clearInterval(this.timer); this.timer = undefined; }
   }
   private paintMeasurement() {
-    const width = Math.max(10, this.renderer.terminalWidth - 2);
-    this.measurementInfo.visible = this.screen === "home" && this.inlineSpeed() && !!this.homeSpeedServer;
-    this.measurementInfo.height = this.measurementInfo.visible ? 2 : 0;
-    const measuredElsewhere = this.homeSpeedServer && this.servers.some(s => s.selected && s.server_id !== this.homeSpeedServer!.id);
-    const timeLabel = this.homeSpeedAt ? new Date(this.homeSpeedAt).toLocaleTimeString("ru-RU", { hour12: false }) : this.homeTesting ? "выполняется" : "не завершён";
-    this.measurementInfo.content = `Замер: ${timeLabel}${measuredElsewhere ? " · другой сервер" : ""}\n${cell(this.homeSpeedServer?.name ?? "", width).trimEnd()}`;
-    const compactGauge = this.renderer.height < 25 || width < 29;
-    this.gauge.visible = this.screen === "home" && !this.inlineSpeed();
-    this.gauge.height = this.gauge.visible ? (compactGauge ? 4 : 11) + (this.homeSpeedAt ? 1 : 0) : 0;
-    this.gauge.marginTop = this.gauge.visible ? 1 : 0;
-    this.gauge.fg = this.homeSpeed === undefined ? p.accent : p.green;
-    const dial = speedometer(this.homeSpeed, this.homeSpeed ?? 0, compactGauge);
-    this.gauge.content = new StyledText([...dial.chunks,
-      ...t`\n${cell(this.homeSpeedLabel, width).trimEnd()}${this.homeSpeedAt ? `\nПоследний замер: ${new Date(this.homeSpeedAt).toLocaleTimeString("ru-RU", { hour12: false })}` : ""}`.chunks,
-    ]);
+    this.measurementView.update({
+      home: this.screen === "home", inline: this.inlineSpeed(), servers: this.servers,
+      testing: this.homeTesting, speed: this.homeSpeed, speedAt: this.homeSpeedAt,
+      speedServer: this.homeSpeedServer, speedLabel: this.homeSpeedLabel,
+    });
   }
   private paintTable() {
     this.tableView.update({
