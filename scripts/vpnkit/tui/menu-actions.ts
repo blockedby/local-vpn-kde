@@ -1,6 +1,5 @@
 import type { Action } from "./bridge";
 import type { AppState } from "./app-state";
-import { names } from "./action-labels";
 import { frames } from "./animation-frames";
 import { compatible, queueable } from "./request-policy";
 
@@ -29,12 +28,12 @@ export function menuItems(state: AppState): MenuItem[] {
     if (state.screen === "tasks") {
       const running = [...state.tasks].filter(([, task]) => task.action !== "status");
       const entries = [
-        ...running.map(([id, task]) => ({ id, action: task.action, label: `${task.cancelRequested ? "Отмена запрошена" : "Отменить"}: ${state.actionLabel(task.action)} · ${task.phase || (state.batch && task.measurement ? `${state.batch.done}/${state.batch.total}` : "выполняется")} · ${Math.floor((Date.now() - task.started) / 1000)} с`, direct: task.measurement || queueable.has(task.action) })),
-        ...state.queue.map(entry => ({ id: entry.id, action: entry.action, label: `В очереди: ${state.actionLabel(entry.action)} · ${Math.floor((Date.now() - entry.started) / 1000)} с`, direct: true })),
+        ...running.map(([id, task]) => ({ id, action: task.action, label: task.action === "servers/select" && !task.cancelRequested ? `Отменить: ${state.actionLabel(task.action)} · ${Math.floor((Date.now() - task.started) / 1000)} с · ${task.phase || "выполняется"}` : `${task.cancelRequested ? "Отмена запрошена" : "Отменить:"} ${state.batch && task.measurement ? `${state.batch.done}/${state.batch.total} · ` : ""}${Math.floor((Date.now() - task.started) / 1000)} с · ${state.actionLabel(task.action)}${task.phase ? ` · ${task.phase}` : ""}`, direct: task.measurement || queueable.has(task.action) })),
+        ...state.queue.map(entry => ({ id: entry.id, action: entry.action, label: `В очереди · ${Math.floor((Date.now() - entry.started) / 1000)} с: ${state.actionLabel(entry.action)}`, direct: true })),
       ];
       return [
         ...entries.map((entry, i) => ({ key: String(i + 1), label: entry.label, run: () => { if (entry.direct) state.cancelTask(entry.id); else { state.cancelTaskID = entry.id; state.open("cancel-confirm"); } } })),
-        ...state.history.map((entry, i) => ({ key: String(entries.length + i + 1), label: `${state.actionLabel(entry.action)} · ${entry.phase ? entry.phase + " · " : ""}${entry.outcome} · ${Math.floor((entry.ended - entry.started) / 1000)} с`, run: () => {} })),
+        ...state.history.map((entry, i) => ({ key: String(entries.length + i + 1), label: `${Math.floor((entry.ended - entry.started) / 1000)} с · ${entry.outcome}: ${state.actionLabel(entry.action)}${entry.phase ? ` · ${entry.phase}` : ""}`, run: () => {} })),
       ];
     }
     if (state.screen === "recovery") {

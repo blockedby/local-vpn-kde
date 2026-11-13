@@ -310,7 +310,7 @@ test("shell: activity shows running, queued and finished work and cancellation p
     app.onKey({ name: "j", preventDefault() {} }); await t.renderOnce();
     let frame = t.captureCharFrame();
     expect(frame).toContain("Скорость и сайт всех серверов");
-    expect(frame).toContain("В очереди: Ping и сайт всех серверов");
+    expect(frame).toContain("В очереди · 0 с: Ping и сайт всех серверов");
     expect(frame).toContain("Завершено");
     app.onKey({ name: "1", preventDefault() {} }); await t.renderOnce();
     frame = t.captureCharFrame(); expect(frame).toContain("Отмена запрошена");

@@ -348,11 +348,15 @@ export class DemoBackend implements Backend {
       if (action === "servers/check-batch" || action === "servers/speed-batch") {
         const ids: string[] = JSON.parse(value ?? "{}").ids;
         const rows = this.servers.filter((s) => ids.includes(s.server_id));
-        for (const row of rows) {
+        for (const [index, row] of rows.entries()) {
+          this.onCheckProgress?.({ event: "server-check", server_id: row.server_id, stage: "start", ping_status: "untested", latency_ms: 0, availability: "untested" }, id);
+          await Bun.sleep(1200);
+          if (task.cancelled) return { ok: false, reason: "cancelled", code: null, status: { ...this.status } };
           row.ping_status = "ready";
-          row.latency_ms = 20;
+          row.latency_ms = 20 + index * 7;
           row.availability = "ready";
-          if (action === "servers/speed-batch") { row.status = "ready"; row.download_mbps = 90; row.download_seconds = 3; row.downloaded_bytes = 33750000; }
+          if (action === "servers/speed-batch") { row.status = "ready"; row.download_mbps = 90 - index * 12; row.download_seconds = 3; row.downloaded_bytes = 33750000; }
+          this.onCheckProgress?.({ event: "server-check", server_id: row.server_id, stage: "complete", ping_status: "ready", latency_ms: row.latency_ms, availability: "ready", status: row.status, download_mbps: row.download_mbps, download_seconds: row.download_seconds, downloaded_bytes: row.downloaded_bytes }, id);
         }
         reply.catalog = { status: "ok", servers: structuredClone(rows) };
       }

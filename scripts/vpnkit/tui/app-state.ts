@@ -132,22 +132,27 @@ export class AppState {
   get measurementAction(): Action | undefined {
     return [...this.tasks.values()].find(task => task.measurement)?.action;
   }
-  queue: { id: string; action: Action; value?: string; kind?: "batch" | "home"; batchKind?: Batch; signature: string; wasReady: boolean; started: number }[] = [];
+  queue: { id: string; action: Action; value?: string; kind?: "batch" | "home"; batchKind?: Batch; signature: string; catalogRevision: number; wasReady: boolean; started: number }[] = [];
   history: { action: Action; started: number; ended: number; outcome: string; phase: string }[] = [];
-  get queued() { return this.queue[0]; }
+  catalogRevision = 0;
   catalogSignature() { return this.servers.map(server => server.server_id).sort().join("|") + `:${this.profiles?.active ?? ""}:${this.catalogStale}`; }
   enqueue(action: Action, value?: string, kind?: "batch" | "home", batchKind?: Batch) {
     if (this.queue.some(entry => entry.action === action && entry.value === value && entry.kind === kind)) { this.notify("Эта операция уже в очереди."); return; }
-    this.queue.push({ id: `queue-${++this.nextTask}`, action, value, kind, batchKind, signature: this.catalogSignature(), wasReady: this.ready(), started: Date.now() });
+    this.queue.push({ id: `queue-${++this.nextTask}`, action, value, kind, batchKind, signature: this.catalogSignature(), catalogRevision: this.catalogRevision, wasReady: this.ready(), started: Date.now() });
     this.notify("Операция поставлена в очередь [j].");
+  }
+  abandonQueue(outcome: string) {
+    for (const entry of this.queue) this.history.unshift({ action: entry.action, started: entry.started, ended: Date.now(), phase: "", outcome });
+    this.history.length = Math.min(20, this.history.length);
+    this.queue = [];
   }
   drainQueue() {
     if (this.closing || this.disposed || this.backendOffline || this.reconnecting) return;
     while (this.queue.length) {
       const entry = this.queue[0]!;
-      if (this.batch || this.homeTesting || [...this.tasks.values()].some(task => !compatible(entry.action, task.action))) return;
+      if (((this.batch || this.homeTesting) && requestClasses[entry.action] !== "read") || [...this.tasks.values()].some(task => !compatible(entry.action, task.action))) return;
       this.queue.shift();
-      if ((entry.wasReady && !this.ready()) || (entry.action.startsWith("servers/") && entry.signature !== this.catalogSignature())) {
+      if ((entry.wasReady && !this.ready()) || (entry.action.startsWith("servers/") && (entry.signature !== this.catalogSignature() || entry.catalogRevision !== this.catalogRevision))) {
         this.history.unshift({ action: entry.action, started: entry.started, ended: Date.now(), outcome: "Не запущено: условия изменились", phase: "" });
         this.history.length = Math.min(20, this.history.length);
         this.notify("Задача снята с очереди: состояние или каталог изменились.", true);
@@ -243,7 +248,7 @@ export class AppState {
       batch.pinged.add(row.server_id);
       if (row.stage === "speed" && batch.target === this.target) server.availability = row.availability;
       if (row.stage === "complete") {
-        if (batch.kind === "speed" && row.download_mbps !== undefined) this.measurementTimes.set(row.server_id, Date.now());
+        if (batch.kind === "speed" && row.status === "ready" && row.download_mbps !== undefined && Number.isFinite(row.download_mbps) && row.download_mbps >= 0) this.measurementTimes.set(row.server_id, Date.now());
         if (batch.target === this.target) server.availability = row.availability;
         if (batch.kind === "speed") { server.status = row.status ?? "failed"; server.download_mbps = row.download_mbps; server.download_seconds = row.download_seconds; server.downloaded_bytes = row.downloaded_bytes; }
         batch.running.delete(row.server_id);
@@ -260,7 +265,7 @@ export class AppState {
       if (this.closing || this.disposed) return;
       this.backendOffline = true;
       this.forgetStatusHealth();
-      this.queue = [];
+      this.abandonQueue("Не запущено: связь потеряна");
       this.cancelled = true;
       this.recovery = { ...recoveryFor("status", "backend-unavailable", this.status?.runtime), action: "status" };
       this.notify("Связь потеряна. Действие могло продолжиться. [f] Восстановить связь", true);
@@ -471,11 +476,12 @@ export class AppState {
       this.ready() &&
       this.status?.subscription === "configured" &&
       !this.catalogLoaded &&
+      !this.catalogStale &&
       !this.busy &&
       !this.batch &&
       !this.nativePreviewOnly()
     )
-      void this.perform(this.catalogStale ? "servers/refresh" : "servers/list");
+      void this.perform("servers/list");
     // Diagnostics immediately displays the cached evidence. Refresh is explicit.
   }
   confirmFastest() {

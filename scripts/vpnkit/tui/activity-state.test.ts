@@ -93,3 +93,15 @@ test("cancelled connection mutation rereads status and catalog without replaying
     expect(backend.calls.filter(call => call.action === "servers/select")).toHaveLength(1);
   } finally { finish(reply()); await state.close(); }
 });
+
+test("failed speed replies containing cached values do not count as a session measurement", async () => {
+  const backend = new FakeBackend(); const state = new AppState(backend);
+  try {
+    await state.perform("status"); await state.perform("servers/list");
+    backend.hold = { action: "servers/speed", promise: Promise.resolve({ ...reply(), ok: false, reason: "stale", catalog: { status: "ok", server: { ...rows[1]!, status: "ready", download_mbps: 100 } } }) };
+    await state.perform("servers/speed", rows[1]!.server_id);
+    state.confirmFastest();
+    expect(state.notice).toContain("[t]");
+    expect(state.measurementTimes.has(rows[1]!.server_id)).toBe(false);
+  } finally { await state.close(); }
+});

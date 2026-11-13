@@ -66,6 +66,7 @@ export async function runBatch(state: AppState, kind: Batch, retry?: { ids: stri
       state.notify(`Сначала запустите ${state.serviceObject()}.`, true);
       return;
     }
+    if (state.catalogStale) { state.notify("Подписка изменена. Обновите список серверов [r].", true); return; }
     state.cancelled = false;
     state.noticeIdentity = undefined;
     state.notice = "";
@@ -84,7 +85,7 @@ export async function runBatch(state: AppState, kind: Batch, retry?: { ids: stri
     };
     if (!state.catalogLoaded || state.catalogStale) {
       const result = await state.perform(
-        state.catalogStale ? "servers/refresh" : "servers/list",
+        "servers/list",
         undefined,
         true,
       );

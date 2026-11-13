@@ -590,7 +590,7 @@ test("server actions are reachable with Tab and Enter, including before Docker s
   }
 });
 
-test("changing subscription invalidates old rows and refreshes the catalog", async () => {
+test("changing subscription invalidates old rows until an explicit catalog refresh", async () => {
   const b = new FakeBackend();
   const app = new AppState(b);
   const key = (name: string) => app.onKey({ name, preventDefault() {} });
@@ -603,6 +603,8 @@ test("changing subscription invalidates old rows and refreshes the catalog", asy
     expect(app.catalogStale).toBe(true);
     key("v");
     await settle();
+    expect(b.calls.some(c => c.action === "servers/refresh")).toBe(false);
+    key("r"); await settle();
     expect(b.calls.at(-1)?.action).toBe("servers/refresh");
     expect(b.calls.some((c) => c.action === "servers/select")).toBe(false);
   } finally {

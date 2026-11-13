@@ -7,7 +7,7 @@ import { failure } from "./model";
 export function updateCatalog(state: AppState, reply: Reply, action: Action) {
     if ((action === "servers/check-batch" || action === "servers/speed-batch") && reply.catalog?.servers) {
       for (const row of reply.catalog.servers) {
-        if (action === "servers/speed-batch" && row.download_mbps !== undefined) state.measurementTimes.set(row.server_id, Date.now());
+        if (reply.ok && action === "servers/speed-batch" && row.status === "ready" && row.download_mbps !== undefined && Number.isFinite(row.download_mbps) && row.download_mbps >= 0) state.measurementTimes.set(row.server_id, Date.now());
         const at = state.servers.findIndex((s) => s.server_id === row.server_id);
         if (at >= 0)
           state.servers[at] = {
@@ -114,6 +114,7 @@ export async function perform(
         clearTimeout(state.staleTimer);
         state.staleTimer = setTimeout(() => state.paintProgress(), 15001);
       }
+      if (reply.ok && ["servers/refresh", "subscription", "profiles/add", "profiles/open", "profiles/remove"].includes(action)) state.catalogRevision++;
       if (reply.ok && reply.autostart) state.autostart = reply.autostart;
       if (action === "autostart/read" || action === "autostart/set") {
         state.serviceState = reply.ok ? reply.autostart_service : undefined;
@@ -215,7 +216,7 @@ export async function perform(
     } catch {
       state.backendOffline = true;
       state.cancelled = true;
-      state.queue = [];
+      state.abandonQueue("Не запущено: связь потеряна");
       state.recovery = { ...recoveryFor(action, "backend-unavailable", state.status?.runtime), action, value };
       state.forgetStatusHealth();
       if (action === "autostart/read" || action === "autostart/set") {
@@ -237,7 +238,7 @@ export async function perform(
         state.history.length = Math.min(20, state.history.length);
       }
       if (state.poll && !cancelRequested && requestClasses[action] === "exclusive" && !state.closing && !state.backendOffline && !state.reconnecting && ![...state.tasks.values()].some(task => task.action === "status")) void state.perform("status");
-      if (action === "servers/speed" && value) { state.liveSpeeds.delete(value); if (reply?.ok) state.measurementTimes.set(value, Date.now()); }
+      if (action === "servers/speed" && value) { state.liveSpeeds.delete(value); if (reply?.ok && reply.catalog?.server?.status === "ready" && reply.catalog.server.download_mbps !== undefined && Number.isFinite(reply.catalog.server.download_mbps) && reply.catalog.server.download_mbps >= 0) state.measurementTimes.set(value, Date.now()); }
       state.paint();
       if (state.closing && !state.batch && !state.homeTesting && !state.tasks.size) await state.finishClose();
       else if (
@@ -246,12 +247,11 @@ export async function perform(
         state.screen === "servers" &&
         state.status?.subscription === "configured" &&
         !state.catalogLoaded &&
+        !state.catalogStale &&
         !state.batch &&
         !state.nativePreviewOnly()
       ) {
-        await state.perform(
-          state.catalogStale ? "servers/refresh" : "servers/list",
-        );
+        await state.perform("servers/list");
       }
     }
     if (cancelRequested && !state.closing && !state.backendOffline && !queueable.has(action)) {
