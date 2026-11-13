@@ -359,3 +359,17 @@ test("retry confirmation refuses a profile whose active identity changed", async
     expect(state.notice).toContain("изменил");
   } finally { await state.close(); }
 });
+
+test("retrying connection captures and names its selected server", async () => {
+  const { recoveryFor } = await import("./recovery");
+  const backend = new FakeBackend(); const state = new AppState(backend);
+  try {
+    state.status = { ...backend.status }; state.servers = [{ ...rows[0]!, selected: true }];
+    state.recovery = { ...recoveryFor("start", "timeout"), action: "start" };
+    state.open("recovery"); state.items().find(item => item.key === "r")!.run();
+    expect(state.retryTarget?.name).toBe(rows[0]!.display_name);
+    state.servers[0]!.display_name = "Changed";
+    key(state, "y"); await settle();
+    expect(backend.calls.some(call => call.action === "start")).toBe(false);
+  } finally { await state.close(); }
+});

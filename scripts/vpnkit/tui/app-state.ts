@@ -538,7 +538,9 @@ export class AppState {
         ? { kind: "server", id: retry.value, name: this.servers.find(server => server.server_id === retry.value)?.display_name }
         : retry?.value && ["profiles/open", "profiles/remove"].includes(retry.action)
           ? { kind: "profile", id: retry.value, name: this.profiles?.items.find(profile => profile.id === retry.value)?.name }
-          : undefined;
+          : retry?.action === "start" && this.servers.some(server => server.selected)
+            ? { kind: "server", id: this.servers.find(server => server.selected)!.server_id, name: this.servers.find(server => server.selected)!.display_name }
+            : undefined;
     }
     if (screen === "cancel-confirm") this.cancelTaskAction = this.cancelTaskID ? this.tasks.get(this.cancelTaskID)?.action : undefined;
     if (screen === "profile-remove") {
