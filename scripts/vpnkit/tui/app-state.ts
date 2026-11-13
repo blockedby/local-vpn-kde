@@ -593,7 +593,7 @@ export class AppState {
   confirmationContext() {
     return JSON.stringify({ runtime: this.status?.runtime, installed: this.status?.installed,
       gateway: this.status?.gateway_state ?? this.status?.vpn_state,
-      active: this.status?.networkmanager_active,
+      active: this.status?.networkmanager_active, profile: this.profiles?.active,
       server: this.servers.find(server => server.selected)?.server_id });
   }
   confirm(action: "disconnect" | "stop") {

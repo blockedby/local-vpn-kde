@@ -344,3 +344,18 @@ test("retry confirmation rejects a changed connection target", async () => {
     expect(state.notice).toContain("изменил");
   } finally { await state.close(); }
 });
+
+test("retry confirmation refuses a profile whose active identity changed", async () => {
+  const { recoveryFor } = await import("./recovery");
+  const backend = new FakeBackend(); const state = new AppState(backend);
+  const items = ["a", "b"].map(id => ({ id, name: id, kind: "server" as const, count: 1, stale: false }));
+  try {
+    state.status = { ...backend.status }; state.profiles = { active: "a", items };
+    state.recovery = { ...recoveryFor("profiles/remove", "timeout"), action: "profiles/remove", value: "a" };
+    state.open("recovery"); state.items().find(item => item.key === "r")!.run();
+    state.profiles.active = "b";
+    key(state, "y"); await settle();
+    expect(backend.calls.some(call => call.action === "profiles/remove")).toBe(false);
+    expect(state.notice).toContain("изменил");
+  } finally { await state.close(); }
+});
