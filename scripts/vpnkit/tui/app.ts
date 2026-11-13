@@ -203,6 +203,8 @@ export class App {
   private pendingScreenRead?: "profiles/list" | "autostart/read";
   private draft = "";
   private timer?: ReturnType<typeof setInterval>;
+  private staleTimer?: ReturnType<typeof setTimeout>;
+  private animationEnabled = false;
   private poll?: ReturnType<typeof setInterval>;
   private root: BoxRenderable;
   private headline: TextRenderable;
@@ -335,7 +337,7 @@ export class App {
       const task = id ? this.tasks.get(id) : [...this.tasks.values()].at(-1);
       if (!task) return;
       task.phase = this.phaseLabel(phase);
-      this.paint();
+      this.paintProgress();
     };
     backend.onCheckProgress = (row, id) => {
       if (id && !["servers/check-batch", "servers/speed-batch"].includes(this.tasks.get(id)?.action ?? "")) return;
@@ -350,7 +352,8 @@ export class App {
         server.latency_ms = undefined;
         server.availability = "untested";
         if (batch.kind === "speed") { server.status = "untested"; server.download_mbps = undefined; server.download_seconds = undefined; server.downloaded_bytes = undefined; }
-        this.paint();
+        this.paintTable();
+        this.paintProgress();
         return;
       }
       server.ping_status = row.ping_status;
@@ -366,7 +369,8 @@ export class App {
         batch.done = batch.completed.size;
         batch.failed = batch.failures.size;
       }
-      this.paint();
+      this.paintTable();
+      this.paintProgress();
     };
     backend.onDisconnect = () => {
       if (this.closing || this.disposed) return;
@@ -382,17 +386,16 @@ export class App {
       if (!task || task.action !== "servers/speed" || task.value !== row.server_id || this.cancelled || this.closing) return;
       this.liveSpeeds.set(row.server_id, row.download_mbps);
       if (this.homeTesting && this.homeSpeedServer?.id === row.server_id) this.homeSpeed = row.download_mbps;
-      this.paint();
+      if (this.screen === "home") this.paintMeasurement();
+      if (this.screen === "servers") this.paintTable();
     };
     renderer.keyInput.on("keypress", this.onKey);
     renderer.on("resize", this.paint);
     this.paint();
   }
   start() {
-    this.timer = setInterval(() => {
-      this.frame++;
-      this.paint();
-    }, 100);
+    this.animationEnabled = true;
+    this.syncAnimation();
     this.poll = setInterval(() => {
       if (!this.busy && !this.batch && !this.closing && !this.backendOffline && !this.reconnecting)
         void this.perform("status");
@@ -1059,6 +1062,8 @@ export class App {
       if (!action.startsWith("servers/") && !action.startsWith("autostart/") && action !== "subscription/read" && !action.startsWith("profiles/")) {
         this.status = reply.status;
         this.checked = Date.now();
+        clearTimeout(this.staleTimer);
+        this.staleTimer = setTimeout(() => this.paintProgress(), 15001);
       }
       if (reply.ok && reply.autostart) this.autostart = reply.autostart;
       if (action === "autostart/read" || action === "autostart/set") {
@@ -1384,8 +1389,105 @@ export class App {
     } catch { this.backendOffline = true; this.notify("Не удалось восстановить связь. Можно повторить [u].", true); }
     finally { this.reconnecting = false; this.paint(); }
   }
+  private syncAnimation() {
+    const animated = this.animationEnabled && !this.disposed &&
+      (!!this.batch || [...this.tasks.values()].some(task => task.action !== "status"));
+    if (animated && !this.timer) this.timer = setInterval(() => {
+      this.frame++;
+      this.paintProgress();
+      if (this.batch && this.screen === "servers") this.paintTable();
+    }, 100);
+    else if (!animated && this.timer) { clearInterval(this.timer); this.timer = undefined; }
+  }
+  private paintMeasurement() {
+    const width = Math.max(10, this.renderer.terminalWidth - 2);
+    this.measurementInfo.visible = this.screen === "home" && this.inlineSpeed() && !!this.homeSpeedServer;
+    this.measurementInfo.height = this.measurementInfo.visible ? 2 : 0;
+    const measuredElsewhere = this.homeSpeedServer && this.servers.some(s => s.selected && s.server_id !== this.homeSpeedServer!.id);
+    const timeLabel = this.homeSpeedAt ? new Date(this.homeSpeedAt).toLocaleTimeString("ru-RU", { hour12: false }) : this.homeTesting ? "выполняется" : "не завершён";
+    this.measurementInfo.content = `Замер: ${timeLabel}${measuredElsewhere ? " · другой сервер" : ""}\n${cell(this.homeSpeedServer?.name ?? "", width).trimEnd()}`;
+    const compactGauge = this.renderer.height < 25 || width < 29;
+    this.gauge.visible = this.screen === "home" && !this.inlineSpeed();
+    this.gauge.height = this.gauge.visible ? (compactGauge ? 4 : 11) + (this.homeSpeedAt ? 1 : 0) : 0;
+    this.gauge.marginTop = this.gauge.visible ? 1 : 0;
+    this.gauge.fg = this.homeSpeed === undefined ? p.accent : p.green;
+    const dial = speedometer(this.homeSpeed, this.homeSpeed ?? 0, compactGauge);
+    this.gauge.content = new StyledText([...dial.chunks,
+      ...t`\n${cell(this.homeSpeedLabel, width).trimEnd()}${this.homeSpeedAt ? `\nПоследний замер: ${new Date(this.homeSpeedAt).toLocaleTimeString("ru-RU", { hour12: false })}` : ""}`.chunks,
+    ]);
+  }
+  private paintTable() {
+    const width = Math.max(10, this.renderer.terminalWidth - 2);
+    const table = this.screen === "servers" && this.ready() && !this.nativePreviewOnly();
+    const nameWidth = Math.max(10, width - 45);
+    this.tableHeader.content = `   ${cell("Сервер", nameWidth)} ${cell("Ping мс", 8)} ${cell("Мбит/с", 8)} ${cell("Сайт", 7)} Статус`;
+    const visible = this.visibleServers();
+    this.rows.forEach((row, i) => {
+      const s = visible[i];
+      row.visible = table && i < this.rowCount() && !!s;
+      if (!s) return;
+      const queued = !!this.batch && this.batch.ids?.includes(s.server_id) && !this.batch.running.has(s.server_id) && !this.batch.completed.has(s.server_id);
+      const active = this.batch?.running.has(s.server_id) ?? false;
+      const checking = (kind: Batch) =>
+        active &&
+        (this.batch?.kind === kind ||
+          (kind === "availability" && !!this.batch));
+      const ping = queued ? "ждёт" : (checking("ping") || checking("speed")) && !this.batch?.pinged.has(s.server_id)
+        ? frames[this.frame % 10]
+        : s.ping_status === "failed"
+          ? "ошибка"
+          : (s.latency_ms?.toString() ?? "—");
+      const speed = checking("speed") && this.batch?.stages.get(s.server_id) === "speed"
+        ? this.liveSpeeds.has(s.server_id) ? `~${this.liveSpeeds.get(s.server_id)!.toFixed(1)}` : frames[this.frame % 10]
+        : s.status === "failed"
+          ? "ошибка"
+          : (s.download_mbps?.toFixed(1) ?? "—");
+      const site = queued ? "—" : checking("availability") && this.batch?.pinged.has(s.server_id) && s.ping_status === "ready" && !this.batch?.completed.has(s.server_id)
+        ? frames[this.frame % 10]
+        : s.availability === "ready"
+          ? "да"
+          : s.availability === "failed"
+            ? "нет"
+            : "—";
+      row.content = `${s.server_id === this.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)} ${cell(ping, 8)} ${cell(speed, 8)} ${cell(site, 7)} ${queued ? "в очереди" : active ? ({ start: "подготовка", ping: "сайт / ждёт", speed: "замер", complete: "готов" }[this.batch!.stages.get(s.server_id) ?? "start"]) : s.ping_status === "failed" || s.availability === "failed" || s.status === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не пров."}`;
+      row.fg =
+        s.server_id === this.serverID
+          ? p.accent
+          : s.selected
+            ? p.green
+            : p.text;
+      row.attributes = s.server_id === this.serverID ? TextAttributes.BOLD : 0;
+    });
+  }
+  private paintProgress() {
+    const width = Math.max(10, this.renderer.terminalWidth - 2);
+    const activeTask = [...this.tasks.values()].find(task => task.measurement) ??
+      [...this.tasks.values()].find(task => task.action !== "status");
+    if (this.batch) {
+      const detail = `${this.batch.kind === "speed" ? "Ping → сайт + скорость" : "Ping → сайт"} · ${this.batch.done}/${this.batch.total} · ${Math.floor((Date.now() - this.started) / 1000)} с`;
+      this.progress.content = `${frames[this.frame % 10]} ${detail}${this.cancelled ? " · отмена…" : " · [k] отменить"}`;
+    }
+    else if (activeTask) {
+      this.progress.content = `${frames[this.frame % 10]} ${this.actionLabel(activeTask.action)} · ${activeTask.phase || "выполняется"} · ${Math.floor((Date.now() - activeTask.started) / 1000)} с`;
+    }
+    else
+      this.progress.content =
+        this.checked && Date.now() - this.checked > 15000
+          ? "Статус устарел · [u] проверить"
+          : "";
+    const switching = [...this.tasks.values()].find(task => task.action === "servers/select");
+    if (switching && (this.batch || this.homeTesting))
+      this.progress.content = `${this.progress.chunks.map(chunk => chunk.text).join("")} · Применяем сервер`;
+    const activeRows = [...this.tasks.values()].filter(task => task.action !== "status");
+    if (activeRows.length > 1) this.progress.content = activeRows.map(task =>
+      cell(`${frames[this.frame % 10]} ${names[task.action] ?? "Ping → сайт"} · ${task.phase || "выполняется"} · [j] задачи`, width).trimEnd()).join("\n");
+    const inlineProgress = this.screen === "home" && this.inlineSpeed() && this.homeTesting && !switching;
+    this.progress.visible = this.progress.chunks.some(chunk => chunk.text.length > 0) && !inlineProgress;
+    this.progress.height = this.progress.visible ? Math.max(1, activeRows.length) : 0;
+  }
   private paint = () => {
     if (this.disposed) return;
+    this.syncAnimation();
     const width = Math.max(10, this.renderer.terminalWidth - 2),
       state = connection(this.status);
     this.headline.content = cell(
@@ -1465,20 +1567,7 @@ export class App {
               : "";
     this.summary.visible = this.screen !== "home" || this.summary.chunks.some(chunk => chunk.text.length > 0);
     if (!this.summary.visible) this.summary.height = 0;
-    this.measurementInfo.visible = this.screen === "home" && this.inlineSpeed() && !!this.homeSpeedServer;
-    this.measurementInfo.height = this.measurementInfo.visible ? 2 : 0;
-    const measuredElsewhere = this.homeSpeedServer && this.servers.some(s => s.selected && s.server_id !== this.homeSpeedServer!.id);
-    const timeLabel = this.homeSpeedAt ? new Date(this.homeSpeedAt).toLocaleTimeString("ru-RU", { hour12: false }) : this.homeTesting ? "выполняется" : "не завершён";
-    this.measurementInfo.content = `Замер: ${timeLabel}${measuredElsewhere ? " · другой сервер" : ""}\n${cell(this.homeSpeedServer?.name ?? "", width).trimEnd()}`;
-    const compactGauge = this.renderer.height < 25 || width < 29;
-    this.gauge.visible = this.screen === "home" && !this.inlineSpeed();
-    this.gauge.height = this.gauge.visible ? (compactGauge ? 4 : 11) + (this.homeSpeedAt ? 1 : 0) : 0;
-    this.gauge.marginTop = this.gauge.visible ? 1 : 0;
-    this.gauge.fg = this.homeSpeed === undefined ? p.accent : p.green;
-    const dial = speedometer(this.homeSpeed, this.homeSpeed ?? 0, compactGauge);
-    this.gauge.content = new StyledText([...dial.chunks,
-      ...t`\n${cell(this.homeSpeedLabel, width).trimEnd()}${this.homeSpeedAt ? `\nПоследний замер: ${new Date(this.homeSpeedAt).toLocaleTimeString("ru-RU", { hour12: false })}` : ""}`.chunks,
-    ]);
+    this.paintMeasurement();
     if (this.screen === "autostart") {
       const nativeAutostart = this.nativeMode() || this.autostart?.runtime === "native";
       const results: Record<string, string> = { ready: "выполнен", failed: "ошибка, откройте диагностику", "prerequisites-unavailable": `${nativeAutostart ? "Native-служба" : "Docker"} или сеть не готовы`, cancelled: "отменён", disabled: "отключён", running: "выполняется" };
@@ -1525,65 +1614,8 @@ export class App {
       this.summary.visible = false;
       this.summary.height = 0;
     }
-    const nameWidth = Math.max(10, width - 45);
-    this.tableHeader.content = `   ${cell("Сервер", nameWidth)} ${cell("Ping мс", 8)} ${cell("Мбит/с", 8)} ${cell("Сайт", 7)} Статус`;
-    const visible = this.visibleServers();
-    this.rows.forEach((row, i) => {
-      const s = visible[i];
-      row.visible = table && i < this.rowCount() && !!s;
-      if (!s) return;
-      const queued = !!this.batch && this.batch.ids?.includes(s.server_id) && !this.batch.running.has(s.server_id) && !this.batch.completed.has(s.server_id);
-      const active = this.batch?.running.has(s.server_id) ?? false;
-      const checking = (kind: Batch) =>
-        active &&
-        (this.batch?.kind === kind ||
-          (kind === "availability" && !!this.batch));
-      const ping = queued ? "ждёт" : (checking("ping") || checking("speed")) && !this.batch?.pinged.has(s.server_id)
-        ? frames[this.frame % 10]
-        : s.ping_status === "failed"
-          ? "ошибка"
-          : (s.latency_ms?.toString() ?? "—");
-      const speed = checking("speed") && this.batch?.stages.get(s.server_id) === "speed"
-        ? this.liveSpeeds.has(s.server_id) ? `~${this.liveSpeeds.get(s.server_id)!.toFixed(1)}` : frames[this.frame % 10]
-        : s.status === "failed"
-          ? "ошибка"
-          : (s.download_mbps?.toFixed(1) ?? "—");
-      const site = queued ? "—" : checking("availability") && this.batch?.pinged.has(s.server_id) && s.ping_status === "ready" && !this.batch?.completed.has(s.server_id)
-        ? frames[this.frame % 10]
-        : s.availability === "ready"
-          ? "да"
-          : s.availability === "failed"
-            ? "нет"
-            : "—";
-      row.content = `${s.server_id === this.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)} ${cell(ping, 8)} ${cell(speed, 8)} ${cell(site, 7)} ${queued ? "в очереди" : active ? ({ start: "подготовка", ping: "сайт / ждёт", speed: "замер", complete: "готов" }[this.batch!.stages.get(s.server_id) ?? "start"]) : s.ping_status === "failed" || s.availability === "failed" || s.status === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не пров."}`;
-      row.fg =
-        s.server_id === this.serverID
-          ? p.accent
-          : s.selected
-            ? p.green
-            : p.text;
-      row.attributes = s.server_id === this.serverID ? TextAttributes.BOLD : 0;
-    });
-    const activeTask = [...this.tasks.values()].find(task => task.measurement) ??
-      [...this.tasks.values()].find(task => task.action !== "status");
-    if (this.batch) {
-      const detail = `${this.batch.kind === "speed" ? "Ping → сайт + скорость" : "Ping → сайт"} · ${this.batch.done}/${this.batch.total} · ${Math.floor((Date.now() - this.started) / 1000)} с`;
-      this.progress.content = `${frames[this.frame % 10]} ${detail}${this.cancelled ? " · отмена…" : " · [k] отменить"}`;
-    }
-    else if (activeTask) {
-      this.progress.content = `${frames[this.frame % 10]} ${this.actionLabel(activeTask.action)} · ${activeTask.phase || "выполняется"} · ${Math.floor((Date.now() - activeTask.started) / 1000)} с`;
-    }
-    else
-      this.progress.content =
-        this.checked && Date.now() - this.checked > 15000
-          ? "Статус устарел · [u] проверить"
-          : "";
-    const switching = [...this.tasks.values()].find(task => task.action === "servers/select");
-    if (switching && (this.batch || this.homeTesting))
-      this.progress.content = `${this.progress.chunks.map(chunk => chunk.text).join("")} · Применяем сервер`;
-    const activeRows = [...this.tasks.values()].filter(task => task.action !== "status");
-    if (activeRows.length > 1) this.progress.content = activeRows.map(task =>
-      cell(`${frames[this.frame % 10]} ${names[task.action] ?? "Ping → сайт"} · ${task.phase || "выполняется"} · [j] задачи`, width).trimEnd()).join("\n");
+    this.paintTable();
+    this.paintProgress();
     this.notification.content = this.closing
       ? "Завершаем текущую операцию перед выходом…"
       : this.notice + (this.error && this.recovery && !this.recovery.actions.includes("reapply") ? "\n[f] Действия" : "") +
@@ -1591,9 +1623,6 @@ export class App {
           ? `\nПопытка: ${this.noticeAttempt}`
           : "");
     this.notification.fg = this.error ? p.red : p.muted;
-    const inlineProgress = this.screen === "home" && this.inlineSpeed() && this.homeTesting && !switching;
-    this.progress.visible = this.progress.chunks.some(chunk => chunk.text.length > 0) && !inlineProgress;
-    this.progress.height = this.progress.visible ? Math.max(1, activeRows.length) : 0;
     const hasNotice = this.closing || !!this.notice;
     this.notification.visible = hasNotice;
     this.notification.height = hasNotice ? (this.error && this.recovery && this.noticeAttempt ? 3 : 2) : 0;
@@ -1623,6 +1652,7 @@ export class App {
     if (this.disposed || this.tasks.size || this.batch || this.homeTesting) return;
     this.disposed = true;
     clearInterval(this.timer);
+    clearTimeout(this.staleTimer);
     clearInterval(this.poll);
     this.renderer.keyInput.off("keypress", this.onKey);
     this.renderer.off("resize", this.paint);
