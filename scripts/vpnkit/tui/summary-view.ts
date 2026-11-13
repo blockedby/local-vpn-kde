@@ -1,0 +1,94 @@
+import { BoxRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
+import type { AppState } from "./app-state";
+import { palette as p } from "./model";
+
+export class SummaryView {
+  private summary: TextRenderable;
+  constructor(renderer: CliRenderer, parent: BoxRenderable) {
+    this.summary = new TextRenderable(renderer, { content: "", fg: p.muted, height: 2, flexShrink: 0 });
+    this.summary.minHeight = 0;
+    parent.add(this.summary);
+  }
+  update(state: AppState) {
+    const compactServers = state.screen === "servers" && state.inlineSpeed();
+    const gateway = state.status?.gateway_state ?? state.status?.vpn_state;
+    const gatewayNames: Record<string, string> = { healthy: "готов", absent: "не запущен", inactive: "не запущен", stopped: "остановлен", starting: "запускается", unhealthy: "ошибка", running: "проверяется" };
+    this.summary.height = state.screen === "diagnostics" ? 6 : 2;
+    if (state.screen === "tasks") this.summary.content = state.tasks.size ? "Текущие задачи" : "Нет выполняющихся задач";
+    if (state.screen === "cancel-confirm") this.summary.content = "Точно отменить эту операцию?";
+    if (state.screen === "retry-confirm") this.summary.content = "Точно повторить изменение VPN?";
+    if (state.screen === "recovery") {
+      this.summary.height = 3;
+      const stages: Record<string, string> = { docker: "Docker", routes: "Маршруты", profile: "Профиль KDE", dns: "DNS", server: "Сервер", management: "Служба управления", input: "Ввод данных", unknown: "Операция" };
+      this.summary.content = `${stages[state.recovery?.stage ?? "unknown"]}\n${state.recovery?.message ?? "Проверьте состояние."}`;
+    }
+    if (state.screen === "confirm") {
+      if (state.confirmation === "subscription") {
+        this.summary.height = 4;
+        this.summary.content =
+          "Настроить native-пакет?\nСистемное окно Polkit попросит подтверждение администратора.\nПервичный выбор сервера может занять несколько минут.\nVPN не запускается; автозапуск не изменяется.";
+      } else {
+        this.summary.content =
+          state.confirmation === "disconnect"
+            ? "Точно хотите отключить VPN?"
+            : `Точно хотите остановить ${state.serviceObject()} и отключить VPN?`;
+      }
+    }
+    if (state.screen === "home")
+      this.summary.content = !state.status
+        ? "Проверяем состояние…"
+        : state.nativePreviewOnly()
+          ? state.nativePreview()
+          : !state.ready()
+            ? `Подписку можно настроить до запуска ${state.nativeMode() ? "сервиса" : "Docker"}.`
+            : state.status.subscription !== "configured"
+              ? "Добавьте подписку, затем откройте серверы."
+              : "";
+    this.summary.visible = state.screen !== "home" || this.summary.chunks.some(chunk => chunk.text.length > 0);
+    if (!this.summary.visible) this.summary.height = 0;
+    if (state.screen === "autostart") {
+      const nativeAutostart = state.nativeMode() || state.autostart?.runtime === "native";
+      const results: Record<string, string> = { ready: "выполнен", failed: "ошибка, откройте диагностику", "prerequisites-unavailable": `${nativeAutostart ? "Native-служба" : "Docker"} или сеть не готовы`, cancelled: "отменён", disabled: "отключён", running: "выполняется" };
+      const login = nativeAutostart
+        ? "Автозапуск native-службы при входе в графическую сессию"
+        : "При входе в KDE";
+      this.summary.height = nativeAutostart ? 5 : 4;
+      this.summary.content = `${login}\nОтключение автозапуска не отключает работающий VPN.\nПоследний запуск: ${results[state.autostart?.last_result ?? ""] ?? "не выполнялся"}${nativeAutostart ? "\nРежим: native-служба" : ""}\n${state.serviceStateLabel()}`;
+    }
+    if (state.screen === "subscription") {
+      this.summary.height = state.nativeInstalled() ? 4 : state.nativeMode() ? 3 : 2;
+      this.summary.content = state.nativeInstalled()
+        ? "Первичная настройка native-пакета\nСистемное окно Polkit попросит подтверждение администратора.\nВыбор первого сервера может занять несколько минут.\nПосле успеха нажмите «Подключить VPN» отдельно; автозапуск включается отдельно и не включается сам."
+        : state.nativeMode()
+          ? "Подписка\nВ native preview чтение и применение подписки пока не подключены."
+          : state.busy === "subscription/read"
+            ? "Подписка · загрузка сохранённого адреса…"
+            : "Подписка";
+    }
+    if(state.screen==="profiles") this.summary.content="Профили · у каждого свой список серверов\nВыбор профиля не меняет активное VPN-подключение.";
+    if(state.screen==="profile-name") this.summary.content="Новый профиль · имя\nНапример: Моя VPS или Основная подписка";
+    if(state.screen==="profile-source") this.summary.content=`${state.profileName} · ссылка\nHTTPS-подписка, vless://, hysteria2:// или hy2://`;
+    if(state.screen==="profile-remove") this.summary.content="Удалить выбранный профиль?\nЭто не останавливает уже работающий сервер.";
+    if (state.screen === "target")
+      this.summary.content =
+        "Адрес для проверки доступности\nHTTPS-запрос через каждый сервер; это не тест скорости.";
+    if (state.screen === "diagnostics")
+      this.summary.content = state.nativeMode()
+        ? `OpenVPN / KDE: ${state.status?.networkmanager_active === "yes" ? "активен" : state.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nNative-служба: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${state.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${state.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${state.status?.last_attempt ?? "—"}\nПроверки сайта и скорости — на экране серверов.`
+        : `OpenVPN / KDE: ${state.status?.networkmanager_active === "yes" ? "активен" : state.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nDocker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${state.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${state.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${state.status?.last_attempt ?? "—"}\nПроверка сайта и скорости — на экране серверов.`;
+    if (state.screen === "servers")
+      this.summary.content = state.nativePreviewOnly()
+        ? !state.ready()
+          ? `Native-служба не готова. Запустите ${state.serviceObject()} для жизненного цикла VPN.\nВыбор серверов и проверки пока не подключены.`
+          : "Native preview: выбор серверов и проверки пока не подключены.\nЗапуск/остановка VPN и автозапуск доступны на главной."
+        : !state.ready()
+          ? `Для проверок запустите ${state.serviceObject()}. VPN подключать не требуется.`
+          : state.status?.subscription !== "configured"
+            ? "Добавьте подписку для загрузки серверов."
+            : `${state.profiles?.items.find(p=>p.id===state.profiles?.active)?.name ?? "Серверы"} · ${state.servers.length} серверов · Сортировка [o]: ${{ name: "имя ↑", ping: "ping ↑", speed: "скорость ↓", availability: "доступность ↓" }[state.sort]}${state.catalogStale ? " · каталог устарел" : ""}\nСайт: ${state.target}`;
+    if (compactServers && !state.profiles && !state.nativePreviewOnly() && state.ready() && state.status?.subscription === "configured" && !state.catalogStale) {
+      this.summary.visible = false;
+      this.summary.height = 0;
+    }
+  }
+}

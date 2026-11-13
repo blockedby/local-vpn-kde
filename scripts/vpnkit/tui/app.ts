@@ -1,11 +1,13 @@
-import { BoxRenderable, TextRenderable, InputRenderable, TextAttributes, type CliRenderer } from "@opentui/core";
+import { BoxRenderable, TextRenderable, InputRenderable, type CliRenderer } from "@opentui/core";
 import type { Backend } from "./bridge";
-import { connection, palette as p } from "./model";
+import { palette as p } from "./model";
 import { observeRendererClose } from "./renderer-lifecycle";
 import { cell } from "./formatting";
 import { ServerTableView } from "./server-table-view";
 import { MenuView } from "./menu-view";
 import { MeasurementView } from "./measurement-view";
+import { HeaderView } from "./header-view";
+import { SummaryView } from "./summary-view";
 import { frames } from "./animation-frames";
 import { AppState } from "./app-state";
 import { names } from "./action-labels";
@@ -13,10 +15,9 @@ export { cell } from "./formatting";
 
 export class App extends AppState {
   private root: BoxRenderable;
-  private headline: TextRenderable;
-  private facts: TextRenderable;
+  private headerView: HeaderView;
   private content: BoxRenderable;
-  private summary: TextRenderable;
+  private summaryView: SummaryView;
   private menuView: MenuView;
   private tableView: ServerTableView;
   private input: InputRenderable;
@@ -58,9 +59,7 @@ export class App extends AppState {
       parent.add(t);
       return t;
     };
-    this.headline = text(this.root);
-    this.headline.attributes = TextAttributes.BOLD;
-    this.facts = text(this.root, "", p.muted);
+    this.headerView = new HeaderView(renderer, this.root);
     this.content = new BoxRenderable(renderer, {
       flexDirection: "column",
       flexGrow: 1,
@@ -69,8 +68,7 @@ export class App extends AppState {
       marginTop: 1,
     });
     this.root.add(this.content);
-    this.summary = text(this.content, "", p.muted, 2);
-    this.summary.minHeight = 0;
+    this.summaryView = new SummaryView(renderer, this.content);
     this.menuView = new MenuView(renderer, this.content, (index) => {
       this.serverMenu = true;
       this.selected = index;
@@ -156,32 +154,7 @@ export class App extends AppState {
     if (this.disposed) return;
     if (this.input.value !== this.editorValue) this.input.value = this.editorValue;
     super.paint();
-    const width = Math.max(10, this.renderer.terminalWidth - 2),
-      state = connection(this.status);
-    this.headline.content = cell(
-      `◈ VPNKIT${this.demo ? " · ДЕМО" : ""}${this.nativeMode() ? (this.nativeInstalled() ? " · NATIVE" : " · NATIVE PREVIEW") : ""}    ${state.title}`,
-      width,
-    );
-    this.headline.fg = state.color;
-    const compactServers = this.screen === "servers" && this.inlineSpeed();
-    this.facts.visible = !compactServers;
-    this.facts.height = compactServers ? 0 : 1;
-    const gateway = this.status?.gateway_state ?? this.status?.vpn_state;
-    const gatewayNames: Record<string, string> = {
-      healthy: "готов",
-      absent: "не запущен",
-      inactive: "не запущен",
-      stopped: "остановлен",
-      starting: "запускается",
-      unhealthy: "ошибка",
-      running: "проверяется",
-    };
-    this.facts.content = cell(
-      this.nativeMode()
-        ? `Native-служба: ${gatewayNames[gateway ?? ""] ?? "неизвестно"} · runtime: native · Режим: ${this.status?.routing_mode === "smart" ? "умный" : this.status?.routing_mode === "strict" ? "строгий" : "неизвестно"}`
-        : `Docker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"} · Режим: ${this.status?.routing_mode === "smart" ? "умный" : this.status?.routing_mode === "strict" ? "строгий" : "неизвестно"}`,
-      width,
-    );
+    this.headerView.update(this, this.demo);
     const editor = this.screen === "subscription" || this.screen === "target" || this.screen === "profile-name" || this.screen === "profile-source";
     this.input.visible = editor;
     this.editorHint.visible = editor;
@@ -192,84 +165,8 @@ export class App extends AppState {
     const items = this.items();
     this.menuView.update(items, editor, this.selected,
       this.screen !== "servers" || this.serverMenu || !this.servers.length);
-    this.summary.height = this.screen === "diagnostics" ? 6 : 2;
-    if (this.screen === "tasks") this.summary.content = this.tasks.size ? "Текущие задачи" : "Нет выполняющихся задач";
-    if (this.screen === "cancel-confirm") this.summary.content = "Точно отменить эту операцию?";
-    if (this.screen === "retry-confirm") this.summary.content = "Точно повторить изменение VPN?";
-    if (this.screen === "recovery") {
-      this.summary.height = 3;
-      const stages: Record<string, string> = { docker: "Docker", routes: "Маршруты", profile: "Профиль KDE", dns: "DNS", server: "Сервер", management: "Служба управления", input: "Ввод данных", unknown: "Операция" };
-      this.summary.content = `${stages[this.recovery?.stage ?? "unknown"]}\n${this.recovery?.message ?? "Проверьте состояние."}`;
-    }
-    if (this.screen === "confirm") {
-      if (this.confirmation === "subscription") {
-        this.summary.height = 4;
-        this.summary.content =
-          "Настроить native-пакет?\nСистемное окно Polkit попросит подтверждение администратора.\nПервичный выбор сервера может занять несколько минут.\nVPN не запускается; автозапуск не изменяется.";
-      } else {
-        this.summary.content =
-          this.confirmation === "disconnect"
-            ? "Точно хотите отключить VPN?"
-            : `Точно хотите остановить ${this.serviceObject()} и отключить VPN?`;
-      }
-    }
-    if (this.screen === "home")
-      this.summary.content = !this.status
-        ? "Проверяем состояние…"
-        : this.nativePreviewOnly()
-          ? this.nativePreview()
-          : !this.ready()
-            ? `Подписку можно настроить до запуска ${this.nativeMode() ? "сервиса" : "Docker"}.`
-            : this.status.subscription !== "configured"
-              ? "Добавьте подписку, затем откройте серверы."
-              : "";
-    this.summary.visible = this.screen !== "home" || this.summary.chunks.some(chunk => chunk.text.length > 0);
-    if (!this.summary.visible) this.summary.height = 0;
+    this.summaryView.update(this);
     this.paintMeasurement();
-    if (this.screen === "autostart") {
-      const nativeAutostart = this.nativeMode() || this.autostart?.runtime === "native";
-      const results: Record<string, string> = { ready: "выполнен", failed: "ошибка, откройте диагностику", "prerequisites-unavailable": `${nativeAutostart ? "Native-служба" : "Docker"} или сеть не готовы`, cancelled: "отменён", disabled: "отключён", running: "выполняется" };
-      const login = nativeAutostart
-        ? "Автозапуск native-службы при входе в графическую сессию"
-        : "При входе в KDE";
-      this.summary.height = nativeAutostart ? 5 : 4;
-      this.summary.content = `${login}\nОтключение автозапуска не отключает работающий VPN.\nПоследний запуск: ${results[this.autostart?.last_result ?? ""] ?? "не выполнялся"}${nativeAutostart ? "\nРежим: native-служба" : ""}\n${this.serviceStateLabel()}`;
-    }
-    if (this.screen === "subscription") {
-      this.summary.height = this.nativeInstalled() ? 4 : this.nativeMode() ? 3 : 2;
-      this.summary.content = this.nativeInstalled()
-        ? "Первичная настройка native-пакета\nСистемное окно Polkit попросит подтверждение администратора.\nВыбор первого сервера может занять несколько минут.\nПосле успеха нажмите «Подключить VPN» отдельно; автозапуск включается отдельно и не включается сам."
-        : this.nativeMode()
-          ? "Подписка\nВ native preview чтение и применение подписки пока не подключены."
-          : this.busy === "subscription/read"
-            ? "Подписка · загрузка сохранённого адреса…"
-            : "Подписка";
-    }
-    if(this.screen==="profiles") this.summary.content="Профили · у каждого свой список серверов\nВыбор профиля не меняет активное VPN-подключение.";
-    if(this.screen==="profile-name") this.summary.content="Новый профиль · имя\nНапример: Моя VPS или Основная подписка";
-    if(this.screen==="profile-source") this.summary.content=`${this.profileName} · ссылка\nHTTPS-подписка, vless://, hysteria2:// или hy2://`;
-    if(this.screen==="profile-remove") this.summary.content="Удалить выбранный профиль?\nЭто не останавливает уже работающий сервер.";
-    if (this.screen === "target")
-      this.summary.content =
-        "Адрес для проверки доступности\nHTTPS-запрос через каждый сервер; это не тест скорости.";
-    if (this.screen === "diagnostics")
-      this.summary.content = this.nativeMode()
-        ? `OpenVPN / KDE: ${this.status?.networkmanager_active === "yes" ? "активен" : this.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nNative-служба: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${this.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${this.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${this.status?.last_attempt ?? "—"}\nПроверки сайта и скорости — на экране серверов.`
-        : `OpenVPN / KDE: ${this.status?.networkmanager_active === "yes" ? "активен" : this.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nDocker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${this.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${this.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${this.status?.last_attempt ?? "—"}\nПроверка сайта и скорости — на экране серверов.`;
-    if (this.screen === "servers")
-      this.summary.content = this.nativePreviewOnly()
-        ? !this.ready()
-          ? `Native-служба не готова. Запустите ${this.serviceObject()} для жизненного цикла VPN.\nВыбор серверов и проверки пока не подключены.`
-          : "Native preview: выбор серверов и проверки пока не подключены.\nЗапуск/остановка VPN и автозапуск доступны на главной."
-        : !this.ready()
-          ? `Для проверок запустите ${this.serviceObject()}. VPN подключать не требуется.`
-          : this.status?.subscription !== "configured"
-            ? "Добавьте подписку для загрузки серверов."
-            : `${this.profiles?.items.find(p=>p.id===this.profiles?.active)?.name ?? "Серверы"} · ${this.servers.length} серверов · Сортировка [o]: ${{ name: "имя ↑", ping: "ping ↑", speed: "скорость ↓", availability: "доступность ↓" }[this.sort]}${this.catalogStale ? " · каталог устарел" : ""}\nСайт: ${this.target}`;
-    if (compactServers && !this.profiles && !this.nativePreviewOnly() && this.ready() && this.status?.subscription === "configured" && !this.catalogStale) {
-      this.summary.visible = false;
-      this.summary.height = 0;
-    }
     this.paintTable();
     this.paintProgress();
     this.notification.content = this.closing
