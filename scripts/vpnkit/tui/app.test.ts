@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
+import { Renderable, TextRenderable } from "@opentui/core";
 import { App, cell } from "./app";
 import { AppState } from "./app-state";
 import {
@@ -13,6 +14,25 @@ import {
 } from "./bridge";
 import { connection } from "./model";
 import { initial, rows, reply, FakeBackend, settle } from "./app-test-fixtures";
+
+// Resolve the current action's rendered hit target without relying on its wording or row.
+function actionTarget(app: App, root: Renderable, id: string) {
+  const action = app.actions().find(item => item.id === id);
+  if (!action) throw new Error(`Missing action: ${id}`);
+  const visit = (node: Renderable): TextRenderable | undefined => {
+    if (node instanceof TextRenderable && node.chunks.map(chunk => chunk.text).join("").includes(action.label)) {
+      const parent = node.parent as unknown as { _mouseListeners?: { down?: unknown } } | null;
+      if (parent?._mouseListeners?.down) return node;
+    }
+    for (const child of node.getChildren()) {
+      const found = visit(child);
+      if (found) return found;
+    }
+  };
+  const target = visit(root);
+  if (!target) throw new Error(`Missing rendered action: ${id}`);
+  return { x: target.screenX, y: target.screenY };
+}
 
 test("connection requires healthy Docker and active KDE", () => {
   expect(connection({ ...initial, networkmanager_active: "yes" }).title).toBe(
@@ -455,13 +475,10 @@ test("mouse navigation works; non-primary clicks do not mutate", async () => {
   try {
     await app.perform("status");
     await t.renderOnce();
-    const at = t
-      .captureCharFrame()
-      .split("\n")
-      .findIndex((l) => l.includes("[m]"));
-    await t.mockMouse.click(5, at, 2);
+    const at = actionTarget(app, t.renderer.root, "home:m");
+    await t.mockMouse.click(at.x, at.y, 2);
     expect(b.calls).toHaveLength(1);
-    await t.mockMouse.click(5, at, 0);
+    await t.mockMouse.click(at.x, at.y, 0);
     await settle();
     expect(b.calls.at(-1)?.action).toBe("toggle-mode");
   } finally {
@@ -675,22 +692,15 @@ test("stopping Docker also requires confirmation; mouse No does not disconnect",
     await app.perform("status");
     t.mockInput.pressKey("z");
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain(
-      "остановить Docker и отключить VPN?",
-    );
-    const no = t
-      .captureCharFrame()
-      .split("\n")
-      .findIndex((line) => line.includes("[n] Нет"));
-    await t.mockMouse.click(5, no);
+    expect(app.screen).toBe("confirm");
+    expect(app.confirmation).toBe("stop");
+    const no = actionTarget(app, t.renderer.root, "confirm:n");
+    await t.mockMouse.click(no.x, no.y);
     expect(b.calls).toHaveLength(1);
     t.mockInput.pressKey("z");
     await t.renderOnce();
-    const yes = t
-      .captureCharFrame()
-      .split("\n")
-      .findIndex((line) => line.includes("[y] Да"));
-    await t.mockMouse.click(5, yes);
+    const yes = actionTarget(app, t.renderer.root, "confirm:y");
+    await t.mockMouse.click(yes.x, yes.y);
     await settle();
     expect(b.calls.at(-1)?.action).toBe("stop");
   } finally {

@@ -1482,3 +1482,19 @@ for (const width of [48, 100, 140]) {
     } finally { await app.close(); }
   });
 }
+
+test("presentation: stopping Docker also requires confirmation; mouse No does not disconnect", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("z");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain(
+      "остановить Docker и отключить VPN?",
+    );
+  } finally {
+    await app.close();
+  }
+});
