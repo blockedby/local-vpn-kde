@@ -13,7 +13,7 @@ export class MenuView {
   constructor(private renderer: CliRenderer, parent: BoxRenderable, activate: (index: number) => void) {
     this.controls = new BoxRenderable(renderer, { flexDirection: "column", flexShrink: 0 });
     parent.add(this.controls);
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 16; i++) {
       const row = new BoxRenderable(renderer, {
         height: 1, flexShrink: 0,
         onMouseDown: (event) => { if (event.button === 0) activate(i); },
@@ -26,13 +26,13 @@ export class MenuView {
     }
   }
 
-  update(items: MenuEntry[], editor: boolean, selected: number, highlight: boolean) {
+  update(items: MenuEntry[], editor: boolean, selected: number, highlight: boolean, modern = false) {
     const width = Math.max(10, this.renderer.terminalWidth - 2);
     this.controls.visible = !editor;
     this.rows.forEach((row, i) => {
       row.visible = i < items.length;
       row.backgroundColor = i === selected && highlight ? p.edge : p.base;
-      this.labels[i].content = items[i] ? cell(`[${items[i].key}] ${items[i].label}`, width).trimEnd() : "";
+      this.labels[i].content = items[i] ? cell(modern ? `${i === selected ? "›" : " "} ${items[i].key}  ${items[i].label}` : `[${items[i].key}] ${items[i].label}`, width).trimEnd() : "";
     });
   }
 }

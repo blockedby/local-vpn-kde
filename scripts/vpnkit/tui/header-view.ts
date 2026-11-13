@@ -28,8 +28,11 @@ export class HeaderView {
       ? measured.server_id === server?.server_id ? `~${measuredLive.toFixed(1)} Мбит/с` : `тест ${cell(measured.display_name, 12).trimEnd()}: ~${measuredLive.toFixed(1)}`
       : live !== undefined ? `~${live.toFixed(1)} Мбит/с` : undefined;
     const name = server?.display_name ?? "сервер неизвестен";
-    const available = Math.max(1, width - Bun.stringWidth(core) - 3 - (activeSpeed ? Bun.stringWidth(activeSpeed) + 3 : 0));
-    const parts = [cell(name, available).trimEnd(), ...(activeSpeed ? [activeSpeed] : []), `режим: ${mode}`];
+    const modePart = `режим: ${mode}`;
+    const remaining = width - Bun.stringWidth(core) - 3 - Bun.stringWidth(modePart) - 3;
+    const includeLive = !!activeSpeed && remaining >= Bun.stringWidth(activeSpeed) + 4;
+    const available = Math.max(1, remaining - (includeLive ? Bun.stringWidth(activeSpeed!) + 3 : 0));
+    const parts = [cell(name, available).trimEnd(), modePart, ...(includeLive ? [activeSpeed!] : [])];
     const at = server && state.measurementTimes.get(server.server_id);
     const age = at ? `${Math.floor((Date.now() - at) / 60000)} мин` : undefined;
     for (const part of [ping, activeSpeed ? undefined : speed]) if (part) parts.push(part);

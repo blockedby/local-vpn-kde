@@ -46,11 +46,11 @@ export class ServerTableView {
     const width = Math.max(10, state.width);
     const showStatus = width >= 78;
     const showSite = width >= 65;
-    const nameWidth = Math.max(10, width - (showStatus ? 45 : showSite ? 29 : 21));
+    const nameWidth = Math.max(10, width - (showStatus ? 48 : showSite ? 33 : 24));
     this.header.visible = state.visible;
     const right = (value: string, columns: number) => cell(value, columns).trimEnd().padStart(columns);
     const sort = { name: "имя", ping: "ping", speed: "скорость", availability: "сайт" }[state.sort];
-    this.header.content = `   ${cell(`Сервер · ${sort} ↑`, nameWidth)} ${right("Ping мс", 8)} ${right("Мбит/с", 8)}${showSite ? ` ${cell("Сайт", 7)}` : ""}${showStatus ? " Статус" : ""}`;
+    this.header.content = `   ${cell(`Сервер · ${sort} ↑`, nameWidth)}  ${right("Ping мс", 8)}  ${right("Мбит/с", 8)}${showSite ? `  ${cell("Сайт", 7)}` : ""}${showStatus ? "  Статус" : ""}`;
     this.rows.forEach((row, i) => {
       const s = state.servers[i];
       row.visible = state.visible && i < state.rowCount && !!s;
@@ -65,7 +65,7 @@ export class ServerTableView {
         : s.status === "failed" ? "ошибка" : (s.download_mbps?.toFixed(1) ?? "—");
       const site = queued ? "—" : checking("availability") && batch?.pinged.has(s.server_id) && s.ping_status === "ready" && !batch?.completed.has(s.server_id)
         ? frames[frame % 10] : s.availability === "ready" ? "да" : s.availability === "failed" ? "нет" : "—";
-      row.content = `${s.server_id === state.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)} ${right(ping, 8)} ${right(speed, 8)}${showSite ? ` ${cell(site, 7)}` : ""}${showStatus ? ` ${queued ? "в очереди" : active ? ({ start: "подготовка", ping: "сайт / ждёт", speed: "замер", complete: "готов" }[batch!.stages.get(s.server_id) ?? "start"]) : s.ping_status === "failed" || s.availability === "failed" || s.status === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не проверен"}` : ""}`;
+      row.content = `${s.server_id === state.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)}  ${right(ping, 8)}  ${right(speed, 8)}${showSite ? `  ${cell(site, 7)}` : ""}${showStatus ? `  ${queued ? "в очереди" : active ? ({ start: "подготовка", ping: "сайт / ждёт", speed: "замер", complete: "готов" }[batch!.stages.get(s.server_id) ?? "start"]) : s.ping_status === "failed" || s.availability === "failed" || s.status === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не проверен"}` : ""}`;
       row.fg = s.server_id === state.serverID ? p.accent : s.selected ? p.green : p.text;
       row.attributes = s.server_id === state.serverID ? TextAttributes.BOLD : 0;
     });

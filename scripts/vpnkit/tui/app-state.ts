@@ -468,6 +468,7 @@ export class AppState {
   sortedServers() {
     return sortedServers(this.servers, this.sort, this.frozenOrder);
   }
+  profilePageSize() { return Math.max(1, Math.min(9, this.viewport().height - 8 - wrapText(this.notice, Math.max(1, this.viewport().width - 2)).length)); }
   rowCount() {
     const message = this.closing ? "Завершаем текущую операцию перед выходом…" : this.notice;
     return Math.max(1, Math.min(100, this.viewport().height - 4 - wrapText(message, Math.max(1, this.viewport().width - 2)).length));

@@ -88,7 +88,7 @@ export class App extends AppState {
     const editor = !small && ["subscription", "target", "profile-name", "profile-source"].includes(this.screen);
     this.editorView.update(this.editorValue, editor && !this.helpOpen, this.closing);
     const items = small || this.screen === "servers" && this.ready() && !this.nativePreviewOnly() && this.status?.subscription === "configured" ? [] : this.items();
-    this.menuView.update(items, editor || small, this.selected, true);
+    this.menuView.update(items, editor || small, this.selected, true, ["settings", "diagnostics", "profiles"].includes(this.screen));
     this.summaryView.update(this);
     if (small) this.summaryView.hide();
     this.paintTable();

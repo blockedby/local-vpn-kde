@@ -225,3 +225,35 @@ test("shell: details appear at the width threshold and omit hidden backend ident
     app.onKey({ name: "escape", preventDefault() {} }); expect(app.screen).toBe("servers");
   } finally { await app.close(); }
 });
+
+test("shell: mode survives a long server name and table columns have gutters", async () => {
+  const { terminal: t, app } = await fixture(80, 24);
+  try {
+    app.status!.networkmanager_active = "yes";
+    app.servers[0]!.display_name = "A very long server name which would otherwise displace the routing mode";
+    app.paint(); await t.renderOnce();
+    const lines = t.captureCharFrame().split("\n");
+    expect(lines[0]).toContain("режим: строгий");
+    expect(lines[0]).toContain("…");
+    expect(lines[2]).toMatch(/Мбит\/с\s{2,}Сайт/);
+    expect(lines[3]).toMatch(/—\s{2,}—/);
+  } finally { await app.close(); }
+});
+
+test("shell: settings show stored and actual state and profiles use available rows", async () => {
+  const { terminal: t, app } = await fixture(80, 24);
+  try {
+    app.autostart = { gateway: true, connect: false };
+    app.serviceState = { enabled: "enabled", active: "active" };
+    app.open("settings"); await t.renderOnce();
+    let frame = t.captureCharFrame();
+    expect(frame).toContain("шлюз да, VPN нет"); expect(frame).toContain("служба активна/вкл");
+    expect(frame).toContain(app.target); expect(frame).toContain("Режим: строгий");
+    expect(frame).not.toContain("[a] Автозапуск");
+    app.profiles = { active: "p0", items: Array.from({ length: 9 }, (_, i) => ({ id: `p${i}`, name: `Profile ${i}`, kind: "server" as const, count: i, stale: i === 2 })) };
+    app.screen = "profiles"; app.tab = "profiles"; app.paint(); await t.renderOnce();
+    frame = t.captureCharFrame();
+    expect(frame).toContain("Profile 8"); expect(frame).toContain("● Profile 0");
+    expect(frame).toContain("сохранённый список"); expect(frame).toContain("серверов: 8");
+  } finally { await app.close(); }
+});

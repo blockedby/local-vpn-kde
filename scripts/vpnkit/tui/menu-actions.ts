@@ -57,9 +57,10 @@ export function menuItems(state: AppState): MenuItem[] {
     ];
     if(state.screen==="profiles") {
       const profiles=state.profiles?.items ?? [];
-      const pages=Math.max(1,Math.ceil(profiles.length/4));state.profilePage=Math.min(state.profilePage,pages-1);
+      const pageSize=state.profilePageSize();
+      const pages=Math.max(1,Math.ceil(profiles.length/pageSize));state.profilePage=Math.min(state.profilePage,pages-1);
       return [
-        ...profiles.slice(state.profilePage*4,state.profilePage*4+4).map((profile,i)=>({key:String(i+1),label:`${profile.id===state.profiles?.active?"● ":""}${profile.name} · ${profile.kind==="server"?"сервер":"подписка"} · ${profile.count}${profile.stale?" · сохранённый список":""}`,run:()=>void state.browseProfile(profile.id)})),
+        ...profiles.slice(state.profilePage*pageSize,state.profilePage*pageSize+pageSize).map((profile,i)=>({key:String(i+1),label:`${profile.id===state.profiles?.active?"● ":""}${profile.name} · ${profile.kind==="server"?"сервер":"подписка"} · серверов: ${profile.count} · ${profile.stale ? "сохранённый список" : "актуален"}`,run:()=>void state.browseProfile(profile.id)})),
         {key:"n",label:"Добавить профиль",run:()=>state.open("profile-name")},
         ...(state.profiles?.active?[{key:"X",label:"Удалить выбранный профиль",run:()=>state.open("profile-remove")}]:[]),
         ...(pages>1?[{key:"[",label:"Предыдущие профили",run:()=>{state.profilePage=(state.profilePage+pages-1)%pages;state.selected=0;state.paint()}},{key:"]",label:"Следующие профили",run:()=>{state.profilePage=(state.profilePage+1)%pages;state.selected=0;state.paint()}}]:[]),
@@ -147,10 +148,10 @@ export function menuItems(state: AppState): MenuItem[] {
           : []),
       ];
     if (state.screen === "settings") return [
-      { key: "a", label: "Автозапуск", run: () => state.open("autostart") },
+      { key: "a", label: `Автозапуск: ${state.autostart ? `шлюз ${state.autostart.gateway ? "да" : "нет"}, VPN ${state.autostart.connect ? "да" : "нет"}` : "не проверен"} · служба ${state.serviceState ? `${state.activeServiceLabel(state.serviceState.active)}/${({ enabled: "вкл", disabled: "выкл", masked: "маска" } as Record<string, string>)[state.serviceState.enabled] ?? "неизвестно"}` : "неизвестно"}`, run: () => state.open("autostart") },
       { key: "m", label: `Режим: ${state.status?.routing_mode === "smart" ? "умный" : state.status?.routing_mode === "strict" ? "строгий" : "неизвестно"}`, run: () => void state.perform("toggle-mode") },
       { key: "c", label: "Профили и источники", run: () => state.open(state.nativeInstalled() && state.status?.subscription === "configured" ? "profiles" : "subscription") },
-      { key: "e", label: "Адрес сайта для проверки", run: () => state.open("target") },
+      { key: "e", label: `Сайт для проверки: ${state.target}`, run: () => state.open("target") },
       ...(!state.ready() ? [{ key: "s", label: `Запустить ${state.serviceObject()}`, run: run("backend/start") }] : []),
       ...(["healthy", "unhealthy", "running", "stopped", "starting"].includes(state.status?.gateway_state ?? state.status?.vpn_state ?? "") ? [{ key: "z", label: state.nativeMode() ? "Остановить сервис" : "Остановить Docker и VPN", run: () => state.confirm("stop") }] : []),
     ];
@@ -212,8 +213,8 @@ export function defineMenuActions(state: AppState, items: MenuItem[]): ActionDef
     if (screen === "tasks") {
       const tasks = [...state.tasks].filter(([, task]) => task.action !== "status");
       id = `task:cancel:${tasks[Number(item.key) - 1]?.[0] ?? item.key}`;
-    } else if (screen === "profiles" && /^[1-4]$/.test(item.key)) {
-      id = `profile:open:${state.profiles?.items[state.profilePage * 4 + Number(item.key) - 1]?.id ?? item.key}`;
+    } else if (screen === "profiles" && /^[1-9]$/.test(item.key)) {
+      id = `profile:open:${state.profiles?.items[state.profilePage * state.profilePageSize() + Number(item.key) - 1]?.id ?? item.key}`;
     } else if (screen === "home" && item.key === "s") {
       id = state.ready() ? "home:connect" : "home:start-service";
     }

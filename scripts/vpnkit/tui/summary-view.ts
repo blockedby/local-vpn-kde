@@ -74,7 +74,7 @@ export class SummaryView {
             ? "Подписка · загрузка сохранённого адреса…"
             : "Подписка";
     }
-    if(state.screen==="profiles") this.summary.content="Профили · у каждого свой список серверов\nВыбор профиля не меняет активное VPN-подключение.";
+    if(state.screen==="profiles") { this.summary.height = 1; this.summary.content="Выбор профиля не меняет активное VPN-подключение."; }
     if(state.screen==="profile-name") this.summary.content="Новый профиль · имя\nНапример: Моя VPS или Основная подписка";
     if(state.screen==="profile-source") this.summary.content=`${state.profileName} · ссылка\nHTTPS-подписка, vless://, hysteria2:// или hy2://`;
     if(state.screen==="profile-remove") this.summary.content="Удалить выбранный профиль?\nЭто не останавливает уже работающий сервер.";
@@ -95,7 +95,7 @@ export class SummaryView {
           : state.status?.subscription !== "configured"
             ? "Добавьте подписку для загрузки серверов."
             : state.catalogLoaded ? "Список серверов пуст. Обновите источник [r] или откройте профили [c]." : "Загружаем серверы… Обновить список [r].";
-    if (state.screen === "settings") { this.summary.content = "Настройки"; this.summary.height = 1; }
+    if (state.screen === "settings") { this.summary.content = ""; this.summary.visible = false; this.summary.height = 0; }
     if (state.screen === "servers" && state.ready() && !state.nativePreviewOnly() && state.status?.subscription === "configured" && state.servers.length) { this.summary.visible = false; this.summary.height = 0; }
 
   }
