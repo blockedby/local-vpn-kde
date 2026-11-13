@@ -15,6 +15,8 @@ import { recoveryFor, type Recovery } from "./recovery";
 import { observeRendererClose } from "./renderer-lifecycle";
 import { cell, safeText } from "./formatting";
 import { compatible } from "./request-policy";
+import { ServerTableView } from "./server-table-view";
+import { frames } from "./animation-frames";
 export { cell } from "./formatting";
 
 type Screen =
@@ -63,7 +65,6 @@ const phases: Record<string, string> = {
   committed: "Готово",
   compensating: "Восстановление состояния",
 };
-const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const nativeSupportedActions: readonly Action[] = [
   "status",
   "backend/start",
@@ -193,8 +194,7 @@ export class App {
   private controls: BoxRenderable;
   private controlRows: BoxRenderable[] = [];
   private controlLabels: TextRenderable[] = [];
-  private tableHeader: TextRenderable;
-  private rows: TextRenderable[] = [];
+  private tableView: ServerTableView;
   private input: InputRenderable;
   private editorHint: TextRenderable;
   private progress: TextRenderable;
@@ -278,21 +278,14 @@ export class App {
     this.measurementInfo = text(this.content, "", p.muted, 2);
     this.gauge = text(this.content, "", p.accent, 14);
     this.gauge.marginTop = 1;
-    this.tableHeader = text(this.content, "", p.accent);
-    for (let i = 0; i < 100; i++) {
-      const row = text(this.content);
-      row.onMouseDown = (e) => {
-        if (e.button === 0) {
-          const server = this.visibleServers()[i];
-          if (server) {
-            this.serverMenu = false;
-            this.serverID = server.server_id;
-            this.paint();
-          }
-        }
-      };
-      this.rows.push(row);
-    }
+    this.tableView = new ServerTableView(renderer, this.content, (index) => {
+      const server = this.visibleServers()[index];
+      if (server) {
+        this.serverMenu = false;
+        this.serverID = server.server_id;
+        this.paint();
+      }
+    });
     this.input = new InputRenderable(renderer, {
       width: "100%",
       maxLength: 16384,
@@ -1402,46 +1395,10 @@ export class App {
     ]);
   }
   private paintTable() {
-    const width = Math.max(10, this.renderer.terminalWidth - 2);
-    const table = this.screen === "servers" && this.ready() && !this.nativePreviewOnly();
-    const nameWidth = Math.max(10, width - 45);
-    this.tableHeader.content = `   ${cell("Сервер", nameWidth)} ${cell("Ping мс", 8)} ${cell("Мбит/с", 8)} ${cell("Сайт", 7)} Статус`;
-    const visible = this.visibleServers();
-    this.rows.forEach((row, i) => {
-      const s = visible[i];
-      row.visible = table && i < this.rowCount() && !!s;
-      if (!s) return;
-      const queued = !!this.batch && this.batch.ids?.includes(s.server_id) && !this.batch.running.has(s.server_id) && !this.batch.completed.has(s.server_id);
-      const active = this.batch?.running.has(s.server_id) ?? false;
-      const checking = (kind: Batch) =>
-        active &&
-        (this.batch?.kind === kind ||
-          (kind === "availability" && !!this.batch));
-      const ping = queued ? "ждёт" : (checking("ping") || checking("speed")) && !this.batch?.pinged.has(s.server_id)
-        ? frames[this.frame % 10]
-        : s.ping_status === "failed"
-          ? "ошибка"
-          : (s.latency_ms?.toString() ?? "—");
-      const speed = checking("speed") && this.batch?.stages.get(s.server_id) === "speed"
-        ? this.liveSpeeds.has(s.server_id) ? `~${this.liveSpeeds.get(s.server_id)!.toFixed(1)}` : frames[this.frame % 10]
-        : s.status === "failed"
-          ? "ошибка"
-          : (s.download_mbps?.toFixed(1) ?? "—");
-      const site = queued ? "—" : checking("availability") && this.batch?.pinged.has(s.server_id) && s.ping_status === "ready" && !this.batch?.completed.has(s.server_id)
-        ? frames[this.frame % 10]
-        : s.availability === "ready"
-          ? "да"
-          : s.availability === "failed"
-            ? "нет"
-            : "—";
-      row.content = `${s.server_id === this.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)} ${cell(ping, 8)} ${cell(speed, 8)} ${cell(site, 7)} ${queued ? "в очереди" : active ? ({ start: "подготовка", ping: "сайт / ждёт", speed: "замер", complete: "готов" }[this.batch!.stages.get(s.server_id) ?? "start"]) : s.ping_status === "failed" || s.availability === "failed" || s.status === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не пров."}`;
-      row.fg =
-        s.server_id === this.serverID
-          ? p.accent
-          : s.selected
-            ? p.green
-            : p.text;
-      row.attributes = s.server_id === this.serverID ? TextAttributes.BOLD : 0;
+    this.tableView.update({
+      visible: this.screen === "servers" && this.ready() && !this.nativePreviewOnly(),
+      servers: this.visibleServers(), rowCount: this.rowCount(), serverID: this.serverID,
+      batch: this.batch, frame: this.frame, liveSpeeds: this.liveSpeeds,
     });
   }
   private paintProgress() {
@@ -1583,8 +1540,6 @@ export class App {
       this.summary.content = this.nativeMode()
         ? `OpenVPN / KDE: ${this.status?.networkmanager_active === "yes" ? "активен" : this.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nNative-служба: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${this.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${this.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${this.status?.last_attempt ?? "—"}\nПроверки сайта и скорости — на экране серверов.`
         : `OpenVPN / KDE: ${this.status?.networkmanager_active === "yes" ? "активен" : this.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nDocker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${this.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${this.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${this.status?.last_attempt ?? "—"}\nПроверка сайта и скорости — на экране серверов.`;
-    const table = this.screen === "servers" && this.ready() && !this.nativePreviewOnly();
-    this.tableHeader.visible = table;
     if (this.screen === "servers")
       this.summary.content = this.nativePreviewOnly()
         ? !this.ready()
