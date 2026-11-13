@@ -167,12 +167,19 @@ assert (p/'ns/net').stat().st_ino==pathlib.Path('/run/netns/vpnkit-native').stat
         assert not booted['gateway'] and not booted['connected'], 'runtime started before graphical session'
         remote('systemctl --user start --no-block ' + session_unit)
         deadline = time.monotonic() + 180
-        while True:
-            current = snapshot()
-            if current['gateway'] == (action != 'off') and current['connected'] == (action == 'connect'):
-                break
-            assert time.monotonic() < deadline, 'autostart runtime state timed out: ' + action
-            time.sleep(2)
+        if action != 'off':
+            # NM lists an activating VPN before its tunnel routes are ready.
+            # The autostart oneshot completes only after its owned connection
+            # and full-tunnel routes have passed the product's readiness proof.
+            while True:
+                state = remote('systemctl --user show ' + unit + ' -p ActiveState --value').stdout.strip()
+                if state == 'active':
+                    break
+                assert state != 'failed', 'autostart unit failed before readiness'
+                assert time.monotonic() < deadline, 'autostart unit timed out: ' + action
+                time.sleep(1)
+        current = snapshot()
+        assert current['gateway'] == (action != 'off') and current['connected'] == (action == 'connect'), 'runtime state does not match completed autostart: ' + action
         if action != 'off':
             assert current['journal_version'] == 5 and current['journal_boot'] == current['boot'], 'active journal is not bound to current kernel boot'
         assert current['config_hash'] == baseline['config_hash'], 'configuration changed over reboot'
@@ -181,6 +188,7 @@ assert (p/'ns/net').stat().st_ino==pathlib.Path('/run/netns/vpnkit-native').stat
         time.sleep(5)
         settled = snapshot()
         assert settled['gateway'] == current['gateway'] and settled['connected'] == current['connected'], 'autostart state did not settle'
+        assert settled['route_tun'] == current['route_tun'], 'desktop route changed after autostart completed'
         https()
         if action == 'off':
             disabled = remote('systemctl --user is-enabled ' + unit, check=False).stdout.strip()
