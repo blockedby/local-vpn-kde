@@ -22,6 +22,7 @@ export class OverlayView {
     this.dialogMenu = new MenuView(renderer, this.dialog, index => {
       if (!this.current || this.current.helpOpen) return;
       const state = this.current;
+      index += this.listOffset;
       state.selected = index;
       const item = state.items()[index];
       const action = item && state.actions().find(candidate => candidate.keys.includes(item.key));
@@ -37,12 +38,13 @@ export class OverlayView {
     this.box.add(this.text); root.add(this.box);
   }
   private current?: AppState;
+  private listOffset = 0;
   update(state: AppState) {
     this.current = state;
     const modal = isOverlay(state.screen) && this.renderer.terminalWidth >= 60 && this.renderer.terminalHeight >= 16;
     const editor = ["subscription", "target", "profile-name", "profile-source"].includes(state.screen);
     this.dialog.visible = modal;
-    this.dialogEditor.update(state.editorValue, modal && editor && !state.helpOpen, state.closing);
+    this.dialogEditor.update(state.editorValue, modal && editor && !state.helpOpen, state.closing, state.screen);
     if (modal) {
       const width = Math.min(64, this.renderer.terminalWidth - 4);
       this.dialogSummary.update(state);
@@ -57,7 +59,10 @@ export class OverlayView {
       this.dialog.left = Math.floor((this.renderer.terminalWidth - width) / 2);
       this.dialog.top = Math.floor((this.renderer.terminalHeight - height) / 2);
       this.dialog.title = ["confirm", "profile-remove", "cancel-confirm", "retry-confirm"].includes(state.screen) ? " Подтверждение " : state.screen === "details" ? " Сервер " : state.screen === "tasks" ? " Задачи " : state.screen === "recovery" ? " Восстановление " : " Редактор ";
-      this.dialogMenu.update(state.items(), editor, state.selected, true);
+      const items = state.items();
+      const availableRows = Math.max(1, height - 2 - summaryHeight);
+      this.listOffset = Math.max(0, Math.min(Math.max(0, items.length - availableRows), state.selected - availableRows + 1));
+      this.dialogMenu.update(items.slice(this.listOffset, this.listOffset + availableRows), editor, state.selected - this.listOffset, true);
     }
     this.box.visible = state.helpOpen;
     this.backdrop.visible = state.helpOpen;

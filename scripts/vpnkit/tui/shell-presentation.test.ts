@@ -257,3 +257,19 @@ test("shell: settings show stored and actual state and profiles use available ro
     expect(frame).toContain("сохранённый список"); expect(frame).toContain("серверов: 8");
   } finally { await app.close(); }
 });
+
+test("shell: long task overlays scroll and outside clicks cannot activate workspace", async () => {
+  const { terminal: t, app } = await fixture(60, 16);
+  try {
+    for (let i = 0; i < 12; i++) app.tasks.set(`task${i}`, { action: "servers/ping", measurement: true, started: 0, phase: "" });
+    app.open("tasks"); await t.renderOnce();
+    const before = app.serverID;
+    await t.mockMouse.click(1, 3); await t.renderOnce();
+    expect(app.screen).toBe("tasks"); expect(app.serverID).toBe(before);
+    for (let i = 0; i < 11; i++) app.onKey({ name: "down", preventDefault() {} });
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("[12] Отменить:");
+    app.tasks.clear(); app.open("profiles"); app.open("profile-remove");
+    expect(app.items()[app.selected]?.key).toBe("n");
+  } finally { app.tasks.clear(); await app.close(); }
+});

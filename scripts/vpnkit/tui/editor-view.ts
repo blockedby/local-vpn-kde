@@ -19,7 +19,8 @@ export class EditorView {
     this.hint = new TextRenderable(renderer, { content: "", fg: p.muted, height: 2, flexShrink: 0 });
     parent.add(this.hint);
   }
-  update(value: string, visible: boolean, closing: boolean) {
+  update(value: string, visible: boolean, closing: boolean, kind?: string) {
+    this.input.placeholder = kind === "profile-name" ? "Имя профиля" : "https://";
     if (this.input.value !== value) this.input.value = value;
     this.input.visible = visible;
     this.hint.visible = visible;

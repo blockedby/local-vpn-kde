@@ -1,8 +1,23 @@
 import { BoxRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
 import type { AppState } from "./app-state";
 import { palette as p } from "./model";
-import { wrapText } from "./formatting";
+import { safeText } from "./formatting";
 import { detailsLines } from "./details-view";
+
+function wrapDialogLine(input: string, width: number): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of safeText(input).split(/\s+/).filter(Boolean)) {
+    if (line && Bun.stringWidth(`${line} ${word}`) <= width) { line += ` ${word}`; continue; }
+    if (line) { lines.push(line); line = ""; }
+    for (const { segment } of new Intl.Segmenter().segment(word)) {
+      if (line && Bun.stringWidth(line + segment) > width) { lines.push(line); line = ""; }
+      line += segment;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
 
 export class SummaryView {
   private summary: TextRenderable;
@@ -12,7 +27,7 @@ export class SummaryView {
     parent.add(this.summary);
   }
   fit(width: number, offset = 0, limit = Infinity) {
-    const lines = this.summary.chunks.map(chunk => chunk.text).join("").split("\n").flatMap(line => wrapText(line, width));
+    const lines = this.summary.chunks.map(chunk => chunk.text).join("").split("\n").flatMap(line => wrapDialogLine(line, width));
     this.summary.content = lines.slice(offset, offset + limit).join("\n");
     this.summary.height = Math.min(limit, Math.max(0, lines.length - offset));
     return lines.length;
