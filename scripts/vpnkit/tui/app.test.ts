@@ -96,20 +96,17 @@ test("installed native subscription setup uses the private editor and explicit c
     t.mockInput.pressKey("c");
     await settle();
     await t.renderOnce();
-    let frame = t.captureCharFrame();
-    expect(frame).toContain("настройка native-пакета");
-    expect(frame).toContain("Polkit");
-    expect(frame).toContain("несколько минут");
-    expect(frame).toContain("Подключить VPN");
-    expect(frame).toContain("автозапуск");
-    expect(frame).not.toContain("недоступна в native preview");
+    expect(app.screen).toBe("subscription");
+    expect(app.subscriptionAvailable()).toBe(true);
     expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription/read"]);
 
     t.mockInput.pressKey("u", { ctrl: true });
     await t.mockInput.pasteBracketedText(value);
     t.mockInput.pressEnter();
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("подтверждение администратора");
+    expect(app.screen).toBe("confirm");
+    expect(app.confirmation).toBe("subscription");
+    expect(app.pendingSubscription).toBe(value);
     expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription/read"]);
 
     t.mockInput.pressKey("y");
@@ -118,10 +115,9 @@ test("installed native subscription setup uses the private editor and explicit c
     expect(b.calls.at(-1)).toEqual({ action: "subscription", value });
     expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription/read", "subscription"]);
     expect(b.calls.some((call) => ["start", "backend/start", "autostart/read", "autostart/set"].includes(call.action))).toBe(false);
-    frame = t.captureCharFrame();
-    expect(frame).toContain("Native-пакет настроен");
-    expect(frame).toContain("нажмите «Подключить VPN» отдельно");
-    expect(frame).not.toContain(value);
+    expect(app.noticeIdentity).toEqual({ action: "subscription", reason: "ok", ok: true });
+    expect(app.notice).not.toContain(value);
+    expect(app.noticeAttempt).not.toContain(value);
   } finally {
     await app.close();
   }
@@ -145,7 +141,6 @@ test("checkout native and native status without installed=true keep subscription
 });
 
 test("native setup failures never echo the private editor value", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true, subscription: "not configured" };
   const value = "https://example.invalid/private-failure-marker";
@@ -156,20 +151,21 @@ test("native setup failures never echo the private editor value", async () => {
       return { ...result, ok: false, reason: value, status: { ...result.status, last_attempt: value } };
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("c");
+    key("c");
     await settle();
-    t.mockInput.pressKey("u", { ctrl: true });
-    await t.mockInput.pasteBracketedText(value);
-    t.mockInput.pressEnter();
-    t.mockInput.pressKey("y");
+    app.edit(value);
+    key("return");
+    key("y");
     await settle();
-    await t.renderOnce();
-    const frame = t.captureCharFrame();
-    expect(frame).toContain("Не удалось настроить native-пакет");
-    expect(frame).not.toContain(value);
+    expect(app.error).toBe(true);
+    expect(app.noticeIdentity).toEqual({ action: "subscription", reason: value, ok: false });
+    expect(app.notice).not.toContain(value);
+    expect(app.noticeAttempt).not.toContain(value);
+    expect(app.recovery?.message).not.toContain(value);
     expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription/read", "subscription"]);
   } finally {
     await app.close();
@@ -177,7 +173,6 @@ test("native setup failures never echo the private editor value", async () => {
 });
 
 test("native autostart edits retain the returned runtime and do not connect immediately", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native" };
   let options = {
@@ -194,21 +189,20 @@ test("native autostart edits retain the returned runtime and do not connect imme
       result.autostart = { ...options };
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("a");
+    key("a");
     await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запускать native-службу: нет");
-    t.mockInput.pressKey("g");
+    expect(app.autostart).toMatchObject({ gateway: false, connect: false, runtime: "native" });
+    key("g");
     await settle();
     const set = b.calls.find((call) => call.action === "autostart/set");
     expect(set).toBeDefined();
     expect(JSON.parse(set!.value!).runtime).toBe("native");
     expect(options).toMatchObject({ gateway: true, connect: false, runtime: "native" });
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запускать native-службу: да");
+    expect(app.autostart).toMatchObject({ gateway: true, connect: false, runtime: "native" });
     expect(b.calls.some((call) => ["start", "backend/start", "disconnect", "stop"].includes(call.action))).toBe(false);
   } finally {
     await app.close();
@@ -216,30 +210,26 @@ test("native autostart edits retain the returned runtime and do not connect imme
 });
 
 test("navigation and diagnostics Back are immediate during a held mutation", async () => {
-  const t = await createTestRenderer({ width: 90, height: 28 });
   const b = new FakeBackend();
   let finish!: (r: Reply) => void;
   b.hold = { action: "start", promise: new Promise((r) => (finish = r)) };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
     const task = app.perform("start");
-    t.mockInput.pressKey("d");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+    key("d");
+    expect(app.screen).toBe("diagnostics");
     const before = performance.now();
-    t.mockInput.pressEscape();
+    key("escape");
     await Bun.sleep(60);
-    await t.renderOnce();
     expect(performance.now() - before).toBeLessThan(150);
-    expect(t.captureCharFrame()).not.toContain("OpenVPN / KDE");
-    t.mockInput.pressKey("c");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Enter сохранить");
+    expect(app.screen).toBe("home");
+    key("c");
+    expect(app.screen).toBe("subscription");
     finish(reply());
     await task;
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Enter сохранить");
+    expect(app.screen).toBe("subscription");
     expect(b.calls.map((c) => c.action)).toEqual(["status", "start", "subscription/read"]);
   } finally {
     finish(reply());
@@ -276,11 +266,11 @@ test("subscription is visible and editable; paste never dispatches action hotkey
     t.mockInput.pressKey("c");
     await settle();
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("https://example.invalid/saved");
+    expect(app.editorValue).toBe("https://example.invalid/saved");
     t.mockInput.pressKey("u", { ctrl: true });
     await t.mockInput.pasteBracketedText("https://example.invalid/sxrm");
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("https://example.invalid/sxrm");
+    expect(app.editorValue).toBe("https://example.invalid/sxrm");
     expect(b.calls.map((c) => c.action)).toEqual(["subscription/read"]);
     t.mockInput.pressEnter();
     await settle();
@@ -293,28 +283,27 @@ test("subscription is visible and editable; paste never dispatches action hotkey
   }
 });
 test("failed subscription save retains input and Back works while saving", async () => {
-  const t = await createTestRenderer({ width: 100, height: 24 });
   const b = new FakeBackend();
   let finish!: (r: Reply) => void;
   b.hold = {
     action: "subscription",
     promise: new Promise((r) => (finish = r)),
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
-    t.mockInput.pressKey("c");
+    key("c");
     await settle();
-    t.mockInput.pressEnter();
+    key("return");
     await settle();
-    t.mockInput.pressEscape();
+    key("escape");
     await Bun.sleep(60);
-    await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("Enter сохранить");
+    expect(app.screen).toBe("home");
     finish({ ...reply(), ok: false, reason: "invalid-request" });
     await settle();
-    t.mockInput.pressKey("c");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("https://example.invalid/saved");
+    key("c");
+    expect(app.screen).toBe("subscription");
+    expect(app.editorValue).toBe("https://example.invalid/saved");
   } finally {
     finish(reply());
     await settle();

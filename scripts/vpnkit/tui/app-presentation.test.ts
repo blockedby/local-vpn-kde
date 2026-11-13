@@ -277,3 +277,190 @@ test("presentation: checkout native and native status without installed=true kee
     }
   }
 });
+
+test("presentation: installed native subscription setup uses the private editor and explicit confirmation", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = {
+    ...b.status,
+    runtime: "native",
+    installed: true,
+    subscription: "not configured",
+  };
+  const app = new App(t.renderer, b);
+  const value = "https://example.invalid/private-initial-subscription";
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("c");
+    await settle();
+    await t.renderOnce();
+    let frame = t.captureCharFrame();
+    expect(frame).toContain("настройка native-пакета");
+    expect(frame).toContain("Polkit");
+    expect(frame).toContain("несколько минут");
+    expect(frame).toContain("Подключить VPN");
+    expect(frame).toContain("автозапуск");
+    expect(frame).not.toContain("недоступна в native preview");
+
+    t.mockInput.pressKey("u", { ctrl: true });
+    await t.mockInput.pasteBracketedText(value);
+    t.mockInput.pressEnter();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("подтверждение администратора");
+
+    t.mockInput.pressKey("y");
+    await settle();
+    await t.renderOnce();
+    frame = t.captureCharFrame();
+    expect(frame).toContain("Native-пакет настроен");
+    expect(frame).toContain("нажмите «Подключить VPN» отдельно");
+    expect(frame).not.toContain(value);
+  } finally {
+    await app.close();
+  }
+});
+
+test("presentation: native setup failures never echo the private editor value", async () => {
+  const t = await createTestRenderer({ width: 110, height: 30 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", installed: true, subscription: "not configured" };
+  const value = "https://example.invalid/private-failure-marker";
+  const original = b.request.bind(b);
+  b.request = async (action, requestValue) => {
+    const result = await original(action, requestValue);
+    if (action === "subscription")
+      return { ...result, ok: false, reason: value, status: { ...result.status, last_attempt: value } };
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("c");
+    await settle();
+    t.mockInput.pressKey("u", { ctrl: true });
+    await t.mockInput.pasteBracketedText(value);
+    t.mockInput.pressEnter();
+    t.mockInput.pressKey("y");
+    await settle();
+    await t.renderOnce();
+    const frame = t.captureCharFrame();
+    expect(frame).toContain("Не удалось настроить native-пакет");
+    expect(frame).not.toContain(value);
+  } finally {
+    await app.close();
+  }
+});
+
+test("presentation: native autostart edits retain the returned runtime and do not connect immediately", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native" };
+  let options = {
+    gateway: false,
+    connect: false,
+    runtime: "native" as const,
+    last_result: "ready",
+  };
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "autostart/set") options = { ...options, ...JSON.parse(value!) };
+    if (action === "autostart/read" || action === "autostart/set")
+      result.autostart = { ...options };
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("a");
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Запускать native-службу: нет");
+    t.mockInput.pressKey("g");
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Запускать native-службу: да");
+  } finally {
+    await app.close();
+  }
+});
+
+test("presentation: navigation and diagnostics Back are immediate during a held mutation", async () => {
+  const t = await createTestRenderer({ width: 90, height: 28 });
+  const b = new FakeBackend();
+  let finish!: (r: Reply) => void;
+  b.hold = { action: "start", promise: new Promise((r) => (finish = r)) };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    const task = app.perform("start");
+    t.mockInput.pressKey("d");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+    t.mockInput.pressEscape();
+    await Bun.sleep(60);
+    await t.renderOnce();
+    expect(t.captureCharFrame()).not.toContain("OpenVPN / KDE");
+    t.mockInput.pressKey("c");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Enter сохранить");
+    finish(reply());
+    await task;
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Enter сохранить");
+  } finally {
+    finish(reply());
+    await settle();
+    await app.close();
+  }
+});
+
+test("presentation: subscription is visible and editable; paste never dispatches action hotkeys", async () => {
+  const t = await createTestRenderer({ width: 100, height: 24 });
+  const b = new FakeBackend();
+  const app = new App(t.renderer, b);
+  try {
+    t.mockInput.pressKey("c");
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("https://example.invalid/saved");
+    t.mockInput.pressKey("u", { ctrl: true });
+    await t.mockInput.pasteBracketedText("https://example.invalid/sxrm");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("https://example.invalid/sxrm");
+    t.mockInput.pressEnter();
+    await settle();
+  } finally {
+    await app.close();
+  }
+});
+
+test("presentation: failed subscription save retains input and Back works while saving", async () => {
+  const t = await createTestRenderer({ width: 100, height: 24 });
+  const b = new FakeBackend();
+  let finish!: (r: Reply) => void;
+  b.hold = {
+    action: "subscription",
+    promise: new Promise((r) => (finish = r)),
+  };
+  const app = new App(t.renderer, b);
+  try {
+    t.mockInput.pressKey("c");
+    await settle();
+    t.mockInput.pressEnter();
+    await settle();
+    t.mockInput.pressEscape();
+    await Bun.sleep(60);
+    await t.renderOnce();
+    expect(t.captureCharFrame()).not.toContain("Enter сохранить");
+    finish({ ...reply(), ok: false, reason: "invalid-request" });
+    await settle();
+    t.mockInput.pressKey("c");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("https://example.invalid/saved");
+  } finally {
+    finish(reply());
+    await settle();
+    await app.close();
+  }
+});
