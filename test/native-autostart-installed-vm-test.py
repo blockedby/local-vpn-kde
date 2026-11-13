@@ -100,10 +100,30 @@ def failure_evidence():
     # addresses and configuration may contain private endpoints. This runs
     # before cleanup and never transfers those raw inputs off the guest.
     script = r'''
-import json,pathlib,re,subprocess
+import json,os,pathlib,re,subprocess,tempfile
 def run(args):
  p=subprocess.run(args,capture_output=True,text=True,timeout=30)
  return p.returncode,p.stdout
+os.umask(0o077)
+evidence=pathlib.Path(tempfile.mkdtemp(prefix='vpnkit-reboot-evidence-',dir='/var/tmp'))
+def capture(name,args):
+ try:
+  code,out=run(args)
+  (evidence/name).write_text('exit='+str(code)+'\n'+out)
+ except (OSError,subprocess.TimeoutExpired):
+  (evidence/name).write_text('capture unavailable\n')
+for name,command in {
+ 'system-units.txt':['systemctl','show','local-vpn-kde-network.service','local-vpn-kde-gateway.service','NetworkManager.service','network-online.target'],
+ 'autostart-unit.txt':['systemctl','--user','show','local-vpn-kde-native-autostart.service'],
+ 'system-journal.txt':['sudo','-n','journalctl','-b','-n','1000','-u','local-vpn-kde-network.service','-u','local-vpn-kde-gateway.service','-u','NetworkManager.service','-u','network-online.target','--no-pager','-o','short-monotonic'],
+ 'autostart-journal.txt':['journalctl','--user','-b','-n','300','-u','local-vpn-kde-native-autostart.service','--no-pager','-o','short-monotonic'],
+ 'routes.txt':['ip','-4','route','show','table','all'],
+ 'rules.txt':['ip','-4','rule','show'],
+ 'namespace-routes.txt':['sudo','-n','ip','netns','exec','vpnkit-native','ip','-4','route','show','table','all'],
+ 'namespace-rules.txt':['sudo','-n','ip','netns','exec','vpnkit-native','ip','-4','rule','show'],
+ 'resolver.txt':['cat','/etc/resolv.conf'],
+ 'namespace-resolver.txt':['cat','/etc/netns/vpnkit-native/resolv.conf'],
+}.items(): capture(name,command)
 def props(args):
  _,out=run(args)
  allowed={'ActiveState','SubState','Result','ExecMainStatus','ActiveEnterTimestampMonotonic','InactiveEnterTimestampMonotonic','ExecMainStartTimestampMonotonic','ExecMainExitTimestampMonotonic'}
@@ -143,7 +163,7 @@ except Exception: print('direct-probe-failed-or-unsupported')
 _,upstream=run(['sudo','-n','python3','-c',upstream_script])
 upstream=upstream.strip()
 if upstream not in ('dns-resolved-transport-unproven','direct-tcp-connected','direct-probe-failed-or-unsupported'): upstream='unavailable'
-print(json.dumps({'units':units,'gateway_codes':codes,'journal_signals':signals,'route_count':len(routes.splitlines()),'rule_count':len(rules.splitlines()),'tun_route_present':bool(re.search(r'\bdev tun\d+\b',routes)),'resolver_nameserver_count':sum(line.lstrip().startswith('nameserver ') for line in resolver.splitlines()),'autostart':safe_status,'guest_dns_probe':dns_ok,'guest_https_probe':https_ok,'upstream_direct_probe':upstream}))
+print(json.dumps({'private_guest_evidence':str(evidence),'units':units,'gateway_codes':codes,'journal_signals':signals,'route_count':len(routes.splitlines()),'rule_count':len(rules.splitlines()),'tun_route_present':bool(re.search(r'\bdev tun\d+\b',routes)),'resolver_nameserver_count':sum(line.lstrip().startswith('nameserver ') for line in resolver.splitlines()),'autostart':safe_status,'guest_dns_probe':dns_ok,'guest_https_probe':https_ok,'upstream_direct_probe':upstream}))
 '''
     result = remote('python3 -c ' + shlex.quote(script), timeout=90, check=False)
     try:
