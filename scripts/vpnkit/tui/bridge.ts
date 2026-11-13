@@ -264,6 +264,7 @@ export class Bridge implements Backend {
 }
 
 export class DemoBackend implements Backend {
+  onSpeedProgress?: (result: SpeedProgress, requestId?: string) => void;
   onProgress?: (phase: string, requestId?: string) => void;
   onCheckProgress?: (result: CheckProgress, requestId?: string) => void;
   private active = new Map<string, { cancelled: boolean }>();
@@ -373,6 +374,13 @@ export class DemoBackend implements Backend {
           server.latency_ms = 15 + i * 11;
         }
         if (action === "servers/speed") {
+          for (let sample = 1; sample <= 6; sample++) {
+            await Bun.sleep(150);
+            if (task.cancelled) return { ok: false, reason: "cancelled", code: null, status: { ...this.status } };
+            const mbps = (90 - i * 12) * (0.4 + 0.1 * sample);
+            this.onSpeedProgress?.({ event: "speed-progress", server_id: server.server_id,
+              elapsed_seconds: sample * 0.15, downloaded_bytes: Math.round(mbps * sample * 0.15 * 125000), download_mbps: mbps }, id);
+          }
           server.status = "ready";
           server.download_mbps = 90 - i * 12;
           server.download_seconds = 3;
