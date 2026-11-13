@@ -12,6 +12,7 @@ import { connection, failure, palette as p } from "./model";
 import { StyledText, t } from "@opentui/core";
 import { speedometer } from "./speedometer";
 import { recoveryFor, type Recovery } from "./recovery";
+import { observeRendererClose } from "./renderer-lifecycle";
 
 type Screen =
   | "tasks" | "cancel-confirm" | "recovery" | "retry-confirm"
@@ -225,12 +226,14 @@ export class App {
   private homeSpeedServer?: { id: string; name: string };
   private measurementInfo: TextRenderable;
   private homeSpeedLabel = "[t] Проверить скорость выбранного сервера";
+  private readonly rendererClosed: Promise<void>;
 
   constructor(
     private renderer: CliRenderer,
     private backend: Backend,
     private demo = false,
   ) {
+    this.rendererClosed = observeRendererClose(renderer);
     this.root = new BoxRenderable(renderer, {
       width: "100%",
       height: "100%",
@@ -1612,6 +1615,9 @@ export class App {
     this.backend.onCheckProgress = undefined;
     this.backend.onSpeedProgress = undefined;
     this.backend.onDisconnect = undefined;
-    try { await this.backend.close(); } finally { this.renderer.destroy(); }
+    try { await this.backend.close(); } finally {
+      this.renderer.destroy();
+      await this.rendererClosed;
+    }
   }
 }

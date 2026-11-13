@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SetupApp } from "./setup";
 import { DemoSetupBackend, NativeSetupBackend } from "./setup-backend";
+import { observeRendererClose } from "./renderer-lifecycle";
 
 if (!process.stdin.isTTY || !process.stdout.isTTY) {
   console.error("Запусти ./install.sh в обычном терминале.");
@@ -11,13 +12,17 @@ if (!process.stdin.isTTY || !process.stdout.isTTY) {
 const demo = process.argv.includes("--demo");
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const renderer = await createCliRenderer({ exitOnCtrlC:false, exitSignals:[], useMouse:true, targetFps:20, backgroundColor:"#0b1120" });
+const rendererClosed = observeRendererClose(renderer);
 let authChild: ChildProcess | undefined;
 let closing = false;
 const authorize = async () => {
   if (demo) return true;
   app.setSuspended(true);
-  renderer.suspend();
+  let suspended = false;
   try {
+    await renderer.suspend();
+    suspended = true;
+    if (closing) return false;
     process.stdout.write("\nВведите пароль администратора для настройки маршрутов.\n");
     return await new Promise<boolean>(resolve => {
       authChild = spawn("sudo", ["-v"], { stdio:"inherit" });
@@ -25,7 +30,7 @@ const authorize = async () => {
       authChild.on("close", code => { authChild = undefined; resolve(code === 0); });
     });
   } finally {
-    renderer.resume();
+    if (suspended) await renderer.resume();
     app.setSuspended(false);
   }
 };
@@ -35,8 +40,9 @@ const finish = async (open: boolean) => {
   authChild?.kill("SIGTERM");
   await app.close();
   renderer.destroy();
-  process.exitCode = app.exitCode;
-  if (open) {
+  await rendererClosed;
+  if (process.exitCode !== 1) process.exitCode = app.exitCode;
+  if (open && process.exitCode === 0) {
     const args = ["ui", ...(demo ? ["--demo"] : [])];
     const child = spawn(`${root}/.build/local-vpn-kde.bin`, args, { stdio:"inherit" });
     child.on("error", () => { process.exitCode = 1; });

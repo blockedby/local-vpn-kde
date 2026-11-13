@@ -40,8 +40,8 @@ vpnkit_go_ready() {
 vpnkit_bun_ready() {
   local version
   version=$(bun --version 2>/dev/null) || return 1
-  [[ "$version" =~ ^([0-9]+)\.([0-9]+) ]] &&
-    (( BASH_REMATCH[1] > 1 || (BASH_REMATCH[1] == 1 && BASH_REMATCH[2] >= 3) ))
+  [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] &&
+    (( BASH_REMATCH[1] > 1 || (BASH_REMATCH[1] == 1 && (BASH_REMATCH[2] > 3 || (BASH_REMATCH[2] == 3 && BASH_REMATCH[3] >= 14))) ))
 }
 vpnkit_install_bun() (
   set -Eeuo pipefail
@@ -126,7 +126,7 @@ vpnkit_install_dependencies() {
   fi
   vpnkit_go_ready || { vpnkit_dependency_error 'В репозиториях системы слишком старый Go: нужен Go 1.22+. Используй Ubuntu 24.04+, Debian 13+ или актуальную Fedora/Arch.'; return 10; }
   vpnkit_bun_ready || vpnkit_install_bun || return
-  vpnkit_bun_ready || { vpnkit_dependency_error 'Не удалось установить Bun 1.3+.'; return 10; }
+  vpnkit_bun_ready || { vpnkit_dependency_error 'Не удалось установить Bun 1.3.14+.'; return 10; }
   docker compose version >/dev/null || return
   docker buildx version >/dev/null || return
   if ! docker info >/dev/null 2>&1; then
