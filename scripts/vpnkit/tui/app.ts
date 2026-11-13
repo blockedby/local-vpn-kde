@@ -17,6 +17,7 @@ import { ServerTableView } from "./server-table-view";
 import { MenuView } from "./menu-view";
 import { MeasurementView } from "./measurement-view";
 import { frames } from "./animation-frames";
+import { serverViewport, sortedServers, type ServerSort } from "./catalog-order";
 export { cell } from "./formatting";
 
 type Screen =
@@ -174,7 +175,7 @@ export class App {
   private frozenOrder?: string[];
   private catalogLoaded = false;
   private catalogStale = false;
-  private sort: "name" | "ping" | "speed" | "availability" = "name";
+  private sort: ServerSort = "name";
   private target = "https://www.youtube.com/";
   private editorRevision = 0;
   private navigationRevision = 0;
@@ -868,44 +869,15 @@ export class App {
     this.paint();
   };
   private sortedServers() {
-    if (this.frozenOrder) {
-      const ranks = new Map(this.frozenOrder.map((id, i) => [id, i]));
-      return [...this.servers].sort((a, b) => (ranks.get(a.server_id) ?? Infinity) - (ranks.get(b.server_id) ?? Infinity));
-    }
-    const compare = (a: Server, b: Server) =>
-      a.display_name.localeCompare(b.display_name, "ru", { numeric: true }) ||
-      a.server_id.localeCompare(b.server_id);
-    return [...this.servers].sort((a, b) => {
-      if (this.sort === "ping")
-        return (
-          (a.latency_ms ?? Infinity) - (b.latency_ms ?? Infinity) ||
-          compare(a, b)
-        );
-      if (this.sort === "speed")
-        return (
-          (b.download_mbps ?? -1) - (a.download_mbps ?? -1) || compare(a, b)
-        );
-      if (this.sort === "availability")
-        return (
-          Number(b.availability === "ready") -
-            Number(a.availability === "ready") || compare(a, b)
-        );
-      return compare(a, b);
-    });
+    return sortedServers(this.servers, this.sort, this.frozenOrder);
   }
   private rowCount() {
     return Math.max(1, Math.min(100, this.renderer.terminalHeight - (this.inlineSpeed() ? (this.catalogStale || this.status?.subscription !== "configured" ? 14 : 12) : 15)));
   }
   private visibleServers() {
-    const list = this.sortedServers();
-    const at = Math.max(
-      0,
-      list.findIndex((s) => s.server_id === this.serverID),
-    );
-    this.viewStart = Math.min(this.viewStart, Math.max(0, list.length - this.rowCount()));
-    if (at < this.viewStart) this.viewStart = at;
-    if (at >= this.viewStart + this.rowCount()) this.viewStart = at - this.rowCount() + 1;
-    return list.slice(this.viewStart, this.viewStart + this.rowCount());
+    const viewport = serverViewport(this.sortedServers(), this.serverID, this.viewStart, this.rowCount());
+    this.viewStart = viewport.start;
+    return viewport.servers;
   }
   private updateCatalog(reply: Reply, action: Action) {
     if ((action === "servers/check-batch" || action === "servers/speed-batch") && reply.catalog?.servers) {
