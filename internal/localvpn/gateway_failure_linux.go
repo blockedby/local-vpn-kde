@@ -46,7 +46,7 @@ func NativeGatewayFailureMessage(err error) string {
 			stage = failure.stage
 		}
 		switch failure.reason {
-		case "failed", "exited", "timeout", "cancelled", "unavailable", "rule-init-dns", "rule-init-timeout", "rule-init-refused", "rule-init-network", "rule-init-failed":
+		case "failed", "exited", "timeout", "cancelled", "unavailable", "rule-init-dns", "rule-init-dns-timeout", "rule-init-dns-refused", "rule-init-dns-network", "rule-init-dns-no-such-host", "rule-init-timeout", "rule-init-refused", "rule-init-network", "rule-init-failed":
 			reason = failure.reason
 		}
 	}
@@ -54,6 +54,14 @@ func NativeGatewayFailureMessage(err error) string {
 	switch reason {
 	case "rule-init-dns":
 		message = "rule-set initialization reported a name resolution failure"
+	case "rule-init-dns-timeout":
+		message = "rule-set initialization reported a name resolution timeout"
+	case "rule-init-dns-refused":
+		message = "rule-set initialization reported a refused name resolution request"
+	case "rule-init-dns-network":
+		message = "rule-set initialization reported an unreachable name resolution network or route"
+	case "rule-init-dns-no-such-host":
+		message = "rule-set initialization reported that name resolution found no host"
 	case "rule-init-timeout":
 		message = "rule-set initialization reported a timeout"
 	case "rule-init-refused":
@@ -70,7 +78,7 @@ func NativeGatewayFailureMessage(err error) string {
 // Journal text is never copied into user state or returned to the caller.
 func gatewayJournalReason(data []byte) string {
 	stages := []string{"unknown", "config-sync", "config-check", "sing-box", "barrier", "openvpn", "routing", "health", "notify"}
-	reasons := []string{"failed", "exited", "timeout", "cancelled", "unavailable", "rule-init-dns", "rule-init-timeout", "rule-init-refused", "rule-init-network", "rule-init-failed"}
+	reasons := gatewayFailureReasons()
 	for _, line := range strings.Split(string(data), "\n") {
 		for _, stage := range stages {
 			for _, reason := range reasons {
@@ -86,7 +94,7 @@ func gatewayJournalReason(data []byte) string {
 
 func gatewayReasonAllowed(code string) bool {
 	stages := []string{"unknown", "config-sync", "config-check", "sing-box", "barrier", "openvpn", "routing", "health", "notify"}
-	reasons := []string{"failed", "exited", "timeout", "cancelled", "unavailable", "rule-init-dns", "rule-init-timeout", "rule-init-refused", "rule-init-network", "rule-init-failed"}
+	reasons := gatewayFailureReasons()
 	for _, stage := range stages {
 		for _, reason := range reasons {
 			if code == stage+"-"+reason {
@@ -95,6 +103,10 @@ func gatewayReasonAllowed(code string) bool {
 		}
 	}
 	return false
+}
+
+func gatewayFailureReasons() []string {
+	return []string{"failed", "exited", "timeout", "cancelled", "unavailable", "rule-init-dns", "rule-init-dns-timeout", "rule-init-dns-refused", "rule-init-dns-network", "rule-init-dns-no-such-host", "rule-init-timeout", "rule-init-refused", "rule-init-network", "rule-init-failed"}
 }
 
 // Inspect complete child log lines without retaining or forwarding them. Only
@@ -131,7 +143,18 @@ func (d *gatewayChildDiagnostics) inspect(line string) {
 	}
 	switch {
 	case strings.Contains(line, "no such host"), strings.Contains(line, "name resolution"), strings.Contains(line, "lookup "):
-		d.classification = "rule-init-dns"
+		switch {
+		case strings.Contains(line, "timeout"), strings.Contains(line, "timed out"), strings.Contains(line, "deadline exceeded"):
+			d.classification = "rule-init-dns-timeout"
+		case strings.Contains(line, "connection refused"):
+			d.classification = "rule-init-dns-refused"
+		case strings.Contains(line, "network is unreachable"), strings.Contains(line, "no route to host"):
+			d.classification = "rule-init-dns-network"
+		case strings.Contains(line, "no such host"):
+			d.classification = "rule-init-dns-no-such-host"
+		default:
+			d.classification = "rule-init-dns"
+		}
 	case strings.Contains(line, "timeout"), strings.Contains(line, "timed out"), strings.Contains(line, "deadline exceeded"):
 		d.classification = "rule-init-timeout"
 	case strings.Contains(line, "connection refused"):
