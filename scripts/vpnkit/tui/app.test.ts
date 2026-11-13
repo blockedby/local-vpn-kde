@@ -1092,7 +1092,6 @@ test("quit drains both selection and measurement before closing backend", async 
 });
 
 test("autostart is opt-in, keeps gateway/connect consistent and never starts VPN immediately", async () => {
-  const t = await createTestRenderer({ width: 90, height: 28 });
   const b = new FakeBackend();
   let options = { gateway: false, connect: false };
   const original = b.request.bind(b);
@@ -1102,25 +1101,23 @@ test("autostart is opt-in, keeps gateway/connect consistent and never starts VPN
     if (action.startsWith("autostart/")) result.autostart = { ...options };
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("a"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("При входе в KDE");
-    expect(t.captureCharFrame()).toContain("Подключать VPN: нет");
+    key("a"); await settle();
+    expect(app.autostart).toEqual({ gateway: false, connect: false });
     expect(b.calls.some(call => call.action === "autostart/set")).toBe(false);
-    t.mockInput.pressKey("a"); await settle();
+    key("a"); await settle();
     expect(options).toEqual({ gateway: true, connect: true });
-    t.mockInput.pressKey("g"); await settle();
+    key("g"); await settle();
     expect(options).toEqual({ gateway: false, connect: false });
-    t.resize(60, 18); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запускать шлюз: нет");
+    expect(app.autostart).toEqual({ gateway: false, connect: false });
     expect(b.calls.some(call => ["start", "backend/start", "stop", "disconnect"].includes(call.action))).toBe(false);
   } finally { await app.close(); }
 });
 
 test("failed autostart save requires rereading authoritative settings", async () => {
-  const t = await createTestRenderer({ width: 90, height: 28 });
   const b = new FakeBackend();
   const original = b.request.bind(b);
   b.request = async (action, value) => {
@@ -1129,18 +1126,18 @@ test("failed autostart save requires rereading authoritative settings", async ()
     if (action === "autostart/set") return { ...result, ok: false, reason: "autostart-unavailable" };
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("a"); await settle();
-    t.mockInput.pressKey("a"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Загрузить настройки");
-    expect(t.captureCharFrame()).not.toContain("Подключать VPN: да");
+    key("a"); await settle();
+    key("a"); await settle();
+    expect(app.autostart).toBeUndefined();
+    expect(app.noticeIdentity).toEqual({ action: "autostart/set", reason: "autostart-unavailable", ok: false });
   } finally { await app.close(); }
 });
 
 test("autostart screen keeps saved intent separate from the actual disabled unit", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   const original = b.request.bind(b);
   b.request = async (action, value) => {
@@ -1151,24 +1148,21 @@ test("autostart screen keeps saved intent separate from the actual disabled unit
     }
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("a");
+    key("a");
     await settle();
-    await t.renderOnce();
-    const frame = t.captureCharFrame();
-    expect(frame).toContain("Запускать шлюз: да");
-    expect(frame).toContain("Подключать VPN: да");
-    expect(frame).toContain("Фактическое состояние службы: автозапуск отключён");
-    expect(frame).toContain("текущее состояние: неактивна");
+
+    expect(app.autostart).toEqual({ gateway: true, connect: true });
+    expect(app.serviceState).toEqual({ enabled: "disabled", active: "inactive" });
   } finally {
     await app.close();
   }
 });
 
 test("successful autostart saves refresh actual state and preserve native runtime payload", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native" };
   let options = { gateway: true, connect: false, runtime: "native" as const };
@@ -1186,29 +1180,28 @@ test("successful autostart saves refresh actual state and preserve native runtim
     }
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("a");
+    key("a");
     await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("при входе в графическую сессию");
-    expect(t.captureCharFrame()).not.toContain("При входе в KDE");
-    t.mockInput.pressKey("g");
+
+    expect(app.autostart?.runtime).toBe("native");
+    key("g");
     await settle();
-    await t.renderOnce();
+
     const set = b.calls.find((call) => call.action === "autostart/set");
     expect(set).toBeDefined();
     expect(JSON.parse(set!.value!).runtime).toBe("native");
-    expect(t.captureCharFrame()).toContain("Запускать native-службу: нет");
-    expect(t.captureCharFrame()).toContain("автозапуск отключён");
+    expect(app.autostart).toMatchObject({ gateway: false, connect: false, runtime: "native" });
+    expect(app.serviceState).toEqual({ enabled: "disabled", active: "inactive" });
   } finally {
     await app.close();
   }
 });
 
 test("autostart errors clear a previously healthy actual state", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   let reads = 0;
   const original = b.request.bind(b);
@@ -1223,18 +1216,19 @@ test("autostart errors clear a previously healthy actual state", async () => {
     }
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("a");
+    key("a");
     await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("автозапуск включён");
+
+    expect(app.serviceState).toEqual({ enabled: "enabled", active: "active" });
     await app.perform("autostart/read");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("не проверено");
-    expect(t.captureCharFrame()).toContain("недоступно");
-    expect(t.captureCharFrame()).not.toContain("автозапуск включён");
+
+    expect(app.serviceState).toBeUndefined();
+    expect(app.autostart).toEqual({ gateway: true, connect: false });
+    expect(app.noticeIdentity).toEqual({ action: "autostart/read", reason: "autostart-unavailable", ok: false });
   } finally {
     await app.close();
   }

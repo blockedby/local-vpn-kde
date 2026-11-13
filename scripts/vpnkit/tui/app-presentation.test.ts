@@ -760,3 +760,145 @@ test("presentation: measurement cancellation is scoped and never cancels concurr
     expect(t.captureCharFrame().split("\n").find(line => line.includes("Amsterdam") && line.includes("●"))).toBeDefined();
   } finally { finishCheck(reply()); finishSelect(reply()); await settle(); await app.close(); }
 });
+
+test("presentation: autostart is opt-in, keeps gateway/connect consistent and never starts VPN immediately", async () => {
+  const t = await createTestRenderer({ width: 90, height: 28 });
+  const b = new FakeBackend();
+  let options = { gateway: false, connect: false };
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "autostart/set") options = JSON.parse(value!);
+    if (action.startsWith("autostart/")) result.autostart = { ...options };
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("a"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("При входе в KDE");
+    expect(t.captureCharFrame()).toContain("Подключать VPN: нет");
+    t.mockInput.pressKey("a"); await settle();
+    t.mockInput.pressKey("g"); await settle();
+    t.resize(60, 18); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Запускать шлюз: нет");
+  } finally { await app.close(); }
+});
+
+test("presentation: failed autostart save requires rereading authoritative settings", async () => {
+  const t = await createTestRenderer({ width: 90, height: 28 });
+  const b = new FakeBackend();
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "autostart/read") result.autostart = { gateway: false, connect: false };
+    if (action === "autostart/set") return { ...result, ok: false, reason: "autostart-unavailable" };
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("a"); await settle();
+    t.mockInput.pressKey("a"); await settle(); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Загрузить настройки");
+    expect(t.captureCharFrame()).not.toContain("Подключать VPN: да");
+  } finally { await app.close(); }
+});
+
+test("presentation: autostart screen keeps saved intent separate from the actual disabled unit", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "autostart/read") {
+      result.autostart = { gateway: true, connect: true };
+      result.autostart_service = { enabled: "disabled", active: "inactive" };
+    }
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("a");
+    await settle();
+    await t.renderOnce();
+    const frame = t.captureCharFrame();
+    expect(frame).toContain("Запускать шлюз: да");
+    expect(frame).toContain("Подключать VPN: да");
+    expect(frame).toContain("Фактическое состояние службы: автозапуск отключён");
+    expect(frame).toContain("текущее состояние: неактивна");
+  } finally {
+    await app.close();
+  }
+});
+
+test("presentation: successful autostart saves refresh actual state and preserve native runtime payload", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native" };
+  let options = { gateway: true, connect: false, runtime: "native" as const };
+  let service = { enabled: "enabled", active: "active" };
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "autostart/set") {
+      options = { ...options, ...JSON.parse(value!) };
+      service = { enabled: options.gateway ? "enabled" : "disabled", active: "inactive" };
+    }
+    if (action === "autostart/read" || action === "autostart/set") {
+      result.autostart = { ...options };
+      result.autostart_service = { ...service };
+    }
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("a");
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("при входе в графическую сессию");
+    expect(t.captureCharFrame()).not.toContain("При входе в KDE");
+    t.mockInput.pressKey("g");
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Запускать native-службу: нет");
+    expect(t.captureCharFrame()).toContain("автозапуск отключён");
+  } finally {
+    await app.close();
+  }
+});
+
+test("presentation: autostart errors clear a previously healthy actual state", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  let reads = 0;
+  const original = b.request.bind(b);
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "autostart/read") {
+      reads++;
+      if (reads === 1) {
+        result.autostart = { gateway: true, connect: false };
+        result.autostart_service = { enabled: "enabled", active: "active" };
+      } else return { ...result, ok: false, reason: "autostart-unavailable" };
+    }
+    return result;
+  };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("a");
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("автозапуск включён");
+    await app.perform("autostart/read");
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("не проверено");
+    expect(t.captureCharFrame()).toContain("недоступно");
+    expect(t.captureCharFrame()).not.toContain("автозапуск включён");
+  } finally {
+    await app.close();
+  }
+});
