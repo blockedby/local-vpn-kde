@@ -50,7 +50,20 @@ func NativeGatewayFailureMessage(err error) string {
 			reason = failure.reason
 		}
 	}
-	return fmt.Sprintf("native_gateway_start_failure=%s-%s: gateway startup failed during %s (%s)", stage, reason, stage, reason)
+	message := "gateway startup failed during " + stage + " (" + reason + ")"
+	switch reason {
+	case "rule-init-dns":
+		message = "rule-set initialization reported a name resolution failure"
+	case "rule-init-timeout":
+		message = "rule-set initialization reported a timeout"
+	case "rule-init-refused":
+		message = "rule-set initialization reported a refused connection"
+	case "rule-init-network":
+		message = "rule-set initialization reported an unreachable network or route"
+	case "rule-init-failed":
+		message = "rule-set initialization failed"
+	}
+	return fmt.Sprintf("native_gateway_start_failure=%s-%s: %s", stage, reason, message)
 }
 
 // gatewayJournalReason accepts only exact messages emitted by this binary.
