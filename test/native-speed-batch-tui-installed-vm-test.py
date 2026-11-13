@@ -41,10 +41,14 @@ SCREEN = {
     'backend_unavailable': 'Служба управления недоступна',
     'connection_lost': 'Связь потеряна. Действие могло продолжиться.',
     'restore_connection': 'Восстановить связь', 'status_unavailable': 'Статус недоступен',
+    'filter': 'Фильтр:', 'queued': 'в очереди 1 [j]', 'tasks': 'Задачи',
+    'running': 'Выполняются', 'queue_heading': 'В очереди', 'history': 'Завершены',
+    'ping_task': 'Ping и сайт', 'speed_task': 'Скорость и сайт',
 }
 KEY = {
     'site': 'e', 'diagnostics': 'd', 'refresh': 'u', 'servers': 'v', 'servers_alias': 'h',
     'profiles': 'c', 'speed_batch': 't', 'cancel': 'k', 'quit': 'q', 'escape': '\x1b',
+    'filter': '/', 'ping_batch': 'p', 'tasks': 'j',
 }
 
 assert os.environ.get('VPNKIT_NATIVE_VM_LAB') == '1'
@@ -83,7 +87,13 @@ seen_speed = False
 
 
 def setup():
-    global created, expected_count, master, process, screen, stream, decoder, active_index, expected_display_name
+    global created, expected_count, master, process, screen, stream, decoder, active_index, expected_display_name, original_index, filter_name, original_count
+    original_rows = [row for row in cli('servers/list')['catalog']['servers'] if row.get('profile_id') == before['profile']]
+    original_count = len(original_rows)
+    assert original_count > 1, 'filter acceptance requires a multi-server original profile'
+    names = [row['display_name'] for row in original_rows]
+    filter_name = next((name for name in names if name and len(name) <= 256 and '\n' not in name and sum(name.casefold() in other.casefold() for other in names) == 1), None)
+    assert filter_name, 'filter acceptance needs a uniquely matching server name'
     if os.environ.get('VPNKIT_NATIVE_LAB_SERVER_FILE'):
         import stat
         path=pathlib.Path(os.environ['VPNKIT_NATIVE_LAB_SERVER_FILE']);info=path.lstat()
@@ -98,7 +108,9 @@ def setup():
     created = added['active']
     profiles = cli('profiles/list')['profiles']
     active_index = next(i for i,p in enumerate(profiles['items']) if p['id']==profiles['active'])
+    original_index = next(i for i,p in enumerate(profiles['items']) if p['id']==before['profile'])
     assert active_index < 4, 'active profile must be visible on first page'
+    assert original_index < 9, 'original profile must be visible on first page'
     expected_count = profiles['items'][active_index]['count']
     assert 0 < expected_count <= 8, 'requires a populated bounded lab profile'
     candidates=[row for row in cli('servers/list')['catalog']['servers'] if row.get('profile_id')==created]
@@ -215,9 +227,24 @@ try:
     assert SCREEN['docker'] not in frame(), 'native UI displays Docker wording'
     key(KEY['profiles'])
     wait(lambda text:SCREEN['fixture_profile'] in text,'loaded profile list',30)
+    key(str(original_index+1))
+    wait(lambda text:SCREEN['ping_column'] in text,'original server table',30)
+    key(KEY['filter']); key(filter_name); key('\r')
+    wait(lambda text: SCREEN['filter'] in text and f'1/{original_count}' in text, 'filter narrows original catalog')
+    key(KEY['ping_batch'])
+    filtered = wait(lambda text: re.search(SCREEN['batch_complete'], text), 'filtered ping batch')
+    result = re.search(SCREEN['batch_complete'], filtered)
+    assert (int(result[1]), int(result[2])) == (1, 1), 'filtered batch did not measure exactly the shown row'
+    key(KEY['escape'])
+    wait(lambda text: SCREEN['filter'] not in text, 'filter cleared')
+    record({'filtered_catalog_and_ping_batch':'passed','shown':1,'total':original_count})
+    key(KEY['profiles'])
+    wait(lambda text:SCREEN['fixture_profile'] in text,'return to profile list',30)
     key(str(active_index+1))
     table = wait(lambda text:SCREEN['ping_column'] in text and SCREEN['fixture_node'] in text,'loaded fixture server table',30)
-    lines = table.splitlines()
+    # At 140 columns the details pane has its own nonblank lines beside the
+    # table.  Count only the table's columns, not the entire terminal row.
+    lines = [line[:140 - 1 - 36] for line in table.splitlines()]
     header = next(i for i, line in enumerate(lines) if SCREEN['ping_column'] in line)
     data_rows = []
     for line in lines[header + 1:]:
@@ -237,11 +264,20 @@ try:
         wait(lambda text:SCREEN['backend_unavailable'] in text,'old bridge remains unusable',30,True)
         record({'baseline_compiled_speed_stage_backend_loss':'reproduced','docker_installed':False})
     else:
+        # A second pass must be visible in the activity panel and run after
+        # the active speed pass, rather than being rejected or discarded.
+        wait(lambda text: 'Проверка' in text, 'active speed batch')
+        key(KEY['ping_batch'])
+        wait(lambda text: SCREEN['queued'] in text, 'queued ping batch')
+        key(KEY['tasks'])
+        wait(lambda text: all(SCREEN[name] in text for name in ('tasks', 'running', 'queue_heading', 'ping_task', 'speed_task')), 'activity panel lists both passes')
+        wait(lambda text: SCREEN['history'] in text and text.count('Завершено') >= 2 and SCREEN['ping_task'] in text and SCREEN['speed_task'] in text, 'both queued passes finished')
+        key(KEY['escape'])
         completed(errors=0)
         assert seen_speed, 'compiled UI never rendered the real speed stage'
         assert SCREEN['docker'] not in frame(), 'native batch displays Docker wording'
         second_action()
-        record({'compiled_speed_site_complete':'passed','real_speed_stage_rendered':True,'second_action':'passed','docker_installed':False})
+        record({'compiled_speed_site_complete':'passed','real_speed_stage_rendered':True,'queued_ping_and_activity':'passed','second_action':'passed','docker_installed':False})
         # Failed website evidence must not destroy the bridge/throughput pass.
         site('https://127.0.0.1:9/unavailable')
         seen_speed=False
