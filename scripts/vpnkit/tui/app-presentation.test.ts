@@ -1152,3 +1152,187 @@ test("presentation: removing the active source browses its fallback without chan
 
   } finally { await app.close(); }
 });
+
+test("presentation: cached errors do not masquerade as tests in the current session", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const server = {
+    ...rows[0],
+    status: "failed",
+    ping_status: "failed",
+    download_mbps: undefined,
+  };
+  const app = new App(t.renderer, {
+    request: async (action) => ({
+      ...reply(),
+      catalog:
+        action === "servers/list"
+          ? { status: "ok", servers: [server] }
+          : {
+              status: "ok",
+              server: { ...server, ping_status: "ready", latency_ms: 15 },
+            },
+    }),
+    close: async () => {},
+  });
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v");
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).not.toContain("ошибка");
+    expect(t.captureCharFrame()).toContain("не пров.");
+    await app.perform("servers/ping", server.server_id);
+    await t.renderOnce();
+    expect(t.captureCharFrame()).not.toContain("ошибка");
+    await app.perform("servers/speed", server.server_id);
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("ошибка");
+  } finally {
+    await app.close();
+  }
+});
+
+test("presentation: a successful site check marks a server ready without claiming a speed result", async () => {
+  const t = await createTestRenderer({ width: 100, height: 28 });
+  const b = new FakeBackend();
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v");
+    await settle();
+    t.mockInput.pressKey("a");
+    await settle();
+    await t.renderOnce();
+    const row = t
+      .captureCharFrame()
+      .split("\n")
+      .find((line) => line.includes("Amsterdam"))!;
+    expect(row).toContain("готов");
+    expect(row).toContain("да");
+    expect(row).toContain("—");
+    expect(row).not.toContain("50.0");
+  } finally {
+    await app.close();
+  }
+});
+
+test("presentation: combined checks submit one snapshot once without restarting on navigation", async () => {
+  const t = await createTestRenderer({ width: 100, height: 30 });
+  const b = new FakeBackend();
+  b.rows = Array.from({ length: 12 }, (_, i) => ({ ...rows[0], server_id: `srv_${String(i).padStart(27, "0")}` }));
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v");
+    await settle();
+    t.mockInput.pressKey("p");
+    await settle();
+    t.mockInput.pressKey("d");
+    t.mockInput.pressKey("v");
+    await settle();
+    await t.renderOnce();
+
+    expect(t.captureCharFrame()).not.toContain("5 потоков");
+  } finally { await app.close(); }
+});
+
+test("presentation: batch failure retains the actionable outdated backend explanation", async () => {
+  const t = await createTestRenderer({ width: 120, height: 30 });
+  const b = new FakeBackend();
+  b.hold = { action: "servers/check-batch", promise: Promise.resolve({ ...reply(), ok: false, reason: "backend-outdated" }) };
+  const app = new App(t.renderer, b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v");
+    await settle();
+    t.mockInput.pressKey("p");
+    await settle();
+    await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Нужен обновлённый Docker-бэкенд");
+    expect(t.captureCharFrame()).not.toContain("Результаты сохранены");
+  } finally { await app.close(); }
+});
+
+test("presentation: ping and site render before batch completion and completed rows stop spinning", async () => {
+ const t = await createTestRenderer({ width:120, height:30 });
+ const b = new FakeBackend();
+ let finish!: (r: Reply) => void;
+ b.hold = { action:"servers/check-batch", promise:new Promise(r => finish=r) };
+ const app = new App(t.renderer,b);
+ try {
+  await app.perform("status");
+  t.mockInput.pressKey("v"); await settle();
+  t.mockInput.pressKey("p"); await settle();
+  const event: CheckProgress = { event:"server-check", server_id:rows[0].server_id, stage:"ping", ping_status:"ready", latency_ms:37, availability:"untested" };
+  b.onCheckProgress?.(event);
+  await t.renderOnce();
+  let row=t.captureCharFrame().split("\n").find(s=>s.includes("Tokyo"))!;
+  expect(row).toContain("37");
+  expect(row).not.toContain("да");
+  expect(t.captureCharFrame()).toContain("0/2");
+  b.onCheckProgress?.({...event,stage:"complete",availability:"ready"});
+  b.onCheckProgress?.({...event,stage:"complete",availability:"ready"});
+  await t.renderOnce();
+  row=t.captureCharFrame().split("\n").find(s=>s.includes("Tokyo"))!;
+  expect(row).toContain("37"); expect(row).toContain("да");
+  expect(row).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+  expect(t.captureCharFrame()).toContain("1/2");
+  t.mockInput.pressKey("d"); await t.renderOnce();
+  expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+  t.mockInput.pressKey("v"); await t.renderOnce();
+  expect(t.captureCharFrame()).toContain("37");
+  finish({...reply(),catalog:{status:"ok",servers:rows.map(s=>({...s,ping_status:"ready",availability:"ready",latency_ms:37}))}});
+  await settle(); await t.renderOnce();
+  expect(t.captureCharFrame()).toContain("2/2");
+  expect(t.captureCharFrame()).not.toContain("3/2");
+
+ } finally { finish(reply()); await settle(); await app.close(); }
+});
+
+test("presentation: failed current ping overrides an earlier successful speed result", async () => {
+  const t = await createTestRenderer({ width: 110, height: 24 });
+  const b = new FakeBackend();
+  const app = new App(t.renderer,b);
+  try {
+    await app.perform("status");
+    t.mockInput.pressKey("v");
+    await settle();
+    await app.perform("servers/speed",rows[0]!.server_id);
+    let finish!: (r: Reply) => void;
+    b.hold = { action: "servers/check-batch", promise: new Promise(r => finish=r) };
+    t.mockInput.pressKey("a");
+    await settle();
+    b.onCheckProgress?.({ event:"server-check",server_id:rows[0]!.server_id,stage:"complete",ping_status:"failed",latency_ms:0,availability:"untested" });
+    await t.renderOnce();
+    const row = t.captureCharFrame().split("\n").find(line => line.includes("Tokyo"))!;
+    expect(row).toContain("50.0");
+    expect(row).toMatch(/ошибка\s*$/);
+    finish(reply()); await settle();
+  } finally { await app.close(); }
+});
+
+test("presentation: only assigned workers spin while remaining servers wait in the queue", async () => {
+ const t = await createTestRenderer({ width:120, height:30 });
+ const b = new FakeBackend();
+ b.rows = Array.from({length:6},(_,i)=>({...rows[0]!,server_id:`srv_${String.fromCharCode(97+i).repeat(27)}`,display_name:`Node ${i}`}));
+ let finish!: (r:Reply)=>void;
+ b.hold = {action:"servers/check-batch",promise:new Promise(r=>finish=r)};
+ const app = new App(t.renderer,b);
+ const event = (i:number,stage:"start"|"complete"): CheckProgress => ({event:"server-check",server_id:b.rows[i]!.server_id,stage,ping_status:stage==="start"?"untested":"ready",latency_ms:stage==="start"?0:12,availability:stage==="start"?"untested":"ready"});
+ try {
+  await app.perform("status"); t.mockInput.pressKey("v"); await settle();
+  t.mockInput.pressKey("a"); await settle();
+  for(let i=0;i<5;i++) b.onCheckProgress?.(event(i,"start"));
+  await t.renderOnce();
+  let lines=t.captureCharFrame().split("\n").filter(s=>s.includes("Node "));
+  expect(lines.filter(s=>s.includes("подготовка"))).toHaveLength(5);
+  expect(lines.find(s=>s.includes("Node 5"))).toContain("в очереди");
+  expect(lines.find(s=>s.includes("Node 5"))).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+  b.onCheckProgress?.(event(0,"complete")); b.onCheckProgress?.(event(5,"start"));
+  await t.renderOnce();
+  lines=t.captureCharFrame().split("\n").filter(s=>s.includes("Node "));
+  expect(lines.filter(s=>s.includes("подготовка"))).toHaveLength(5);
+  expect(lines.find(s=>s.includes("Node 0"))).toContain("готов");
+  expect(lines.find(s=>s.includes("Node 5"))).toContain("подготовка");
+ } finally { finish(reply()); await settle(); await app.close(); }
+});

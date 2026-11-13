@@ -498,14 +498,13 @@ test("actual native Go bridge supports new actions and bounded catalog responses
 });
 
 test("cached errors do not masquerade as tests in the current session", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const server = {
     ...rows[0],
     status: "failed",
     ping_status: "failed",
     download_mbps: undefined,
   };
-  const app = new App(t.renderer, {
+  const app = new AppState({
     request: async (action) => ({
       ...reply(),
       catalog:
@@ -518,19 +517,19 @@ test("cached errors do not masquerade as tests in the current session", async ()
     }),
     close: async () => {},
   });
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("ошибка");
-    expect(t.captureCharFrame()).toContain("не пров.");
+
+    expect(app.servers[0]).toMatchObject({ status: "untested", ping_status: "untested" });
     await app.perform("servers/ping", server.server_id);
-    await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("ошибка");
+
+    expect(app.servers[0]).toMatchObject({ status: "untested", ping_status: "ready", latency_ms: 15 });
     await app.perform("servers/speed", server.server_id);
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("ошибка");
+
+    expect(app.servers[0]?.status).toBe("failed");
   } finally {
     await app.close();
   }
@@ -615,24 +614,19 @@ test("Docker readiness loads the list on an already-open servers screen", async 
 });
 
 test("a successful site check marks a server ready without claiming a speed result", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
-    t.mockInput.pressKey("a");
+    key("a");
     await settle();
-    await t.renderOnce();
-    const row = t
-      .captureCharFrame()
-      .split("\n")
-      .find((line) => line.includes("Amsterdam"))!;
-    expect(row).toContain("готов");
-    expect(row).toContain("да");
-    expect(row).toContain("—");
-    expect(row).not.toContain("50.0");
+
+    expect(app.servers.find(server => server.server_id === rows[1]!.server_id)).toMatchObject({
+      ping_status: "ready", availability: "ready", status: "untested", download_mbps: undefined,
+    });
   } finally {
     await app.close();
   }
@@ -702,78 +696,72 @@ test("stopping Docker also requires confirmation; mouse No does not disconnect",
 });
 
 test("combined checks submit one snapshot once without restarting on navigation", async () => {
-  const t = await createTestRenderer({ width: 100, height: 30 });
   const b = new FakeBackend();
   b.rows = Array.from({ length: 12 }, (_, i) => ({ ...rows[0], server_id: `srv_${String(i).padStart(27, "0")}` }));
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
-    t.mockInput.pressKey("p");
+    key("p");
     await settle();
     const batches = b.calls.filter(c => c.action === "servers/check-batch").map(c => JSON.parse(c.value!).ids);
     expect(batches.map(ids => ids.length)).toEqual([12]);
     expect(new Set(batches.flat()).size).toBe(12);
-    t.mockInput.pressKey("d");
-    t.mockInput.pressKey("v");
+    key("d");
+    key("v");
     await settle();
-    await t.renderOnce();
+
     expect(b.calls.filter(c => c.action === "servers/check-batch")).toHaveLength(1);
-    expect(t.captureCharFrame()).not.toContain("5 потоков");
+    expect(app.batch).toBeUndefined();
   } finally { await app.close(); }
 });
 
 test("batch failure retains the actionable outdated backend explanation", async () => {
-  const t = await createTestRenderer({ width: 120, height: 30 });
   const b = new FakeBackend();
   b.hold = { action: "servers/check-batch", promise: Promise.resolve({ ...reply(), ok: false, reason: "backend-outdated" }) };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
-    t.mockInput.pressKey("p");
+    key("p");
     await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Нужен обновлённый Docker-бэкенд");
-    expect(t.captureCharFrame()).not.toContain("Результаты сохранены");
+
+    expect(app.error).toBe(true);
+    expect(app.recovery).toMatchObject({ action: "servers/check-batch" });
   } finally { await app.close(); }
 });
 
 
 test("ping and site render before batch completion and completed rows stop spinning", async () => {
- const t = await createTestRenderer({ width:120, height:30 });
  const b = new FakeBackend();
  let finish!: (r: Reply) => void;
  b.hold = { action:"servers/check-batch", promise:new Promise(r => finish=r) };
- const app = new App(t.renderer,b);
+ const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
  try {
   await app.perform("status");
-  t.mockInput.pressKey("v"); await settle();
-  t.mockInput.pressKey("p"); await settle();
+  key("v"); await settle();
+  key("p"); await settle();
   const event: CheckProgress = { event:"server-check", server_id:rows[0].server_id, stage:"ping", ping_status:"ready", latency_ms:37, availability:"untested" };
   b.onCheckProgress?.(event);
-  await t.renderOnce();
-  let row=t.captureCharFrame().split("\n").find(s=>s.includes("Tokyo"))!;
-  expect(row).toContain("37");
-  expect(row).not.toContain("да");
-  expect(t.captureCharFrame()).toContain("0/2");
+
+  expect(app.servers.find(s=>s.server_id===rows[0]!.server_id)).toMatchObject({latency_ms:37, ping_status:"ready", availability:"untested"});
+  expect(app.batch).toMatchObject({done:0,total:2});
   b.onCheckProgress?.({...event,stage:"complete",availability:"ready"});
   b.onCheckProgress?.({...event,stage:"complete",availability:"ready"});
-  await t.renderOnce();
-  row=t.captureCharFrame().split("\n").find(s=>s.includes("Tokyo"))!;
-  expect(row).toContain("37"); expect(row).toContain("да");
-  expect(row).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
-  expect(t.captureCharFrame()).toContain("1/2");
-  t.mockInput.pressKey("d"); await t.renderOnce();
-  expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
-  t.mockInput.pressKey("v"); await t.renderOnce();
-  expect(t.captureCharFrame()).toContain("37");
+  expect(app.servers.find(s=>s.server_id===rows[0]!.server_id)).toMatchObject({latency_ms:37,availability:"ready"});
+  expect(app.batch).toMatchObject({done:1,total:2});
+  expect(app.batch?.running.has(rows[0]!.server_id)).toBe(false);
+  key("d"); expect(app.screen).toBe("diagnostics");
+  key("v"); expect(app.servers.find(s=>s.server_id===rows[0]!.server_id)?.latency_ms).toBe(37);
   finish({...reply(),catalog:{status:"ok",servers:rows.map(s=>({...s,ping_status:"ready",availability:"ready",latency_ms:37}))}});
-  await settle(); await t.renderOnce();
-  expect(t.captureCharFrame()).toContain("2/2");
-  expect(t.captureCharFrame()).not.toContain("3/2");
+  await settle();
+  expect(app.batch).toBeUndefined();
+  expect(app.servers.every(s=>s.ping_status==="ready" && s.availability==="ready")).toBe(true);
   expect(b.calls.filter(c=>c.action==="servers/check-batch")).toHaveLength(1);
  } finally { finish(reply()); await settle(); await app.close(); }
 });
@@ -833,50 +821,44 @@ test("any listed server can be selected without successful measurements", async 
 });
 
 test("failed current ping overrides an earlier successful speed result", async () => {
-  const t = await createTestRenderer({ width: 110, height: 24 });
   const b = new FakeBackend();
-  const app = new App(t.renderer,b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
     await app.perform("servers/speed",rows[0]!.server_id);
     let finish!: (r: Reply) => void;
     b.hold = { action: "servers/check-batch", promise: new Promise(r => finish=r) };
-    t.mockInput.pressKey("a");
+    key("a");
     await settle();
     b.onCheckProgress?.({ event:"server-check",server_id:rows[0]!.server_id,stage:"complete",ping_status:"failed",latency_ms:0,availability:"untested" });
-    await t.renderOnce();
-    const row = t.captureCharFrame().split("\n").find(line => line.includes("Tokyo"))!;
-    expect(row).toContain("50.0");
-    expect(row).toMatch(/ошибка\s*$/);
+
+    expect(app.servers.find(s=>s.server_id===rows[0]!.server_id)).toMatchObject({download_mbps:50,ping_status:"failed"});
     finish(reply()); await settle();
   } finally { await app.close(); }
 });
 
 test("only assigned workers spin while remaining servers wait in the queue", async () => {
- const t = await createTestRenderer({ width:120, height:30 });
  const b = new FakeBackend();
  b.rows = Array.from({length:6},(_,i)=>({...rows[0]!,server_id:`srv_${String.fromCharCode(97+i).repeat(27)}`,display_name:`Node ${i}`}));
  let finish!: (r:Reply)=>void;
  b.hold = {action:"servers/check-batch",promise:new Promise(r=>finish=r)};
- const app = new App(t.renderer,b);
+ const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
  const event = (i:number,stage:"start"|"complete"): CheckProgress => ({event:"server-check",server_id:b.rows[i]!.server_id,stage,ping_status:stage==="start"?"untested":"ready",latency_ms:stage==="start"?0:12,availability:stage==="start"?"untested":"ready"});
  try {
-  await app.perform("status"); t.mockInput.pressKey("v"); await settle();
-  t.mockInput.pressKey("a"); await settle();
+  await app.perform("status"); key("v"); await settle();
+  key("a"); await settle();
   for(let i=0;i<5;i++) b.onCheckProgress?.(event(i,"start"));
-  await t.renderOnce();
-  let lines=t.captureCharFrame().split("\n").filter(s=>s.includes("Node "));
-  expect(lines.filter(s=>s.includes("подготовка"))).toHaveLength(5);
-  expect(lines.find(s=>s.includes("Node 5"))).toContain("в очереди");
-  expect(lines.find(s=>s.includes("Node 5"))).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+
+  expect(app.batch?.running.size).toBe(5);
+  expect(app.batch?.running.has(b.rows[5]!.server_id)).toBe(false);
   b.onCheckProgress?.(event(0,"complete")); b.onCheckProgress?.(event(5,"start"));
-  await t.renderOnce();
-  lines=t.captureCharFrame().split("\n").filter(s=>s.includes("Node "));
-  expect(lines.filter(s=>s.includes("подготовка"))).toHaveLength(5);
-  expect(lines.find(s=>s.includes("Node 0"))).toContain("готов");
-  expect(lines.find(s=>s.includes("Node 5"))).toContain("подготовка");
+  expect(app.batch?.running.size).toBe(5);
+  expect(app.batch?.completed.has(b.rows[0]!.server_id)).toBe(true);
+  expect(app.batch?.running.has(b.rows[5]!.server_id)).toBe(true);
  } finally { finish(reply()); await settle(); await app.close(); }
 });
 
