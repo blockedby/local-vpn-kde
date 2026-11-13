@@ -47,7 +47,11 @@ export class SummaryView {
       this.summary.content = `${stages[state.recovery?.stage ?? "unknown"]}\n${state.recovery?.message ?? "Проверьте состояние."}`;
     }
     if (state.screen === "confirm") {
-      if (state.confirmation === "subscription") {
+      if (state.confirmation === "fastest" && state.fastestCandidate) {
+        const candidate = state.fastestCandidate;
+        const age = Math.max(0, Math.floor((Date.now() - candidate.measuredAt) / 1000));
+        this.summary.content = `${candidate.name} · ${candidate.speed.toFixed(1)} Мбит/с · ${age} с назад\nПереключение прервёт текущие соединения. Выбрать сервер?`;
+      } else if (state.confirmation === "subscription") {
         this.summary.height = 4;
         this.summary.content =
           "Настроить native-пакет?\nСистемное окно Polkit попросит подтверждение администратора.\nПервичный выбор сервера может занять несколько минут.\nVPN не запускается; автозапуск не изменяется.";

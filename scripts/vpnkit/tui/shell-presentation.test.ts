@@ -284,3 +284,17 @@ test("shell: long task overlays scroll and outside clicks cannot activate worksp
     expect(app.items()[app.selected]?.key).toBe("n");
   } finally { app.tasks.clear(); await app.close(); }
 });
+
+test("shell: fastest server confirmation names the measurement and defaults to No", async () => {
+  const { terminal: t, app } = await fixture(80,24);
+  try {
+    const server = app.servers[1]!;
+    Object.assign(server, { status: "ready", download_mbps: 82.5, availability: "ready" });
+    app.measurementTimes.set(server.server_id, Date.now());
+    app.onKey({ name: "b", preventDefault() {} }); await t.renderOnce();
+    const frame = t.captureCharFrame();
+    expect(frame).toContain("Node 01"); expect(frame).toContain("82.5 Мбит/с");
+    expect(frame).toContain("Переключение прервёт");
+    expect(app.selected).toBe(0);
+  } finally { await app.close(); }
+});

@@ -137,3 +137,30 @@ test("polling overlaps measurements, avoids duplicate polls and resumes after ex
     expect(backend.calls.filter(call => call.action === "status")).toHaveLength(3);
   } finally { await state.close(); }
 });
+
+test("fastest confirmation uses session results, rejects unreachable sites and retains the named choice", async () => {
+  const backend = new FakeBackend(); const state = new AppState(backend);
+  try {
+    await state.perform("status");
+    state.servers = [
+      { ...rows[0]!, status: "ready", download_mbps: 80, availability: "failed" },
+      { ...rows[1]!, status: "ready", download_mbps: 50, availability: "ready" },
+      { ...rows[0]!, server_id: "srv_z", display_name: "Other", status: "ready", download_mbps: 50, availability: "untested" },
+    ];
+    state.catalogLoaded = true;
+    key(state, "b"); expect(state.notice).toContain("[t]");
+    for (const server of state.servers) state.measurementTimes.set(server.server_id, Date.now());
+    key(state, "b");
+    expect(state.fastestCandidate?.id).toBe(rows[1]!.server_id);
+    expect(state.selected).toBe(0);
+    key(state, "return");
+    expect(backend.calls.some(call => call.action === "servers/select")).toBe(false);
+    state.servers[1]!.selected = true;
+    key(state, "b"); expect(state.notice).toContain("уже выбран");
+    state.servers[1]!.selected = false;
+    key(state, "b");
+    state.servers[2]!.download_mbps = 100; // A later result must not change the confirmed identity.
+    key(state, "y"); await settle();
+    expect(backend.calls.filter(call => call.action === "servers/select").at(-1)?.value).toBe(rows[1]!.server_id);
+  } finally { await state.close(); }
+});

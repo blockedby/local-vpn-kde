@@ -100,6 +100,7 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
     for (const item of lifecycle) actions.push({ ...item, scope: "global", run: () => { item.run(); state.paint(); } });
   const items = state.items();
   if (state.screen === "servers") {
+    add("servers:fastest", ["b"], "Подключить самый быстрый", "server-table", () => state.confirmFastest());
     add("servers:details", ["l"], "Подробности сервера", "server-table", () => state.open("details"), state.serverID ? undefined : "Нет выбранного сервера.");
     const ping = items.find(item => item.key === "p");
     add(ping?.id ?? "servers:ping-alias", ["p"], "Ping всех + сайт", "server-table", () => void state.runBatch("ping"),

@@ -159,7 +159,8 @@ export class AppState {
   error = false;
   selected = 0;
   serverMenu = false;
-  confirmation: "disconnect" | "stop" | "subscription" = "disconnect";
+  confirmation: "disconnect" | "stop" | "subscription" | "fastest" = "disconnect";
+  fastestCandidate?: { id: string; name: string; speed: number; measuredAt: number };
   pendingSubscription?: string;
   serverID?: string;
   servers: Server[] = [];
@@ -450,6 +451,17 @@ export class AppState {
     )
       void this.perform(this.catalogStale ? "servers/refresh" : "servers/list");
     // Diagnostics immediately displays the cached evidence. Refresh is explicit.
+  }
+  confirmFastest() {
+    if (!this.ready() || this.catalogStale) { this.notify("Сначала запустите сервис и обновите список серверов.", true); return; }
+    const candidates = this.servers.filter(server => this.measurementTimes.has(server.server_id) && server.status === "ready" && server.availability !== "failed" && server.download_mbps !== undefined && Number.isFinite(server.download_mbps) && server.download_mbps >= 0)
+      .sort((a, b) => b.download_mbps! - a.download_mbps! || a.server_id.localeCompare(b.server_id));
+    const server = candidates[0];
+    if (!server) { this.notify("Нет подходящих замеров этой сессии. Запустите тест скорости [t]."); return; }
+    if (server.selected) { this.notify("Самый быстрый сервер уже выбран."); return; }
+    this.fastestCandidate = { id: server.server_id, name: server.display_name, speed: server.download_mbps!, measuredAt: this.measurementTimes.get(server.server_id)! };
+    this.confirmation = "fastest";
+    this.open("confirm");
   }
   confirm(action: "disconnect" | "stop") {
     this.confirmation = action;

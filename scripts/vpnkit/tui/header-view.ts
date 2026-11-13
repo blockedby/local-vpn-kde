@@ -15,9 +15,10 @@ export class HeaderView {
     const server = state.servers.find(s => s.selected);
     const mode = state.status?.routing_mode === "smart" ? "умный" : state.status?.routing_mode === "strict" ? "строгий" : "неизвестно";
     const stale = state.checked && Date.now() - state.checked > 15000 ? " · устарел" : "";
-    const symbol = status.title === "VPN подключён" ? "●" : status.title === "VPN отключён" ? "○" : "◌";
+    const symbol = [...state.tasks.values()].some(task => ["start", "disconnect", "toggle-mode", "servers/select"].includes(task.action)) ? "◌" : status.title === "VPN подключён" ? "●" : status.title === "VPN отключён" ? "○" : "◌";
     const runtime = state.nativePreviewOnly() ? "NATIVE PREVIEW" : state.status?.runtime === "native" ? "NATIVE" : state.status ? "Docker" : "?";
-    const title = status.title === "VPN подключён" ? "подключён" : status.title === "VPN отключён" ? "отключён" : status.title;
+    const applying = [...state.tasks.values()].find(task => ["start", "disconnect", "toggle-mode", "servers/select"].includes(task.action));
+    const title = applying ? state.actionLabel(applying.action) + "…" : status.title === "VPN подключён" ? "подключён" : status.title === "VPN отключён" ? "отключён" : status.title;
     const core = `◈ VPNKIT · ${runtime}${demo ? " · ДЕМО" : ""} ${symbol} ${title}${stale}`;
     const live = server && state.liveSpeeds.get(server.server_id);
     const ping = server?.latency_ms === undefined ? undefined : `${server.latency_ms} мс`;
