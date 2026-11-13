@@ -24,7 +24,7 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
       : state.screen === "confirm" && state.confirmation === "subscription" ? "subscription"
       : state.screen === "cancel-confirm" ? "tasks"
       : state.screen === "retry-confirm" ? "recovery"
-      : ["details", "confirm", "tasks", "recovery"].includes(state.screen) ? state.tab : "servers", state.screen !== "confirm"), state.closing ? "Закрываем приложение." : undefined, "none", true);
+      : ["autostart", "details", "confirm", "tasks", "recovery"].includes(state.screen) ? state.tab : "servers", state.screen !== "confirm"), state.closing ? "Закрываем приложение." : undefined, "none", true);
   add("global:quit-control", ["ctrl+c"], "Выход", "global", () => void state.close(), state.closing || state.disposed ? "Закрываем приложение." : undefined, "none", true);
   if (editor) {
     add("editor:submit", ["return"], "Сохранить", "editor", () => {

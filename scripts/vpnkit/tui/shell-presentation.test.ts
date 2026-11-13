@@ -256,6 +256,11 @@ test("shell: settings show stored and actual state and profiles use available ro
     expect(frame).toContain("шлюз да, VPN нет"); expect(frame).toContain("служба активна/вкл");
     expect(frame).toContain(app.target); expect(frame).toContain("Режим: строгий");
     expect(frame).not.toContain("[a] Автозапуск");
+    t.resize(60, 16); app.open("autostart"); await t.renderOnce();
+    frame = t.captureCharFrame();
+    expect(frame).toContain("Автозапуск"); expect(frame).toContain("[g]"); expect(frame).toContain("[a]");
+    app.onKey({ name: "escape", preventDefault() {} }); expect(app.screen).toBe("settings");
+    t.resize(80, 24);
     app.profiles = { active: "p0", items: Array.from({ length: 9 }, (_, i) => ({ id: `p${i}`, name: `Profile ${i}`, kind: "server" as const, count: i, stale: i === 2 })) };
     app.screen = "profiles"; app.tab = "profiles"; app.paint(); await t.renderOnce();
     frame = t.captureCharFrame();

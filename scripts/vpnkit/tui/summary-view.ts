@@ -77,7 +77,7 @@ export class SummaryView {
         ? "Автозапуск native-службы при входе в графическую сессию"
         : "При входе в KDE";
       this.summary.height = nativeAutostart ? 5 : 4;
-      this.summary.content = `${login}\nОтключение автозапуска не отключает работающий VPN.\nПоследний запуск: ${results[state.autostart?.last_result ?? ""] ?? "не выполнялся"}${nativeAutostart ? "\nРежим: native-служба" : ""}\n${state.serviceStateLabel()}`;
+      this.summary.content = `${login}\nОтключение автозапуска не отключает работающий VPN.\nПоследний запуск: ${results[state.autostart?.last_result ?? ""] ?? "не выполнялся"}${nativeAutostart ? "\nРежим: native-служба" : ""}\n${state.serviceStateLabel().replace("; ", ";\n")}`;
     }
     if (state.screen === "subscription") {
       this.summary.height = state.nativeInstalled() ? 4 : state.nativeMode() ? 3 : 2;

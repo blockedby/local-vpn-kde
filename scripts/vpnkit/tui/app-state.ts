@@ -22,7 +22,7 @@ export type Screen =
   | "diagnostics"
   | "target"
   | "confirm";
-export const overlayScreens: readonly Screen[] = ["details", "confirm", "cancel-confirm", "retry-confirm", "profile-remove", "tasks", "recovery", "subscription", "target", "profile-name", "profile-source"];
+export const overlayScreens: readonly Screen[] = ["autostart", "details", "confirm", "cancel-confirm", "retry-confirm", "profile-remove", "tasks", "recovery", "subscription", "target", "profile-name", "profile-source"];
 export const isOverlay = (screen: Screen) => overlayScreens.includes(screen);
 export type Batch = "ping" | "speed" | "availability";
 const phases: Record<string, string> = {

@@ -58,7 +58,7 @@ export class OverlayView {
       this.dialog.width = width; this.dialog.height = height;
       this.dialog.left = Math.floor((this.renderer.terminalWidth - width) / 2);
       this.dialog.top = Math.floor((this.renderer.terminalHeight - height) / 2);
-      this.dialog.title = ["confirm", "profile-remove", "cancel-confirm", "retry-confirm"].includes(state.screen) ? " Подтверждение " : state.screen === "details" ? " Сервер " : state.screen === "tasks" ? " Задачи " : state.screen === "recovery" ? " Восстановление " : " Редактор ";
+      this.dialog.title = ["confirm", "profile-remove", "cancel-confirm", "retry-confirm"].includes(state.screen) ? " Подтверждение " : state.screen === "autostart" ? " Автозапуск " : state.screen === "details" ? " Сервер " : state.screen === "tasks" ? " Задачи " : state.screen === "recovery" ? " Восстановление " : " Редактор ";
       const items = state.items();
       const availableRows = Math.max(1, height - 2 - summaryHeight);
       this.listOffset = Math.max(0, Math.min(Math.max(0, items.length - availableRows), state.selected - availableRows + 1));
