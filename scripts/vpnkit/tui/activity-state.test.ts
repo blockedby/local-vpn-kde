@@ -121,3 +121,20 @@ test("queued measurement is dropped if service stops, but status can still be re
     expect(state.history.some(item => item.outcome.includes("условия изменились"))).toBe(true);
   } finally { finish(reply()); await state.close(); }
 });
+
+test("cancelled catalog refresh invalidates queued snapshots and rereads cached state", async () => {
+  const backend = new FakeBackend(); const state = new AppState(backend);
+  let finish!: (result: Reply) => void;
+  try {
+    await state.perform("status"); await state.perform("servers/list");
+    backend.hold = { action: "servers/refresh", promise: new Promise(resolve => { finish = resolve; }) };
+    const refresh = state.perform("servers/refresh");
+    await state.perform("servers/ping", rows[0]!.server_id);
+    state.cancelTask([...state.tasks.keys()][0]!);
+    finish({ ...reply(), ok: false, reason: "cancelled" }); await refresh; await settle();
+    expect(backend.calls.filter(call => call.action === "servers/refresh")).toHaveLength(1);
+    expect(backend.calls.some(call => call.action === "servers/ping")).toBe(false);
+    expect(backend.calls.filter(call => call.action === "servers/list")).toHaveLength(2);
+    expect(state.history.some(item => item.outcome.includes("условия изменились"))).toBe(true);
+  } finally { finish(reply()); await state.close(); }
+});

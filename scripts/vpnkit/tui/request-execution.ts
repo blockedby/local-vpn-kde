@@ -232,6 +232,7 @@ export async function perform(
     } finally {
       const completed = state.tasks.get(requestID);
       cancelRequested = !!completed?.cancelRequested;
+      if (cancelRequested && ["servers/refresh", "subscription", "profiles/add", "profiles/open", "profiles/remove"].includes(action)) state.catalogRevision++;
       state.tasks.delete(requestID);
       if (completed && action !== "status") {
         state.history.unshift({ action, started: completed.started, ended: Date.now(), phase: state.batch && completed.measurement ? `${state.batch.done}/${state.batch.total}` : completed.phase, outcome: reply?.reason === "cancelled" ? "Отменено" : reply?.ok ? "Завершено" : `Ошибка: ${reply ? failure(reply.reason, reply.code, state.status?.runtime) : "связь потеряна"}` });
@@ -254,14 +255,14 @@ export async function perform(
         await state.perform("servers/list");
       }
     }
-    if (cancelRequested && !state.closing && !state.backendOffline && !queueable.has(action)) {
+    if (cancelRequested && !state.closing && !state.backendOffline && (!queueable.has(action) || action === "servers/refresh")) {
       await state.perform("status");
-      if (action.startsWith("profiles/")) await state.perform("profiles/list");
+      if (action.startsWith("profiles/") || action === "servers/refresh" && state.profiles) await state.perform("profiles/list");
       if (action === "subscription") await state.perform("subscription/read");
-      if ((action === "servers/select" || action === "subscription" || action.startsWith("profiles/")) && state.ready()) await state.perform("servers/list");
+      if ((action === "servers/select" || action === "servers/refresh" || action === "subscription" || action.startsWith("profiles/")) && state.ready()) await state.perform("servers/list");
       if (action === "autostart/set") await state.perform("autostart/read");
     }
-    if(action==="servers/refresh" && reply?.ok && state.profiles){
+    if(action==="servers/refresh" && reply?.ok && state.profiles && !cancelRequested){
       await state.perform("profiles/list");
       if(state.profiles.items.find(p=>p.id===state.profiles?.active)?.stale) state.notify("Источник недоступен. Показаны ранее сохранённые серверы.");
     }

@@ -159,7 +159,8 @@ test("fastest confirmation uses session results, rejects unreachable sites and r
     key(state, "b"); expect(state.notice).toContain("уже выбран");
     state.servers[1]!.selected = false;
     key(state, "b");
-    state.servers[2]!.download_mbps = 100; // A later result must not change the confirmed identity.
+    // A late batch reply must not change the identity already shown to the user.
+    state.updateCatalog({ ...reply(), catalog: { status: "ok", servers: [{ ...state.servers[2]!, download_mbps: 100 }] } }, "servers/speed-batch");
     key(state, "y"); await settle();
     expect(backend.calls.filter(call => call.action === "servers/select").at(-1)?.value).toBe(rows[1]!.server_id);
   } finally { await state.close(); }
