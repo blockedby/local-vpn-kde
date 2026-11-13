@@ -122,7 +122,7 @@ resolver=pathlib.Path('/etc/resolv.conf').read_text(errors='replace')
 _,status=run(['/usr/bin/local-vpn-kde','autostart','--runtime','native','--action','status'])
 try: result=json.loads(status)
 except ValueError: result={}
-safe_status={k:result.get(k) for k in ('last_result','last_reason')}
+safe_status={k:result.get(k) for k in ('last_result','last_reason','last_gateway_reason')}
 dns_ok=run(['getent','ahostsv4','www.gstatic.com'])[0]==0
 https_ok=run(['curl','--silent','--fail','--max-time','10','https://www.gstatic.com/generate_204','-o','/dev/null'])[0]==0
 upstream_script="""
