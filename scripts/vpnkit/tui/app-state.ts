@@ -74,12 +74,16 @@ export class AppState {
   measurementTimes = new Map<string, number>();
   speedSamples = new Map<string, number[]>();
   sessionMeasurements = new Map<string, { at: number; ping?: number; speed?: number; site: string }[]>();
-  recordMeasurement(server: Server) {
+  /** Records only the values the finished action measured; the row also carries older results. */
+  recordMeasurement(server: Server, action: Action = "servers/speed-batch") {
+    const batch = action === "servers/speed-batch", check = action === "servers/check-batch";
+    const ping = batch || check || action === "servers/ping", speed = batch || action === "servers/speed";
+    const site = batch || check || action === "servers/availability";
     if (!this.sessionMeasurements.has(server.server_id) && this.sessionMeasurements.size >= 100)
       this.sessionMeasurements.delete(this.sessionMeasurements.keys().next().value!);
     const entries = this.sessionMeasurements.get(server.server_id) ?? [];
-    entries.unshift({ at: Date.now(), ping: server.ping_status === "ready" ? server.latency_ms : undefined,
-      speed: server.status === "ready" ? server.download_mbps : undefined, site: server.availability ?? "untested" });
+    entries.unshift({ at: Date.now(), ping: ping && server.ping_status === "ready" ? server.latency_ms : undefined,
+      speed: speed && server.status === "ready" ? server.download_mbps : undefined, site: site ? server.availability ?? "untested" : "untested" });
     entries.length = Math.min(entries.length, 4);
     this.sessionMeasurements.set(server.server_id, entries);
   }

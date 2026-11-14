@@ -131,7 +131,7 @@ export async function perform(
       state.updateCatalog(reply, action);
       if (reply.ok && ["servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch"].includes(action)) {
         const ids = new Set([...(reply.catalog?.servers ?? []).map(row => row.server_id), ...(reply.catalog?.server ? [reply.catalog.server.server_id] : [])]);
-        for (const server of state.servers) if (ids.has(server.server_id)) state.recordMeasurement(server);
+        for (const server of state.servers) if (ids.has(server.server_id)) state.recordMeasurement(server, action);
       }
       if (selectionRevision !== state.selectionRevision && reply.catalog?.servers)
         state.servers.forEach(row => row.selected = row.server_id === currentSelection);
