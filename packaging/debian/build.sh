@@ -19,7 +19,7 @@ go run ./packaging/arch/generate-units "$stage/usr/lib/systemd/system"
 (
   cd scripts/vpnkit/tui
   bun install --frozen-lockfile --production
-  bun build --compile --target=bun-linux-x64-baseline --define 'process.env.VPNKIT_COMPILED_NATIVE="1"' index.ts --outfile "$stage/usr/share/local-vpn-kde/scripts/vpnkit/tui/vpnkit-tui"
+  bun build --compile --target=bun-linux-x64-baseline --external '@opentui/core-linux-x64-musl' --define 'process.env.VPNKIT_COMPILED_NATIVE="1"' index.ts --outfile "$stage/usr/share/local-vpn-kde/scripts/vpnkit/tui/vpnkit-tui"
 )
 install -Dm755 /usr/bin/sing-box "$stage/usr/libexec/local-vpn-kde/sing-box"
 install -Dm755 packaging/arch/local-vpn-kde "$stage/usr/bin/local-vpn-kde"
