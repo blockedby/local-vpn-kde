@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 image=${VPNKIT_NATIVE_ARCH_TEST_IMAGE:-vpnkit-native-arch-lab}
-expected=${VPNKIT_NATIVE_ARCH_TEST_IMAGE_ID:-sha256:2a081ef716ac1099601e5f0fef6a12a153549084998c9822492c452875985a9e}
+expected=${VPNKIT_NATIVE_ARCH_TEST_IMAGE_ID:-sha256:6363d665cd774a2a71f0512ad61d4f2be584a0ff189a882afa07f33c1355d22e}
 name="vpnkit-native-arch-package-${UID}-$$-${RANDOM}"
 tmp=$(mktemp -d)
 cleanup() { docker rm -f "$name" >/dev/null 2>&1 || true; rm -rf -- "$tmp"; }
@@ -26,6 +26,8 @@ docker cp "$root/packaging/portable/build.py" "$name:/work/portable-src/packagin
 # Network access is used only for frozen public Go/Bun build dependencies.
 timeout --kill-after=5s 900s docker exec "$name" bash -lc '
 set -Eeuo pipefail
+# Record the toolchain so a stale lab image is visible in the log.
+printf "lab_toolchain bun=%s go=%s sing-box=%s\n" "$(bun --version)" "$(go env GOVERSION)" "$(pacman -Q sing-box | cut -d" " -f2)"
 cp -a /input/. /work/
 chown -R builder:builder /work
 runuser -u builder -- bash -lc "cd /work && makepkg --noconfirm --cleanbuild"
