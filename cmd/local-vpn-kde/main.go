@@ -386,6 +386,10 @@ func main() {
 				fmt.Fprintln(os.Stderr, "networkmanager_failure=previous-profile-active")
 			}
 			fmt.Fprintln(os.Stderr, "NetworkManager:", err)
+		} else if len(os.Args) > 1 && os.Args[1] == "native-serve" {
+			fmt.Fprintln(os.Stderr, localvpn.NativeGatewayFailureMessage(err))
+		} else if len(os.Args) > 1 && os.Args[1] == "autostart" {
+			fmt.Fprintln(os.Stderr, localvpn.AutostartFailureMessage(err))
 		} else if len(os.Args) > 1 && (os.Args[1] == "host-smoke" || os.Args[1] == "native-network" || os.Args[1] == "native-desktop") {
 			// Preserve network preflight and lifecycle reasons in the service
 			// journal; these commands never include subscription configuration.

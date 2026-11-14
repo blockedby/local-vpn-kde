@@ -78,10 +78,10 @@ The installer requests administrator access when needed, installs build and runt
 
 ## First connection
 
-1. Open **Profiles** (`c`, «Профили») and add a subscription or an individual server link.
+1. Press `c` and add the first subscription or an individual server link. Once installed native mode is configured, `c` opens Profiles («Профили»); you can also reach that tab with `Tab`.
 2. Open **Servers** (`v`, «Серверы»). Refresh a new subscription (`r`), then select and apply a server.
 3. Optionally check latency, website access or speed from the server list.
-4. Return to the main screen. Start the service if it is stopped, then choose **Connect VPN** (`s`, «Подключить VPN»).
+4. Start the service if it is stopped, then choose **Connect VPN** (`s`, «Подключить VPN»).
 
 **“Service ready” does not mean “VPN connected.”** The service can run checks while the system VPN connection remains off.
 
@@ -91,14 +91,24 @@ The installer requests administrator access when needed, installs build and runt
 | :---: | :--- |
 | `s` / `x` | Start the service or connect the VPN / disconnect the VPN, depending on state |
 | `v` | Servers and connection checks |
-| `c` | Profiles: subscriptions and individual servers |
+| `c` | Profiles in installed native mode with a configured subscription; otherwise the subscription editor |
 | `m` | Strict / smart routing |
 | `a` | Autostart settings |
 | `d` | Diagnostics |
+| `i` | Settings |
+| `Tab` / `Shift+Tab` | Next / previous tab |
+| `/` | Filter names; `Enter` keeps it, `Esc` clears it |
+| `p` / `t` | Ping and site / speed and site for shown servers |
+| `T` / `b` | Test the row under the cursor / offer the fastest measured shown server |
+| `o` / `[` / `]` / `\` | Cycle sort / choose column / reverse direction |
+| `l` | Details for the row under the cursor |
+| `:` / `Ctrl+P` | Search commands |
+| `j` / `k` | Activity / cancel operation |
+| `X` | Remove the active profile after confirmation |
 | `z` | Stop the native service and its VPN |
 | `Esc` / `q` | Go back / exit the interface |
 
-Menus also support arrow keys, `Tab` and `Enter`. Available actions depend on the screen and service state.
+The server table opens first; the status line names the selected server and the footer shows available keys. Arrow keys move the cursor, `Enter` selects and `?` opens help. `a` opens autostart; it does not run ping. Checks can overlap or wait in a queue; `j` shows running, queued and finished operations. Available actions depend on service state.
 
 Autostart settings apply at the next KDE login. You can start only the gateway or also connect the VPN. Disabling autostart leaves the current connection running; the TUI does not open automatically at login. Docker may also restart an already-running gateway through its container restart policy.
 

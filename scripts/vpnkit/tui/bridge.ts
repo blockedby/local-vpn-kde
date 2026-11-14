@@ -264,6 +264,7 @@ export class Bridge implements Backend {
 }
 
 export class DemoBackend implements Backend {
+  onSpeedProgress?: (result: SpeedProgress, requestId?: string) => void;
   onProgress?: (phase: string, requestId?: string) => void;
   onCheckProgress?: (result: CheckProgress, requestId?: string) => void;
   private active = new Map<string, { cancelled: boolean }>();
@@ -285,6 +286,7 @@ export class DemoBackend implements Backend {
     "Frankfurt",
     "Tokyo",
     "New York",
+    "Москва",
   ].map((display_name, i) => ({
     server_id: `srv_${String(i).padStart(27, "0")}`,
     display_name,
@@ -348,11 +350,17 @@ export class DemoBackend implements Backend {
       if (action === "servers/check-batch" || action === "servers/speed-batch") {
         const ids: string[] = JSON.parse(value ?? "{}").ids;
         const rows = this.servers.filter((s) => ids.includes(s.server_id));
-        for (const row of rows) {
+        for (const [index, row] of rows.entries()) {
+          this.onCheckProgress?.({ event: "server-check", server_id: row.server_id, stage: "start", ping_status: "untested", latency_ms: 0, availability: "untested" }, id);
+          for (let elapsed = 0; elapsed < (action === "servers/speed-batch" ? 3200 : 1200); elapsed += 100) {
+            await Bun.sleep(100);
+            if (task.cancelled) return { ok: false, reason: "cancelled", code: null, status: { ...this.status } };
+          }
           row.ping_status = "ready";
-          row.latency_ms = 20;
+          row.latency_ms = 20 + index * 7;
           row.availability = "ready";
-          if (action === "servers/speed-batch") { row.status = "ready"; row.download_mbps = 90; row.download_seconds = 3; row.downloaded_bytes = 33750000; }
+          if (action === "servers/speed-batch") { row.status = "ready"; row.download_mbps = 90 - index * 12; row.download_seconds = 3; row.downloaded_bytes = 33750000; }
+          this.onCheckProgress?.({ event: "server-check", server_id: row.server_id, stage: "complete", ping_status: "ready", latency_ms: row.latency_ms, availability: "ready", status: row.status, download_mbps: row.download_mbps, download_seconds: row.download_seconds, downloaded_bytes: row.downloaded_bytes }, id);
         }
         reply.catalog = { status: "ok", servers: structuredClone(rows) };
       }
@@ -366,6 +374,13 @@ export class DemoBackend implements Backend {
           server.latency_ms = 15 + i * 11;
         }
         if (action === "servers/speed") {
+          for (let sample = 1; sample <= 6; sample++) {
+            await Bun.sleep(150);
+            if (task.cancelled) return { ok: false, reason: "cancelled", code: null, status: { ...this.status } };
+            const mbps = (90 - i * 12) * (0.4 + 0.1 * sample);
+            this.onSpeedProgress?.({ event: "speed-progress", server_id: server.server_id,
+              elapsed_seconds: sample * 0.15, downloaded_bytes: Math.round(mbps * sample * 0.15 * 125000), download_mbps: mbps }, id);
+          }
           server.status = "ready";
           server.download_mbps = 90 - i * 12;
           server.download_seconds = 3;

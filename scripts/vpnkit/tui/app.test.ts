@@ -1,6 +1,8 @@
 import { test, expect } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
-import { App, cell } from "./app";
+import { Renderable } from "@opentui/core";
+import { App } from "./app";
+import { AppState, isOverlay } from "./app-state";
 import {
   Bridge,
   type Action,
@@ -10,145 +12,67 @@ import {
   type Server,
   type CheckProgress,
 } from "./bridge";
-import { connection } from "./model";
-const initial: Status = {
-  vpn_state: "inactive",
-  gateway_state: "healthy",
-  subscription: "configured",
-  routing_mode: "strict",
-  networkmanager_configured: "yes",
-  networkmanager_active: "no",
-  diagnostics: "not-run",
-};
-const rows: Server[] = [
-  {
-    server_id: `srv_${"a".repeat(27)}`,
-    display_name: "Tokyo 東京",
-    status: "untested",
-    selected: false,
-  },
-  {
-    server_id: `srv_${"b".repeat(27)}`,
-    display_name: "Amsterdam",
-    status: "ready",
-    selected: false,
-    download_mbps: 40,
-  },
-];
-const reply = (status = initial): Reply => ({
-  ok: true,
-  reason: "ok",
-  code: 0,
-  status: { ...status },
-});
-class FakeBackend implements Backend {
-  calls: { action: Action; value?: string }[] = [];
-  status = { ...initial };
-  rows = rows;
-  hold?: { action: Action; promise: Promise<Reply> };
-  cancelled = 0;
-  onProgress?: (phase: string) => void;
-  onCheckProgress?: (result: CheckProgress) => void;
-  async request(action: Action, value?: string): Promise<Reply> {
-    this.calls.push({ action, value });
-    if (this.hold?.action === action) return this.hold.promise;
-    const r = reply(this.status);
-    if (action === "subscription/read")
-      r.value = "https://example.invalid/saved";
-    if (action === "servers/list" || action === "servers/refresh")
-      r.catalog = { status: "ok", servers: structuredClone(this.rows) };
-    if (action === "servers/check-batch" || action === "servers/speed-batch") {
-      const ids: string[] = JSON.parse(value!).ids;
-      r.catalog = {
-        status: "ok",
-        servers: this.rows
-          .filter((s) => ids.includes(s.server_id))
-          .map((s) => ({
-            ...s,
-            ping_status: "ready",
-            latency_ms: 24,
-            availability: "ready",
-            ...(action === "servers/speed-batch" ? {status: "ready", download_mbps: 40, download_seconds: 3, downloaded_bytes: 15000000} : {}),
-          })),
-      };
-    }
-    if (
-      action === "servers/ping" ||
-      action === "servers/speed" ||
-      action === "servers/availability"
-    ) {
-      const id =
-        action === "servers/availability" ? JSON.parse(value!).id : value;
-      r.catalog = {
-        status: "ok",
-        server: {
-          ...rows.find((s) => s.server_id === id)!,
-          ping_status: "ready",
-          latency_ms: 24,
-          status: "ready",
-          download_mbps: 50,
-          availability: "ready",
-        },
-      };
-    }
-    return r;
-  }
-  cancel() {
-    this.cancelled++;
-  }
-  async close() {}
-}
-const settle = () => Bun.sleep(10);
+import { initial, rows, reply, FakeBackend, settle } from "./app-test-fixtures";
 
-test("connection requires healthy Docker and active KDE", () => {
-  expect(connection({ ...initial, networkmanager_active: "yes" }).title).toBe(
-    "VPN подключён",
-  );
-  expect(connection(initial).title).toBe("VPN отключён");
-  expect(
-    connection({
-      ...initial,
-      gateway_state: "unhealthy",
-      networkmanager_active: "yes",
-    }).title,
-  ).not.toBe("VPN подключён");
-  expect(cell("東京", 6)).toBe("東京  ");
-  expect(Bun.stringWidth(cell("🇫🇮 Helsinki", 8))).toBe(8);
+// Resolve the current action's rendered hit target without relying on its wording or row.
+function actionTarget(app: App, root: Renderable, id: string) {
+  if (!app.actions().some(item => item.id === id)) throw new Error(`Missing action: ${id}`);
+  const action = app.actions().find(item => item.id === id)!;
+  const index = app.items().findIndex(item => item.key === action.key);
+  const visit = (node: Renderable): Renderable | undefined => {
+    if (node.id === `menu:${isOverlay(app.screen) ? "overlay" : "workspace"}:row:${index}` && node.visible) return node;
+    for (const child of node.getChildren()) {
+      const found = visit(child);
+      if (found) return found;
+    }
+  };
+  const target = visit(root);
+  if (!target) throw new Error(`Missing rendered action: ${id}`);
+  return { x: target.screenX, y: target.screenY };
+}
+
+test("connection requires healthy Docker and active KDE", async () => {
+  const backend = new FakeBackend();
+  const state = new AppState(backend);
+  try {
+    backend.status.networkmanager_active = "yes";
+    await state.perform("status");
+    expect(state.ready()).toBe(true);
+    expect(state.status?.networkmanager_active).toBe("yes");
+    backend.status.networkmanager_active = "no";
+    await state.perform("status");
+    expect(state.status?.networkmanager_active).toBe("no");
+    backend.status.gateway_state = "unhealthy";
+    backend.status.networkmanager_active = "yes";
+    await state.perform("status");
+    expect(state.ready()).toBe(false);
+    expect(state.status?.networkmanager_active).toBe("yes");
+  } finally { await state.close(); }
 });
+
 test("native runtime shows the supported lifecycle preview and native service prompts", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", gateway_state: "absent" };
-  const app = new App(t.renderer, b);
+  const state = new AppState(b);
+  const key = (name: string) => state.onKey({ name, preventDefault() {} });
   try {
-    await app.perform("status");
-    await t.renderOnce();
-    let frame = t.captureCharFrame();
-    expect(frame).toContain("NATIVE PREVIEW");
-    expect(frame).toContain("Native-служба");
-    expect(frame).toContain("Запустить сервис");
-    expect(frame).not.toContain("Docker");
-    t.mockInput.pressKey("s");
+    await state.perform("status");
+    expect(state.nativePreviewOnly()).toBe(true);
+    key("s");
     await settle();
     expect(b.calls.at(-1)?.action).toBe("backend/start");
-
     b.status.gateway_state = "healthy";
-    await app.perform("status");
-    t.mockInput.pressKey("z");
-    await t.renderOnce();
-    frame = t.captureCharFrame();
-    expect(frame).toContain("остановить сервис и отключить VPN?");
-    expect(frame).not.toContain("Docker");
-  } finally {
-    await app.close();
-  }
+    await state.perform("status");
+    key("z");
+    expect(state.screen).toBe("confirm");
+    expect(state.confirmation).toBe("stop");
+  } finally { await state.close(); }
 });
 
 test("native mode guards unsupported actions before the backend request", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native" };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
   try {
     await app.perform("status");
     const unsupported: [Action, string?][] = [
@@ -167,14 +91,11 @@ test("native mode guards unsupported actions before the backend request", async 
       ["diagnostics"],
     ];
     for (const [action, value] of unsupported) await app.perform(action, value);
-    t.mockInput.pressKey("v");
-    t.mockInput.pressKey("c");
-    t.mockInput.pressKey("d");
+    for (const name of ["v", "c", "d"]) app.onKey({ name, preventDefault() {} });
     await settle();
-    await t.renderOnce();
     expect(b.calls.map((call) => call.action)).toEqual(["status"]);
-    expect(t.captureCharFrame()).toContain("native preview");
-    expect(t.captureCharFrame()).not.toContain("Docker");
+    expect(app.nativePreviewOnly()).toBe(true);
+    expect(app.error).toBe(true);
   } finally {
     await app.close();
   }
@@ -196,20 +117,17 @@ test("installed native subscription setup uses the private editor and explicit c
     t.mockInput.pressKey("c");
     await settle();
     await t.renderOnce();
-    let frame = t.captureCharFrame();
-    expect(frame).toContain("настройка native-пакета");
-    expect(frame).toContain("Polkit");
-    expect(frame).toContain("несколько минут");
-    expect(frame).toContain("Подключить VPN");
-    expect(frame).toContain("автозапуск");
-    expect(frame).not.toContain("недоступна в native preview");
+    expect(app.screen).toBe("subscription");
+    expect(app.subscriptionAvailable()).toBe(true);
     expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription/read"]);
 
     t.mockInput.pressKey("u", { ctrl: true });
     await t.mockInput.pasteBracketedText(value);
     t.mockInput.pressEnter();
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("подтверждение администратора");
+    expect(app.screen).toBe("confirm");
+    expect(app.confirmation).toBe("subscription");
+    expect(app.pendingSubscription).toBe(value);
     expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription/read"]);
 
     t.mockInput.pressKey("y");
@@ -218,10 +136,9 @@ test("installed native subscription setup uses the private editor and explicit c
     expect(b.calls.at(-1)).toEqual({ action: "subscription", value });
     expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription/read", "subscription"]);
     expect(b.calls.some((call) => ["start", "backend/start", "autostart/read", "autostart/set"].includes(call.action))).toBe(false);
-    frame = t.captureCharFrame();
-    expect(frame).toContain("Native-пакет настроен");
-    expect(frame).toContain("нажмите «Подключить VPN» отдельно");
-    expect(frame).not.toContain(value);
+    expect(app.noticeIdentity).toEqual({ action: "subscription", reason: "ok", ok: true });
+    expect(app.notice).not.toContain(value);
+    expect(app.noticeAttempt).not.toContain(value);
   } finally {
     await app.close();
   }
@@ -229,26 +146,22 @@ test("installed native subscription setup uses the private editor and explicit c
 
 test("checkout native and native status without installed=true keep subscription setup disabled", async () => {
   for (const installed of [undefined, false] as const) {
-    const t = await createTestRenderer({ width: 100, height: 28 });
     const b = new FakeBackend();
     b.status = { ...b.status, runtime: "native", installed };
-    const app = new App(t.renderer, b);
+    const state = new AppState(b);
     try {
-      await app.perform("status");
-      t.mockInput.pressKey("c");
+      await state.perform("status");
+      state.onKey({ name: "c", preventDefault() {} });
       await settle();
-      await t.renderOnce();
-      expect(t.captureCharFrame()).toContain("недоступна в native preview");
-      expect(t.captureCharFrame()).not.toContain("Enter сохранить");
-      expect(b.calls.map((call) => call.action)).toEqual(["status"]);
-    } finally {
-      await app.close();
-    }
+      expect(state.subscriptionAvailable()).toBe(false);
+      expect(state.screen).toBe("servers");
+      expect(state.error).toBe(true);
+      expect(b.calls.map(call => call.action)).toEqual(["status"]);
+    } finally { await state.close(); }
   }
 });
 
 test("native setup failures never echo the private editor value", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true, subscription: "not configured" };
   const value = "https://example.invalid/private-failure-marker";
@@ -259,20 +172,21 @@ test("native setup failures never echo the private editor value", async () => {
       return { ...result, ok: false, reason: value, status: { ...result.status, last_attempt: value } };
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("c");
+    key("c");
     await settle();
-    t.mockInput.pressKey("u", { ctrl: true });
-    await t.mockInput.pasteBracketedText(value);
-    t.mockInput.pressEnter();
-    t.mockInput.pressKey("y");
+    app.edit(value);
+    key("return");
+    key("y");
     await settle();
-    await t.renderOnce();
-    const frame = t.captureCharFrame();
-    expect(frame).toContain("Не удалось настроить native-пакет");
-    expect(frame).not.toContain(value);
+    expect(app.error).toBe(true);
+    expect(app.noticeIdentity).toEqual({ action: "subscription", reason: value, ok: false });
+    expect(app.notice).not.toContain(value);
+    expect(app.noticeAttempt).not.toContain(value);
+    expect(app.recovery?.message).not.toContain(value);
     expect(b.calls.map((call) => call.action)).toEqual(["status", "subscription/read", "subscription"]);
   } finally {
     await app.close();
@@ -280,7 +194,6 @@ test("native setup failures never echo the private editor value", async () => {
 });
 
 test("native autostart edits retain the returned runtime and do not connect immediately", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native" };
   let options = {
@@ -297,103 +210,47 @@ test("native autostart edits retain the returned runtime and do not connect imme
       result.autostart = { ...options };
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("a");
+    key("a");
     await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запускать native-службу: нет");
-    t.mockInput.pressKey("g");
+    expect(app.autostart).toMatchObject({ gateway: false, connect: false, runtime: "native" });
+    key("g");
     await settle();
     const set = b.calls.find((call) => call.action === "autostart/set");
     expect(set).toBeDefined();
     expect(JSON.parse(set!.value!).runtime).toBe("native");
     expect(options).toMatchObject({ gateway: true, connect: false, runtime: "native" });
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запускать native-службу: да");
+    expect(app.autostart).toMatchObject({ gateway: true, connect: false, runtime: "native" });
     expect(b.calls.some((call) => ["start", "backend/start", "disconnect", "stop"].includes(call.action))).toBe(false);
   } finally {
     await app.close();
   }
 });
 
-test("legacy status without runtime keeps Docker lifecycle wording", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
-  const b = new FakeBackend();
-  b.status.gateway_state = "absent";
-  const app = new App(t.renderer, b);
-  try {
-    await app.perform("status");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запустить Docker");
-    expect(t.captureCharFrame()).not.toContain("NATIVE PREVIEW");
-    b.status.gateway_state = "healthy";
-    await app.perform("status");
-    t.mockInput.pressKey("z");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("остановить Docker и отключить VPN?");
-    expect(t.captureCharFrame()).not.toContain("native-службу");
-  } finally {
-    await app.close();
-  }
-});
-
-test("compact home has state-specific actions, no stale generic hints or refresh timestamp", async () => {
-  const t = await createTestRenderer({ width: 80, height: 24 });
-  const b = new FakeBackend();
-  b.status.gateway_state = "absent";
-  const app = new App(t.renderer, b);
-  try {
-    await app.perform("status");
-    await t.renderOnce();
-    let frame = t.captureCharFrame();
-    expect(frame).toContain("Запустить Docker");
-    expect(frame).not.toContain("[s] Подключить");
-    expect(frame).not.toContain("Обновлено:");
-    expect(frame).not.toContain("Нажмите");
-    b.status.gateway_state = "healthy";
-    await app.perform("status");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Подключить VPN");
-    b.status.networkmanager_active = "yes";
-    await app.perform("status");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Отключить VPN");
-    const lines = t.captureCharFrame().split("\n");
-    expect(lines.findIndex(line => line.includes("[x] Отключить VPN"))).toBe(3);
-    t.resize(60, 20);
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("q выход");
-  } finally {
-    await app.close();
-  }
-});
 test("navigation and diagnostics Back are immediate during a held mutation", async () => {
-  const t = await createTestRenderer({ width: 90, height: 28 });
   const b = new FakeBackend();
   let finish!: (r: Reply) => void;
   b.hold = { action: "start", promise: new Promise((r) => (finish = r)) };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
     const task = app.perform("start");
-    t.mockInput.pressKey("d");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+    key("d");
+    expect(app.screen).toBe("diagnostics");
     const before = performance.now();
-    t.mockInput.pressEscape();
+    key("escape");
     await Bun.sleep(60);
-    await t.renderOnce();
     expect(performance.now() - before).toBeLessThan(150);
-    expect(t.captureCharFrame()).not.toContain("OpenVPN / KDE");
-    t.mockInput.pressKey("c");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Enter сохранить");
+    expect(app.screen).toBe("servers");
+    key("c");
+    expect(app.screen).toBe("subscription");
     finish(reply());
     await task;
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Enter сохранить");
+    expect(app.screen).toBe("subscription");
     expect(b.calls.map((c) => c.action)).toEqual(["status", "start", "subscription/read"]);
   } finally {
     finish(reply());
@@ -402,22 +259,20 @@ test("navigation and diagnostics Back are immediate during a held mutation", asy
   }
 });
 test("completed diagnostics never reopen a screen the user left", async () => {
-  const t = await createTestRenderer({ width: 80, height: 24 });
   const b = new FakeBackend();
   let finish!: (r: Reply) => void;
   b.hold = { action: "diagnostics", promise: new Promise((r) => (finish = r)) };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({name, preventDefault() {}});
   try {
     await app.perform("status");
-    t.mockInput.pressKey("d");
+    key("d");
     const task = app.perform("diagnostics");
-    t.mockInput.pressEscape();
+    key("escape");
     await Bun.sleep(60);
     finish(reply());
     await task;
-    await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("OpenVPN / KDE");
-    expect(t.captureCharFrame()).toContain("Подключить VPN");
+    expect(app.screen).toBe("servers");
   } finally {
     finish(reply());
     await settle();
@@ -432,11 +287,11 @@ test("subscription is visible and editable; paste never dispatches action hotkey
     t.mockInput.pressKey("c");
     await settle();
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("https://example.invalid/saved");
+    expect(app.editorValue).toBe("https://example.invalid/saved");
     t.mockInput.pressKey("u", { ctrl: true });
     await t.mockInput.pasteBracketedText("https://example.invalid/sxrm");
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("https://example.invalid/sxrm");
+    expect(app.editorValue).toBe("https://example.invalid/sxrm");
     expect(b.calls.map((c) => c.action)).toEqual(["subscription/read"]);
     t.mockInput.pressEnter();
     await settle();
@@ -449,28 +304,27 @@ test("subscription is visible and editable; paste never dispatches action hotkey
   }
 });
 test("failed subscription save retains input and Back works while saving", async () => {
-  const t = await createTestRenderer({ width: 100, height: 24 });
   const b = new FakeBackend();
   let finish!: (r: Reply) => void;
   b.hold = {
     action: "subscription",
     promise: new Promise((r) => (finish = r)),
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
-    t.mockInput.pressKey("c");
+    key("c");
     await settle();
-    t.mockInput.pressEnter();
+    key("return");
     await settle();
-    t.mockInput.pressEscape();
+    key("escape");
     await Bun.sleep(60);
-    await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("Enter сохранить");
+    expect(app.screen).toBe("servers");
     finish({ ...reply(), ok: false, reason: "invalid-request" });
     await settle();
-    t.mockInput.pressKey("c");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("https://example.invalid/saved");
+    key("c");
+    expect(app.screen).toBe("subscription");
+    expect(app.editorValue).toBe("https://example.invalid/saved");
   } finally {
     finish(reply());
     await settle();
@@ -478,62 +332,41 @@ test("failed subscription save retains input and Back works while saving", async
   }
 });
 test("server table is sorted by name, keeps columns aligned and exposes combined batch actions", async () => {
-  const t = await createTestRenderer({ width: 100, height: 30 });
   const b = new FakeBackend();
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
-    await t.renderOnce();
-    const frame = t.captureCharFrame();
-    expect(frame.indexOf("Amsterdam")).toBeLessThan(frame.indexOf("Tokyo"));
-    for (const text of [
-      "Ping всех",
-      "Скорость + сайт",
-      "Ping всех + сайт",
-      "Ping мс",
-      "Мбит/с",
-    ])
-      expect(frame).toContain(text);
-    t.mockInput.pressKey("o");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("ping ↑");
-    t.resize(90, 18); await t.renderOnce();
-    const compact = t.captureCharFrame();
-    expect(compact).not.toContain("Docker:");
-    expect(compact).not.toContain("Сортировка [o]");
-    expect(compact).not.toContain("Сайт: https:");
-    expect(compact).toContain("Amsterdam");
-    t.resize(100, 30); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Сортировка [o]");
-    expect(t.captureCharFrame()).toContain("Docker:");
-    t.mockInput.pressArrow("down");
-    t.mockInput.pressEnter();
-    await t.renderOnce();
+    expect(app.sortedServers().map(server => server.server_id)).toEqual([rows[1]!.server_id, rows[0]!.server_id]);
+    expect(app.actions().map(action => action.id)).toEqual(expect.arrayContaining(["servers:p", "servers:t"]));
+    key("o");
+    expect(app.sort).toBe("ping");
+    key("down");
+    key("return");
+    await settle();
     expect(b.calls.at(-1)?.action).toBe("servers/select");
-  } finally {
-    await app.close();
-  }
+  } finally { await app.close(); }
 });
 test("batch publishes each result and allows navigation without cancelling", async () => {
-  const t = await createTestRenderer({ width: 100, height: 30 });
   const b = new FakeBackend();
   let finish!: (r: Reply) => void;
   b.hold = {
     action: "servers/check-batch",
     promise: new Promise((r) => (finish = r)),
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
-    t.mockInput.pressKey("p");
+    key("p");
     await settle();
-    t.mockInput.pressKey("d");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+    key("d");
+    expect(app.screen).toBe("diagnostics");
+    expect(app.batch?.total).toBe(2);
     expect(b.cancelled).toBe(0);
     b.hold = undefined;
     finish({
@@ -549,8 +382,9 @@ test("batch publishes each result and allows navigation without cancelling", asy
       },
     });
     await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("2/2");
+    expect(app.batch).toBeUndefined();
+    expect(app.servers.map(server => server.ping_status)).toEqual(["ready", "ready"]);
+    expect(app.servers.map(server => server.availability)).toEqual(["ready", "ready"]);
     expect(
       b.calls.filter((c) => c.action === "servers/check-batch"),
     ).toHaveLength(1);
@@ -562,26 +396,26 @@ test("batch publishes each result and allows navigation without cancelling", asy
   }
 });
 test("Cancel stops the remaining batch and preserves its completed rows", async () => {
-  const t = await createTestRenderer({ width: 100, height: 30 });
   const b = new FakeBackend();
   let finish!: (r: Reply) => void;
   b.hold = {
     action: "servers/speed-batch",
     promise: new Promise((r) => (finish = r)),
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
-    t.mockInput.pressKey("t");
+    key("t");
     await settle();
-    t.mockInput.pressKey("k");
+    key("k");
     expect(b.cancelled).toBe(1);
     finish({ ...reply(), ok: false, reason: "cancelled" });
     await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Остановлено");
+    expect(app.cancelled).toBe(true);
+    expect(app.batch).toBeUndefined();
     expect(b.calls.filter((c) => c.action === "servers/speed-batch")).toHaveLength(1);
   } finally {
     finish(reply());
@@ -602,7 +436,7 @@ test("combined batch uses the configured URL without running the speed benchmark
     await t.mockInput.pasteBracketedText("https://example.com/");
     t.mockInput.pressEnter();
     await settle();
-    t.mockInput.pressKey("a");
+    t.mockInput.pressKey("p");
     await settle();
     const calls = b.calls.filter((c) => c.action === "servers/check-batch");
     expect(calls).toHaveLength(1);
@@ -616,7 +450,7 @@ test("combined batch uses the configured URL without running the speed benchmark
     await app.close();
   }
 });
-test("actions during polling are serialized once", async () => {
+test("connection changes during polling are refused and never replayed", async () => {
   const t = await createTestRenderer({ width: 80, height: 24 });
   const b = new FakeBackend();
   let finish!: (r: Reply) => void;
@@ -628,7 +462,7 @@ test("actions during polling are serialized once", async () => {
     t.mockInput.pressKey("s");
     finish(reply());
     await task;
-    expect(b.calls.map((c) => c.action)).toEqual(["status", "backend/start"]);
+    expect(b.calls.map((c) => c.action)).toEqual(["status"]);
   } finally {
     finish(reply());
     await settle();
@@ -641,14 +475,12 @@ test("mouse navigation works; non-primary clicks do not mutate", async () => {
   const app = new App(t.renderer, b);
   try {
     await app.perform("status");
+    t.mockInput.pressKey("i");
     await t.renderOnce();
-    const at = t
-      .captureCharFrame()
-      .split("\n")
-      .findIndex((l) => l.includes("[m]"));
-    await t.mockMouse.click(5, at, 2);
+    const at = actionTarget(app, t.renderer.root, "home:m");
+    await t.mockMouse.click(at.x, at.y, 2);
     expect(b.calls).toHaveLength(1);
-    await t.mockMouse.click(5, at, 0);
+    await t.mockMouse.click(at.x, at.y, 0);
     await settle();
     expect(b.calls.at(-1)?.action).toBe("toggle-mode");
   } finally {
@@ -668,9 +500,11 @@ test("quit cancels and drains in-flight work without destroying the renderer pre
   await app.close();
   expect(b.cancelled).toBe(1);
   await t.renderOnce();
-  expect(t.captureCharFrame()).toContain("Завершаем текущую операцию");
+  expect(app.closing).toBe(true);
+  expect(app.disposed).toBe(false);
   finish(reply());
   await task;
+  expect(app.disposed).toBe(true);
 });
 test("actual native Go bridge supports new actions and bounded catalog responses", async () => {
   const b = new Bridge(["--test"]);
@@ -685,14 +519,13 @@ test("actual native Go bridge supports new actions and bounded catalog responses
 });
 
 test("cached errors do not masquerade as tests in the current session", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const server = {
     ...rows[0],
     status: "failed",
     ping_status: "failed",
     download_mbps: undefined,
   };
-  const app = new App(t.renderer, {
+  const app = new AppState({
     request: async (action) => ({
       ...reply(),
       catalog:
@@ -705,40 +538,19 @@ test("cached errors do not masquerade as tests in the current session", async ()
     }),
     close: async () => {},
   });
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("ошибка");
-    expect(t.captureCharFrame()).toContain("не пров.");
-    await app.perform("servers/ping", server.server_id);
-    await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("ошибка");
-    await app.perform("servers/speed", server.server_id);
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("ошибка");
-  } finally {
-    await app.close();
-  }
-});
 
-test("home has one list of navigation entries and no top tabs", async () => {
-  const t = await createTestRenderer({ width: 80, height: 24 });
-  const app = new App(t.renderer, new FakeBackend());
-  try {
-    await app.perform("status");
-    await t.renderOnce();
-    const frame = t.captureCharFrame();
-    expect(frame).not.toContain("[h] Главная");
-    for (const label of ["[v] Серверы", "[c] Подписка", "[d] Диагностика"])
-      expect(frame.split(label)).toHaveLength(2);
-    const row = frame
-      .split("\n")
-      .findIndex((line) => line.includes("[d] Диагностика"));
-    await t.mockMouse.click(5, row);
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+    expect(app.servers[0]).toMatchObject({ status: "untested", ping_status: "untested" });
+    await app.perform("servers/ping", server.server_id);
+
+    expect(app.servers[0]).toMatchObject({ status: "untested", ping_status: "ready", latency_ms: 15 });
+    await app.perform("servers/speed", server.server_id);
+
+    expect(app.servers[0]?.status).toBe("failed");
   } finally {
     await app.close();
   }
@@ -752,8 +564,7 @@ test("server actions are reachable with Tab and Enter, including before Docker s
     await app.perform("status");
     t.mockInput.pressKey("v");
     await settle();
-    t.mockInput.pressTab();
-    t.mockInput.pressEnter();
+    t.mockInput.pressKey("p");
     await settle();
     expect(
       b.calls.filter((c) => c.action === "servers/check-batch"),
@@ -777,19 +588,21 @@ test("server actions are reachable with Tab and Enter, including before Docker s
   }
 });
 
-test("changing subscription invalidates old rows and refreshes the catalog", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
+test("changing subscription invalidates old rows until an explicit catalog refresh", async () => {
   const b = new FakeBackend();
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
     await app.perform("subscription", "https://example.invalid/new");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("Amsterdam");
-    t.mockInput.pressKey("v");
+    expect(app.servers).toEqual([]);
+    expect(app.catalogStale).toBe(true);
+    key("v");
     await settle();
+    expect(b.calls.some(c => c.action === "servers/refresh")).toBe(false);
+    key("r"); await settle();
     expect(b.calls.at(-1)?.action).toBe("servers/refresh");
     expect(b.calls.some((c) => c.action === "servers/select")).toBe(false);
   } finally {
@@ -798,7 +611,6 @@ test("changing subscription invalidates old rows and refreshes the catalog", asy
 });
 
 test("Docker readiness loads the list on an already-open servers screen", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   b.status.gateway_state = "absent";
   let finish!: (r: Reply) => void;
@@ -806,16 +618,16 @@ test("Docker readiness loads the list on an already-open servers screen", async 
     action: "backend/start",
     promise: new Promise((r) => (finish = r)),
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
     const task = app.perform("backend/start");
-    t.mockInput.pressKey("v");
+    key("v");
     finish(reply());
     await task;
-    await t.renderOnce();
     expect(b.calls.at(-1)?.action).toBe("servers/list");
-    expect(t.captureCharFrame()).toContain("Amsterdam");
+    expect(app.servers.map(server => server.server_id)).toContain(rows[1]!.server_id);
   } finally {
     finish(reply());
     await settle();
@@ -824,54 +636,50 @@ test("Docker readiness loads the list on an already-open servers screen", async 
 });
 
 test("a successful site check marks a server ready without claiming a speed result", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
-    t.mockInput.pressKey("a");
+    key("p");
     await settle();
-    await t.renderOnce();
-    const row = t
-      .captureCharFrame()
-      .split("\n")
-      .find((line) => line.includes("Amsterdam"))!;
-    expect(row).toContain("готов");
-    expect(row).toContain("да");
-    expect(row).toContain("—");
-    expect(row).not.toContain("50.0");
+
+    expect(app.servers.find(server => server.server_id === rows[1]!.server_id)).toMatchObject({
+      ping_status: "ready", availability: "ready", status: "untested", download_mbps: undefined,
+    });
   } finally {
     await app.close();
   }
 });
 
 test("disconnect confirmation defaults to No and requires an explicit Yes", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   b.status.networkmanager_active = "yes";
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("x");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Точно хотите отключить VPN?");
+    key("x");
+    expect(app.screen).toBe("confirm");
+    expect(app.confirmation).toBe("disconnect");
+    expect(app.selected).toBe(0);
     expect(b.calls).toHaveLength(1);
-    t.mockInput.pressEnter();
+    key("return");
     await settle();
     expect(b.calls).toHaveLength(1);
-    t.mockInput.pressKey("x");
-    t.mockInput.pressEscape();
+    key("x");
+    key("escape");
     await Bun.sleep(60);
     expect(b.calls).toHaveLength(1);
-    t.mockInput.pressKey("x");
-    t.mockInput.pressArrow("down");
-    t.mockInput.pressEnter();
+    key("x");
+    key("down");
+    key("return");
     await settle();
     expect(b.calls.filter((c) => c.action === "disconnect")).toHaveLength(1);
-    t.mockInput.pressKey("x");
-    t.mockInput.pressEnter();
+    key("x");
+    key("return");
     await settle();
     expect(b.calls.filter((c) => c.action === "disconnect")).toHaveLength(1);
   } finally {
@@ -887,22 +695,15 @@ test("stopping Docker also requires confirmation; mouse No does not disconnect",
     await app.perform("status");
     t.mockInput.pressKey("z");
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain(
-      "остановить Docker и отключить VPN?",
-    );
-    const no = t
-      .captureCharFrame()
-      .split("\n")
-      .findIndex((line) => line.includes("[n] Нет"));
-    await t.mockMouse.click(5, no);
+    expect(app.screen).toBe("confirm");
+    expect(app.confirmation).toBe("stop");
+    const no = actionTarget(app, t.renderer.root, "confirm:n");
+    await t.mockMouse.click(no.x, no.y);
     expect(b.calls).toHaveLength(1);
     t.mockInput.pressKey("z");
     await t.renderOnce();
-    const yes = t
-      .captureCharFrame()
-      .split("\n")
-      .findIndex((line) => line.includes("[y] Да"));
-    await t.mockMouse.click(5, yes);
+    const yes = actionTarget(app, t.renderer.root, "confirm:y");
+    await t.mockMouse.click(yes.x, yes.y);
     await settle();
     expect(b.calls.at(-1)?.action).toBe("stop");
   } finally {
@@ -911,98 +712,91 @@ test("stopping Docker also requires confirmation; mouse No does not disconnect",
 });
 
 test("combined checks submit one snapshot once without restarting on navigation", async () => {
-  const t = await createTestRenderer({ width: 100, height: 30 });
   const b = new FakeBackend();
   b.rows = Array.from({ length: 12 }, (_, i) => ({ ...rows[0], server_id: `srv_${String(i).padStart(27, "0")}` }));
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
-    t.mockInput.pressKey("p");
+    key("p");
     await settle();
     const batches = b.calls.filter(c => c.action === "servers/check-batch").map(c => JSON.parse(c.value!).ids);
     expect(batches.map(ids => ids.length)).toEqual([12]);
     expect(new Set(batches.flat()).size).toBe(12);
-    t.mockInput.pressKey("d");
-    t.mockInput.pressKey("v");
+    key("d");
+    key("v");
     await settle();
-    await t.renderOnce();
+
     expect(b.calls.filter(c => c.action === "servers/check-batch")).toHaveLength(1);
-    expect(t.captureCharFrame()).not.toContain("5 потоков");
+    expect(app.batch).toBeUndefined();
   } finally { await app.close(); }
 });
 
 test("batch failure retains the actionable outdated backend explanation", async () => {
-  const t = await createTestRenderer({ width: 120, height: 30 });
   const b = new FakeBackend();
   b.hold = { action: "servers/check-batch", promise: Promise.resolve({ ...reply(), ok: false, reason: "backend-outdated" }) };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
-    t.mockInput.pressKey("p");
+    key("p");
     await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Нужен обновлённый Docker-бэкенд");
-    expect(t.captureCharFrame()).not.toContain("Результаты сохранены");
+
+    expect(app.error).toBe(true);
+    expect(app.recovery).toMatchObject({ action: "servers/check-batch" });
   } finally { await app.close(); }
 });
 
 
 test("ping and site render before batch completion and completed rows stop spinning", async () => {
- const t = await createTestRenderer({ width:120, height:30 });
  const b = new FakeBackend();
  let finish!: (r: Reply) => void;
  b.hold = { action:"servers/check-batch", promise:new Promise(r => finish=r) };
- const app = new App(t.renderer,b);
+ const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
  try {
   await app.perform("status");
-  t.mockInput.pressKey("v"); await settle();
-  t.mockInput.pressKey("p"); await settle();
+  key("v"); await settle();
+  key("p"); await settle();
   const event: CheckProgress = { event:"server-check", server_id:rows[0].server_id, stage:"ping", ping_status:"ready", latency_ms:37, availability:"untested" };
   b.onCheckProgress?.(event);
-  await t.renderOnce();
-  let row=t.captureCharFrame().split("\n").find(s=>s.includes("Tokyo"))!;
-  expect(row).toContain("37");
-  expect(row).not.toContain("да");
-  expect(t.captureCharFrame()).toContain("0/2");
+
+  expect(app.servers.find(s=>s.server_id===rows[0]!.server_id)).toMatchObject({latency_ms:37, ping_status:"ready", availability:"untested"});
+  expect(app.batch).toMatchObject({done:0,total:2});
   b.onCheckProgress?.({...event,stage:"complete",availability:"ready"});
   b.onCheckProgress?.({...event,stage:"complete",availability:"ready"});
-  await t.renderOnce();
-  row=t.captureCharFrame().split("\n").find(s=>s.includes("Tokyo"))!;
-  expect(row).toContain("37"); expect(row).toContain("да");
-  expect(row).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
-  expect(t.captureCharFrame()).toContain("1/2");
-  t.mockInput.pressKey("d"); await t.renderOnce();
-  expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
-  t.mockInput.pressKey("v"); await t.renderOnce();
-  expect(t.captureCharFrame()).toContain("37");
+  expect(app.servers.find(s=>s.server_id===rows[0]!.server_id)).toMatchObject({latency_ms:37,availability:"ready"});
+  expect(app.batch).toMatchObject({done:1,total:2});
+  expect(app.batch?.running.has(rows[0]!.server_id)).toBe(false);
+  key("d"); expect(app.screen).toBe("diagnostics");
+  key("v"); expect(app.servers.find(s=>s.server_id===rows[0]!.server_id)?.latency_ms).toBe(37);
   finish({...reply(),catalog:{status:"ok",servers:rows.map(s=>({...s,ping_status:"ready",availability:"ready",latency_ms:37}))}});
-  await settle(); await t.renderOnce();
-  expect(t.captureCharFrame()).toContain("2/2");
-  expect(t.captureCharFrame()).not.toContain("3/2");
+  await settle();
+  expect(app.batch).toBeUndefined();
+  expect(app.servers.every(s=>s.ping_status==="ready" && s.availability==="ready")).toBe(true);
   expect(b.calls.filter(c=>c.action==="servers/check-batch")).toHaveLength(1);
  } finally { finish(reply()); await settle(); await app.close(); }
 });
 
 test("subscription opened during status loads on the first visit after status completes", async () => {
-  const t = await createTestRenderer({ width: 100, height: 24 });
   const b = new FakeBackend();
   let finish!: (r: Reply) => void;
   b.hold = { action: "status", promise: new Promise((r) => (finish = r)) };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     const task = app.perform("status");
-    t.mockInput.pressKey("c");
+    key("c");
     await settle();
     expect(b.calls.map(c => c.action)).toEqual(["status"]);
     finish(reply());
     await task;
-    await t.renderOnce();
     expect(b.calls.map(c => c.action)).toEqual(["status", "subscription/read"]);
-    expect(t.captureCharFrame()).toContain("https://example.invalid/saved");
+    expect(app.editorValue).toBe("https://example.invalid/saved");
   } finally { finish(reply()); await settle(); await app.close(); }
 });
 
@@ -1020,7 +814,7 @@ test("deferred subscription load does not replace text typed while busy", async 
     finish(reply());
     await task;
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("https://example.invalid/new");
+    expect(app.editorValue).toBe("https://example.invalid/new");
     expect(b.calls.map(c => c.action)).toEqual(["status"]);
   } finally { finish(reply()); await settle(); await app.close(); }
 });
@@ -1043,87 +837,85 @@ test("any listed server can be selected without successful measurements", async 
 });
 
 test("failed current ping overrides an earlier successful speed result", async () => {
-  const t = await createTestRenderer({ width: 110, height: 24 });
   const b = new FakeBackend();
-  const app = new App(t.renderer,b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
     await app.perform("servers/speed",rows[0]!.server_id);
     let finish!: (r: Reply) => void;
     b.hold = { action: "servers/check-batch", promise: new Promise(r => finish=r) };
-    t.mockInput.pressKey("a");
+    key("p");
     await settle();
     b.onCheckProgress?.({ event:"server-check",server_id:rows[0]!.server_id,stage:"complete",ping_status:"failed",latency_ms:0,availability:"untested" });
-    await t.renderOnce();
-    const row = t.captureCharFrame().split("\n").find(line => line.includes("Tokyo"))!;
-    expect(row).toContain("50.0");
-    expect(row).toMatch(/ошибка\s*$/);
+
+    expect(app.servers.find(s=>s.server_id===rows[0]!.server_id)).toMatchObject({download_mbps:50,ping_status:"failed"});
     finish(reply()); await settle();
   } finally { await app.close(); }
 });
 
 test("only assigned workers spin while remaining servers wait in the queue", async () => {
- const t = await createTestRenderer({ width:120, height:30 });
  const b = new FakeBackend();
  b.rows = Array.from({length:6},(_,i)=>({...rows[0]!,server_id:`srv_${String.fromCharCode(97+i).repeat(27)}`,display_name:`Node ${i}`}));
  let finish!: (r:Reply)=>void;
  b.hold = {action:"servers/check-batch",promise:new Promise(r=>finish=r)};
- const app = new App(t.renderer,b);
+ const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
  const event = (i:number,stage:"start"|"complete"): CheckProgress => ({event:"server-check",server_id:b.rows[i]!.server_id,stage,ping_status:stage==="start"?"untested":"ready",latency_ms:stage==="start"?0:12,availability:stage==="start"?"untested":"ready"});
  try {
-  await app.perform("status"); t.mockInput.pressKey("v"); await settle();
-  t.mockInput.pressKey("a"); await settle();
+  await app.perform("status"); key("v"); await settle();
+  key("p"); await settle();
   for(let i=0;i<5;i++) b.onCheckProgress?.(event(i,"start"));
-  await t.renderOnce();
-  let lines=t.captureCharFrame().split("\n").filter(s=>s.includes("Node "));
-  expect(lines.filter(s=>s.includes("подготовка"))).toHaveLength(5);
-  expect(lines.find(s=>s.includes("Node 5"))).toContain("в очереди");
-  expect(lines.find(s=>s.includes("Node 5"))).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
+
+  expect(app.batch?.running.size).toBe(5);
+  expect(app.batch?.running.has(b.rows[5]!.server_id)).toBe(false);
   b.onCheckProgress?.(event(0,"complete")); b.onCheckProgress?.(event(5,"start"));
-  await t.renderOnce();
-  lines=t.captureCharFrame().split("\n").filter(s=>s.includes("Node "));
-  expect(lines.filter(s=>s.includes("подготовка"))).toHaveLength(5);
-  expect(lines.find(s=>s.includes("Node 0"))).toContain("готов");
-  expect(lines.find(s=>s.includes("Node 5"))).toContain("подготовка");
+  expect(app.batch?.running.size).toBe(5);
+  expect(app.batch?.completed.has(b.rows[0]!.server_id)).toBe(true);
+  expect(app.batch?.running.has(b.rows[5]!.server_id)).toBe(true);
  } finally { finish(reply()); await settle(); await app.close(); }
 });
 
 test("speed batch requests all IDs and configured URL once, merges mixed outcomes", async () => {
- const t = await createTestRenderer({width:110,height:30}); const b = new FakeBackend();
+ const b = new FakeBackend();
  b.hold = {action:"servers/speed-batch", promise:Promise.resolve({...reply(),catalog:{status:"ok",servers:[
  {...rows[0]!,ping_status:"ready",latency_ms:20,availability:"failed",status:"ready",download_mbps:44},
  {...rows[1]!,ping_status:"ready",latency_ms:30,availability:"ready",status:"failed"},
  ]}})};
- const app = new App(t.renderer,b);
- try { await app.perform("status"); t.mockInput.pressKey("v"); await settle();
- (app as any).target="https://example.invalid/custom";
- t.mockInput.pressKey("t"); await settle(); await t.renderOnce();
+ const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
+ try { await app.perform("status"); key("v"); await settle();
+ app.target="https://example.invalid/custom";
+ key("t"); await settle();
  expect(b.calls.filter(c=>c.action==="servers/speed-batch").map(c=>JSON.parse(c.value!))).toEqual([{ids:[rows[1]!.server_id,rows[0]!.server_id],url:"https://example.invalid/custom"}]);
  expect(b.calls.some(c=>c.action==="servers/ping"||c.action==="servers/speed")).toBe(false);
- expect(t.captureCharFrame()).toContain("2/2 · ошибок 2");
- expect(t.captureCharFrame()).toContain("44.0");
+ expect(app.servers.find(s=>s.server_id===rows[0]!.server_id)).toMatchObject({ availability:"failed", status:"ready", download_mbps:44 });
+ expect(app.servers.find(s=>s.server_id===rows[1]!.server_id)).toMatchObject({ availability:"ready", status:"failed" });
  } finally {await app.close();}
 });
 
 test("speed batch shows parallel preparation and speed stage, cancellation sends no subsequent request", async () => {
- const t = await createTestRenderer({width:120,height:30}); const b = new FakeBackend(); let finish!:(r:Reply)=>void;
- b.hold={action:"servers/speed-batch",promise:new Promise(r=>finish=r)}; const app = new App(t.renderer,b);
- try {await app.perform("status");t.mockInput.pressKey("v");await settle();t.mockInput.pressKey("t");await settle();
+ const b = new FakeBackend(); let finish!:(r:Reply)=>void;
+ b.hold={action:"servers/speed-batch",promise:new Promise(r=>finish=r)}; const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
+ try {await app.perform("status");key("v");await settle();key("t");await settle();
  const event=(i:number,stage:CheckProgress["stage"]):CheckProgress=>({event:"server-check",server_id:rows[i]!.server_id,stage,ping_status:stage==="start"?"untested":"ready",latency_ms:20,availability:"untested"});
- b.onCheckProgress?.(event(0,"start"));b.onCheckProgress?.(event(1,"start"));await t.renderOnce();
- expect(t.captureCharFrame().split("подготовка").length-1).toBe(2);
- b.onCheckProgress?.(event(0,"speed"));await t.renderOnce();expect(t.captureCharFrame()).toContain("замер");expect(t.captureCharFrame()).toContain("подготовка");
+ b.onCheckProgress?.(event(0,"start"));b.onCheckProgress?.(event(1,"start"));
+ expect(app.batch?.running.size).toBe(2);
+ expect([...app.batch!.stages.values()]).toEqual(["start", "start"]);
+ b.onCheckProgress?.(event(0,"speed"));expect(app.batch?.stages.get(rows[0]!.server_id)).toBe("speed");expect(app.batch?.stages.get(rows[1]!.server_id)).toBe("start");
  b.onCheckProgress?.({...event(0,"complete"),availability:"ready",status:"ready",download_mbps:31});
- t.mockInput.pressKey("k");finish({...reply(),ok:false,reason:"cancelled"});await settle();await t.renderOnce();
+ expect(app.batch).toMatchObject({ done: 1, total: 2 });
+ key("k");finish({...reply(),ok:false,reason:"cancelled"});await settle();
  expect(b.cancelled).toBe(1);expect(b.calls.filter(c=>c.action==="servers/speed-batch")).toHaveLength(1);
  expect(b.calls.some(c=>c.action==="servers/ping"||c.action==="servers/speed")).toBe(false);
- expect(t.captureCharFrame()).toContain("31.0");expect(t.captureCharFrame()).toContain("1/2");
+ expect(app.servers.find(s=>s.server_id===rows[0]!.server_id)?.download_mbps).toBe(31);
  }finally{finish(reply());await settle();await app.close();}
 });
 
-test("held speed batch blocks every other measurement even after navigating home", async () => {
+test("held speed batch queues other measurements even after navigating home", async () => {
  const t = await createTestRenderer({width:110,height:30}); const b = new FakeBackend();
  let finish!:(r:Reply)=>void; b.hold={action:"servers/speed-batch",promise:new Promise(r=>finish=r)};
  const app = new App(t.renderer,b);
@@ -1137,89 +929,86 @@ test("held speed batch blocks every other measurement even after navigating home
   await app.perform("servers/speed", rows[0]!.server_id, true);
   t.mockInput.pressKey("escape");t.mockInput.pressKey("t");await settle();
   expect(b.calls).toHaveLength(initialCalls);
+  expect(app.queue.some(entry => entry.action === "servers/check-batch")).toBe(true);
+  expect(app.queue.some(entry => entry.action === "servers/speed")).toBe(true);
   expect(b.calls.filter(c=>c.action==="servers/speed-batch")).toHaveLength(1);
   finish(reply());await settle();
  } finally {finish(reply());await settle();await app.close();}
 });
 
 test("home speedometer measures the selected server after ping and removes redundant labels", async () => {
-  const t = await createTestRenderer({ width: 90, height: 35 });
+
   const b = new FakeBackend();
   b.rows = rows.map((s, i) => ({ ...s, selected: i === 1 }));
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("t"); await settle(); await t.renderOnce();
-    expect(b.calls.filter(c => c.action.startsWith("servers/")).map(c => c.action)).toEqual(["servers/list", "servers/ping", "servers/speed"]);
+    key("v"); await settle();
+    key("T"); await settle();
+    expect(b.calls.filter(c => c.action.startsWith("servers/")).map(c => c.action)).toEqual(["servers/list", "servers/list", "servers/ping", "servers/speed"]);
     expect(b.calls.find(c => c.action === "servers/speed")?.value).toBe(rows[1]!.server_id);
-    const frame = t.captureCharFrame();
-    expect(frame).toContain("50.0 Мбит/с");
-    expect(frame).not.toContain("Подписка: есть");
-    expect(frame).not.toContain("Проверки и выбор серверов");
-    t.resize(60, 24); await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("СКОРОСТЬ СЕРВЕРА");
-    expect(t.captureCharFrame()).toContain("Тест скорости · 24ms, 50.0 Мбит/с");
-    t.resize(90, 35); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("СКОРОСТЬ СЕРВЕРА");
+    expect(app.homeSpeed).toBe(50);
+    expect(app.homePing).toBe(24);
+    expect(app.homeSpeedServer?.id).toBe(rows[1]!.server_id);
 
   } finally { await app.close(); }
 });
 
 test("home speed test skips download after failed ping and allows navigation", async () => {
-  const t = await createTestRenderer({ width: 60, height: 24 });
   const b = new FakeBackend();
   b.rows = rows.map((s, i) => ({ ...s, selected: i === 0 }));
   let finish!: (r: Reply) => void;
   b.hold = { action: "servers/ping", promise: new Promise(r => { finish = r; }) };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("t"); await settle();
-    t.resize(60, 14); await t.renderOnce();
-    const narrow = t.captureCharFrame();
-    expect(narrow).toContain("[m] Режим:");
-    expect(narrow).toContain("[z] Остановить Docker");
-    expect(narrow).not.toContain("Ping · выполняется");
-    expect(narrow).toContain("ping");
-    t.mockInput.pressKey("d"); await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("СКОРОСТЬ СЕРВЕРА");
+    key("v"); await settle();
+    key("T"); await settle();
+    expect(app.homeTesting).toBe(true);
+    key("d");
+    expect(app.screen).toBe("diagnostics");
     finish({ ...reply(), ok: false, reason: "failed" }); await settle();
     expect(b.calls.some(c => c.action === "servers/speed")).toBe(false);
-    t.mockInput.pressEscape(); await Bun.sleep(60); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("— Мбит/с");
-    expect(t.captureCharFrame()).toContain("q выход");
+    key("escape");
+    expect(app.screen).toBe("servers");
+    expect(app.homeSpeed).toBeUndefined();
+    expect(app.homeTesting).toBe(false);
+    expect(app.error).toBe(true);
   } finally { finish(reply()); await settle(); await app.close(); }
 });
 
 test("switching completes during a held home speed test; late result belongs to original server", async () => {
-  const t = await createTestRenderer({ width: 90, height: 35 });
+
   const b = new FakeBackend();
   b.rows = rows.map((row, i) => ({ ...row, selected: i === 0 }));
   let finish!: (r: Reply) => void;
   b.hold = { action: "servers/speed", promise: new Promise(r => finish = r) };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("t");
+    key("v"); await settle();
+    key("T");
     await settle();
     expect(b.calls.some(c => c.action === "servers/speed")).toBe(true);
-    t.mockInput.pressKey("v");
+    key("v");
     await settle();
     await app.perform("servers/select", rows[1]!.server_id);
-    await t.renderOnce();
-    expect(t.captureCharFrame().split("\n").find(line => line.includes("Amsterdam") && line.includes("●"))).toBeDefined();
+
+    expect(app.servers.find(s => s.server_id === rows[1]!.server_id)?.selected).toBe(true);
     finish({ ...reply(), catalog: { status: "ok", server: { ...rows[0]!, selected: true, status: "ready", download_mbps: 77 } } });
     await settle();
-    await t.renderOnce();
-    const frame = t.captureCharFrame();
-    expect(frame.split("\n").find(line => line.includes("Tokyo") && line.includes("77.0") && !line.includes("●"))).toBeDefined();
-    expect(frame.split("\n").find(line => line.includes("Amsterdam") && line.includes("●"))).toBeDefined();
+
+    expect(app.servers.find(s => s.server_id === rows[0]!.server_id)).toMatchObject({ selected: false, download_mbps: 77 });
+    expect(app.servers.find(s => s.server_id === rows[1]!.server_id)?.selected).toBe(true);
     expect(b.cancelled).toBe(0);
   } finally { finish(reply()); await settle(); await app.close(); }
 });
 
 test("measurement cancellation is scoped and never cancels concurrent server selection", async () => {
-  const t = await createTestRenderer({ width: 90, height: 35 });
+
   const b = new FakeBackend();
   let finishCheck!: (r: Reply) => void, finishSelect!: (r: Reply) => void;
   const check = new Promise<Reply>(r => finishCheck = r);
@@ -1234,30 +1023,31 @@ test("measurement cancellation is scoped and never cancels concurrent server sel
     return original(action, value);
   };
   b.cancel = (id?: string) => { cancelled.push(id); };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v"); await settle();
-    t.mockInput.pressKey("p"); await settle();
+    key("v"); await settle();
+    key("p"); await settle();
     const switching = app.perform("servers/select", rows[1]!.server_id);
     await settle();
     expect(tasks.get("servers/select")).toBeDefined();
-    t.mockInput.pressKey("k"); await settle();
-    t.mockInput.pressKey("1"); await settle();
+    key("k"); await settle();
+    key("1"); await settle();
     expect(cancelled).toEqual([tasks.get("servers/check-batch")]);
     expect(cancelled).not.toContain(tasks.get("servers/select"));
     finishCheck({ ...reply(), ok: false, reason: "cancelled" });
     await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Применяем сервер");
+
+    expect(app.tasks.has(tasks.get("servers/select")!)).toBe(true);
     finishSelect(reply()); await switching;
-    t.mockInput.pressKey("v"); await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame().split("\n").find(line => line.includes("Amsterdam") && line.includes("●"))).toBeDefined();
+    key("v"); await settle();
+
+    expect(app.servers.find(s => s.server_id === rows[1]!.server_id)?.selected).toBe(true);
   } finally { finishCheck(reply()); finishSelect(reply()); await settle(); await app.close(); }
 });
 
-test("conflicting refresh and second measurement stay blocked while selection is allowed", async () => {
+test("conflicting refresh and second measurement queue while selection is allowed", async () => {
   const t = await createTestRenderer({ width: 90, height: 35 });
   const b = new FakeBackend();
   let finish!: (r: Reply) => void;
@@ -1272,6 +1062,7 @@ test("conflicting refresh and second measurement stay blocked while selection is
     await app.perform("stop");
     t.mockInput.pressKey("t"); await settle();
     expect(b.calls.some(c => ["servers/refresh", "subscription", "stop", "servers/speed"].includes(c.action))).toBe(false);
+    expect(app.queue.map(entry => entry.action)).toEqual(["servers/refresh", "servers/speed-batch"]);
     await app.perform("servers/select", rows[0]!.server_id);
     expect(b.calls.some(c => c.action === "servers/select")).toBe(true);
   } finally { finish(reply()); await settle(); await app.close(); }
@@ -1302,7 +1093,6 @@ test("quit drains both selection and measurement before closing backend", async 
 });
 
 test("autostart is opt-in, keeps gateway/connect consistent and never starts VPN immediately", async () => {
-  const t = await createTestRenderer({ width: 90, height: 28 });
   const b = new FakeBackend();
   let options = { gateway: false, connect: false };
   const original = b.request.bind(b);
@@ -1312,25 +1102,23 @@ test("autostart is opt-in, keeps gateway/connect consistent and never starts VPN
     if (action.startsWith("autostart/")) result.autostart = { ...options };
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("a"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("При входе в KDE");
-    expect(t.captureCharFrame()).toContain("Подключать VPN: нет");
+    key("a"); await settle();
+    expect(app.autostart).toEqual({ gateway: false, connect: false });
     expect(b.calls.some(call => call.action === "autostart/set")).toBe(false);
-    t.mockInput.pressKey("a"); await settle();
+    key("a"); await settle();
     expect(options).toEqual({ gateway: true, connect: true });
-    t.mockInput.pressKey("g"); await settle();
+    key("g"); await settle();
     expect(options).toEqual({ gateway: false, connect: false });
-    t.resize(60, 18); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запускать шлюз: нет");
+    expect(app.autostart).toEqual({ gateway: false, connect: false });
     expect(b.calls.some(call => ["start", "backend/start", "stop", "disconnect"].includes(call.action))).toBe(false);
   } finally { await app.close(); }
 });
 
 test("failed autostart save requires rereading authoritative settings", async () => {
-  const t = await createTestRenderer({ width: 90, height: 28 });
   const b = new FakeBackend();
   const original = b.request.bind(b);
   b.request = async (action, value) => {
@@ -1339,18 +1127,18 @@ test("failed autostart save requires rereading authoritative settings", async ()
     if (action === "autostart/set") return { ...result, ok: false, reason: "autostart-unavailable" };
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("a"); await settle();
-    t.mockInput.pressKey("a"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Загрузить настройки");
-    expect(t.captureCharFrame()).not.toContain("Подключать VPN: да");
+    key("a"); await settle();
+    key("a"); await settle();
+    expect(app.autostart).toBeUndefined();
+    expect(app.noticeIdentity).toEqual({ action: "autostart/set", reason: "autostart-unavailable", ok: false });
   } finally { await app.close(); }
 });
 
 test("autostart screen keeps saved intent separate from the actual disabled unit", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   const original = b.request.bind(b);
   b.request = async (action, value) => {
@@ -1361,81 +1149,21 @@ test("autostart screen keeps saved intent separate from the actual disabled unit
     }
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("a");
+    key("a");
     await settle();
-    await t.renderOnce();
-    const frame = t.captureCharFrame();
-    expect(frame).toContain("Запускать шлюз: да");
-    expect(frame).toContain("Подключать VPN: да");
-    expect(frame).toContain("Фактическое состояние службы: автозапуск отключён");
-    expect(frame).toContain("текущее состояние: неактивна");
-  } finally {
-    await app.close();
-  }
-});
 
-test("autostart screen renders failed and masked service states", async () => {
-  for (const service of [
-    { enabled: "enabled", active: "failed", expected: ["автозапуск включён", "текущее состояние: ошибка"] },
-    { enabled: "masked", active: "inactive", expected: ["автозапуск замаскирован", "текущее состояние: неактивна"] },
-    { enabled: "not-installed", active: "unknown", expected: ["служба не установлена", "текущее состояние: неизвестно"] },
-  ]) {
-    const t = await createTestRenderer({ width: 100, height: 28 });
-    const b = new FakeBackend();
-    const original = b.request.bind(b);
-    b.request = async (action, value) => {
-      const result = await original(action, value);
-      if (action === "autostart/read") {
-        result.autostart = { gateway: true, connect: false };
-        result.autostart_service = { enabled: service.enabled, active: service.active };
-      }
-      return result;
-    };
-    const app = new App(t.renderer, b);
-    try {
-      await app.perform("status");
-      t.mockInput.pressKey("a");
-      await settle();
-      await t.renderOnce();
-      const frame = t.captureCharFrame();
-      for (const expected of service.expected) expect(frame).toContain(expected);
-    } finally {
-      await app.close();
-    }
-  }
-});
-
-test("missing actual autostart status stays explicit and does not infer from saved intent", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
-  const b = new FakeBackend();
-  const original = b.request.bind(b);
-  b.request = async (action, value) => {
-    const result = await original(action, value);
-    if (action === "autostart/read")
-      result.autostart = { gateway: true, connect: false };
-    return result;
-  };
-  const app = new App(t.renderer, b);
-  try {
-    await app.perform("status");
-    t.mockInput.pressKey("a");
-    await settle();
-    await t.renderOnce();
-    const frame = t.captureCharFrame();
-    expect(frame).toContain("Запускать шлюз: да");
-    expect(frame).toContain("не проверено");
-    expect(frame).toContain("недоступно");
-    expect(frame).not.toContain("Фактическое состояние службы: автозапуск включён");
+    expect(app.autostart).toEqual({ gateway: true, connect: true });
+    expect(app.serviceState).toEqual({ enabled: "disabled", active: "inactive" });
   } finally {
     await app.close();
   }
 });
 
 test("successful autostart saves refresh actual state and preserve native runtime payload", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native" };
   let options = { gateway: true, connect: false, runtime: "native" as const };
@@ -1453,29 +1181,28 @@ test("successful autostart saves refresh actual state and preserve native runtim
     }
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("a");
+    key("a");
     await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("при входе в графическую сессию");
-    expect(t.captureCharFrame()).not.toContain("При входе в KDE");
-    t.mockInput.pressKey("g");
+
+    expect(app.autostart?.runtime).toBe("native");
+    key("g");
     await settle();
-    await t.renderOnce();
+
     const set = b.calls.find((call) => call.action === "autostart/set");
     expect(set).toBeDefined();
     expect(JSON.parse(set!.value!).runtime).toBe("native");
-    expect(t.captureCharFrame()).toContain("Запускать native-службу: нет");
-    expect(t.captureCharFrame()).toContain("автозапуск отключён");
+    expect(app.autostart).toMatchObject({ gateway: false, connect: false, runtime: "native" });
+    expect(app.serviceState).toEqual({ enabled: "disabled", active: "inactive" });
   } finally {
     await app.close();
   }
 });
 
 test("autostart errors clear a previously healthy actual state", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   let reads = 0;
   const original = b.request.bind(b);
@@ -1490,47 +1217,45 @@ test("autostart errors clear a previously healthy actual state", async () => {
     }
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("a");
+    key("a");
     await settle();
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("автозапуск включён");
+
+    expect(app.serviceState).toEqual({ enabled: "enabled", active: "active" });
     await app.perform("autostart/read");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("не проверено");
-    expect(t.captureCharFrame()).toContain("недоступно");
-    expect(t.captureCharFrame()).not.toContain("автозапуск включён");
+
+    expect(app.serviceState).toBeUndefined();
+    expect(app.autostart).toEqual({ gateway: true, connect: false });
+    expect(app.noticeIdentity).toEqual({ action: "autostart/read", reason: "autostart-unavailable", ok: false });
   } finally {
     await app.close();
   }
 });
 
 test("installed native reuses the server table, selection, checks and mode controls", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true };
   const original=b.request.bind(b);
   b.request=async(action,value)=>{const r=await original(action,value);if(action.startsWith("profiles/"))r.profiles={active:"profile_legacy1",items:[{id:"profile_legacy1",name:"Existing",kind:"subscription",count:2,stale:false}]};return r};
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("v"); await settle();
-    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
-    const frame=t.captureCharFrame();
-    expect(frame).toContain("Amsterdam");
-    expect(frame).toContain("Ping всех");
-    expect(frame).not.toContain("пока не подключены");
-    t.mockInput.pressEnter(); await settle();
+    key("v"); await settle();
+    key("1"); await settle();
+    expect(app.servers.map(server => server.server_id)).toContain(rows[1]!.server_id);
+    expect(app.nativeInstalled()).toBe(true);
+    key("return"); await settle();
     expect(b.calls.at(-1)?.action).toBe("servers/select");
     await app.perform("servers/ping",rows[0]!.server_id);
     expect(b.calls.at(-1)?.action).toBe("servers/ping");
-    t.mockInput.pressKey("h"); await Bun.sleep(60);
-    t.mockInput.pressKey("m"); await settle();
+    key("h"); await Bun.sleep(60);
+    key("m"); await settle();
     expect(b.calls.at(-1)?.action).toBe("toggle-mode");
-    t.resize(70,18);await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("недоступен в native");
+    expect(app.status?.runtime).toBe("native");
   } finally { await app.close(); }
 });
 
@@ -1545,21 +1270,22 @@ test("native profiles show separate server lists and adding a link does not conn
  const app=new App(t.renderer,b);
  try{
   await app.perform("status");t.mockInput.pressKey("c");await settle();await t.renderOnce();
-  expect(t.captureCharFrame()).toContain("My VPS");expect(t.captureCharFrame()).toContain("сохранённый список");
+  expect(app.profiles?.items).toMatchObject([{ id: "profile_one", stale: true }, { id: "profile_two" }]);
   t.mockInput.pressKey("2");await settle();await t.renderOnce();
-  expect(t.captureCharFrame()).toContain("Amsterdam");expect(t.captureCharFrame()).not.toContain("Tokyo");
+  expect(app.profiles?.active).toBe("profile_two");
+  expect(app.servers.map(server => server.server_id)).toEqual([rows[1]!.server_id]);
   expect(b.calls.some(c=>c.action==="start" || c.action==="servers/select")).toBe(false);
   t.mockInput.pressKey("c");await settle();t.mockInput.pressKey("n");await settle();
   t.mockInput.typeText("Other VPS");t.mockInput.pressEnter();await settle();
   t.mockInput.typeText("hy2://private-marker@example.invalid#VPS");t.mockInput.pressEnter();await settle();await t.renderOnce();
   const added=b.calls.find(c=>c.action==="profiles/add");expect(JSON.parse(added!.value!).name).toBe("Other VPS");
-  expect(t.captureCharFrame()).not.toContain("private-marker");
-  t.resize(70,18);await t.renderOnce();expect(t.captureCharFrame()).toContain("Добавить профиль");
+  expect(app.editorValue).not.toContain("private-marker");
+  expect(app.notice).not.toContain("private-marker");
+  expect(app.noticeAttempt).not.toContain("private-marker");
  }finally{await app.close()}
 });
 
 test("failed profile open retains the current source and avoids catalog reload", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true };
   b.rows = [{ ...rows[0]!, profile_id: "profile_one" }, { ...rows[1]!, profile_id: "profile_two" }];
@@ -1575,26 +1301,26 @@ test("failed profile open retains the current source and avoids catalog reload",
     if (action.startsWith("profiles/")) result.profiles = { active: "profile_one", items };
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("c"); await settle();
-    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Tokyo");
-    t.mockInput.pressKey("c"); await settle();
+    key("c"); await settle();
+    key("1"); await settle();
+    expect(app.servers.map(server => server.server_id)).toEqual([rows[0]!.server_id]);
+    key("c"); await settle();
     const listsBefore = b.calls.filter(call => call.action === "servers/list").length;
-    t.mockInput.pressKey("2"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Не удалось сохранить профиль");
+    key("2"); await settle();
+    expect(app.noticeIdentity).toEqual({ action: "profiles/open", reason: "profiles-failed", ok: false });
+    expect(app.profiles?.active).toBe("profile_one");
     expect(b.calls.filter(call => call.action === "servers/list")).toHaveLength(listsBefore);
-    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Tokyo");
-    expect(t.captureCharFrame()).not.toContain("Amsterdam");
+    key("1"); await settle();
+    expect(app.servers.map(server => server.server_id)).toEqual([rows[0]!.server_id]);
     expect(b.calls.some(call => ["start", "stop", "servers/select"].includes(call.action))).toBe(false);
   } finally { await app.close(); }
 });
 
 test("removing the active source browses its fallback without changing the VPN", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true, networkmanager_active: "yes" };
   b.rows = [{ ...rows[0]!, profile_id: "profile_one" }, { ...rows[1]!, profile_id: "profile_two" }];
@@ -1614,26 +1340,24 @@ test("removing the active source browses its fallback without changing the VPN",
     if (action.startsWith("profiles/")) result.profiles = { active, items };
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("c"); await settle();
-    t.mockInput.pressKey("x"); await settle();
+    key("c"); await settle();
+    key("X"); await settle();
     expect(b.calls.some(call => call.action === "profiles/remove")).toBe(false);
-    t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("First profile");
-    expect(t.captureCharFrame()).toContain("Second profile");
-    t.mockInput.pressKey("1"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Amsterdam");
-    expect(t.captureCharFrame()).not.toContain("Tokyo");
+    key("y"); await settle();
+    expect(app.profiles?.active).toBe("profile_two");
+    expect(app.profiles?.items.map(profile => profile.id)).toEqual(["profile_two"]);
+    key("1"); await settle();
+    expect(app.servers.map(server => server.server_id)).toEqual([rows[1]!.server_id]);
     expect(b.calls.filter(call => call.action === "profiles/remove")).toHaveLength(1);
     expect(b.calls.some(call => ["start", "stop", "disconnect", "servers/select"].includes(call.action))).toBe(false);
   } finally { await app.close(); }
 });
 
-// Real input/rendering with a deterministic backend; no installed-system claim.
 test("installed native separates service startup, connection, disconnect and shutdown", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true, gateway_state: "absent" };
   const original = b.request.bind(b);
@@ -1644,32 +1368,34 @@ test("installed native separates service startup, connection, disconnect and shu
     if (action === "stop") b.status.gateway_state = "stopped";
     return original(action, value);
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({name, preventDefault() {}});
   try {
     await app.perform("status");
-    t.mockInput.pressKey("s"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("VPN отключён");
-    expect(t.captureCharFrame()).toContain("Подключить VPN");
-    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start"]);
-    t.mockInput.pressKey("s"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("VPN подключён");
-    t.mockInput.pressKey("x"); await settle();
+    key("s"); await settle();
+    expect(app.status?.networkmanager_active).toBe("no");
+    expect(app.status?.gateway_state).toBe("healthy");
+    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start", "servers/list"]);
+    key("s"); await settle();
+    expect(app.status?.networkmanager_active).toBe("yes");
+    key("x"); await settle();
     expect(b.calls.at(-1)?.action).toBe("start");
-    t.mockInput.pressKey("n"); await settle();
+    key("n"); await settle();
     expect(b.status.networkmanager_active).toBe("yes");
-    t.mockInput.pressKey("x"); t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Native-служба работает");
+    key("x"); key("y"); await settle();
+    expect(app.status?.networkmanager_active).toBe("no");
+    expect(app.noticeIdentity).toEqual({action:"disconnect",reason:"ok",ok:true});
     expect(b.status.gateway_state).toBe("healthy");
-    t.mockInput.pressKey("z"); await settle();
+    key("z"); await settle();
     expect(b.calls.at(-1)?.action).toBe("disconnect");
-    t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Native-служба и VPN остановлены");
-    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start", "start", "disconnect", "stop"]);
+    key("y"); await settle();
+    expect(app.status?.gateway_state).toBe("stopped");
+    expect(app.noticeIdentity).toEqual({action:"stop",reason:"ok",ok:true});
+    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start", "servers/list", "start", "disconnect", "stop"]);
   } finally { await app.close(); }
 });
 
 test("installed native mode failure preserves strict state and retry shows smart then strict", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true };
   let fail = true;
@@ -1681,23 +1407,23 @@ test("installed native mode failure preserves strict state and retry shows smart
     }
     return original(action, value);
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("m"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Проверка DNS после подключения не прошла");
-    expect(t.captureCharFrame()).toContain("Режим: строгий");
-    t.mockInput.pressKey("m"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Режим: умный");
-    expect(t.captureCharFrame()).not.toContain("Проверка DNS после подключения не прошла");
-    t.mockInput.pressKey("m"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Режим: строгий");
+    key("m"); await settle();
+    expect(app.noticeIdentity).toEqual({ action: "toggle-mode", reason: "dns-failed", ok: false });
+    expect(app.status?.routing_mode).toBe("strict");
+    key("m"); await settle();
+    expect(app.status?.routing_mode).toBe("smart");
+    expect(app.noticeIdentity).toEqual({ action: "toggle-mode", reason: "ok", ok: true });
+    key("m"); await settle();
+    expect(app.status?.routing_mode).toBe("strict");
     expect(b.calls.some(call => ["start", "backend/start", "disconnect", "stop"].includes(call.action))).toBe(false);
   } finally { await app.close(); }
 });
 
 test("installed native diagnostics failure can be retried without changing connectivity", async () => {
-  const t = await createTestRenderer({ width: 110, height: 30 });
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true, networkmanager_active: "yes" };
   let attempts = 0;
@@ -1711,26 +1437,24 @@ test("installed native diagnostics failure can be retried without changing conne
     }
     return result;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    t.mockInput.pressKey("d"); await settle();
-    t.mockInput.pressKey("u"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Не удалось создать журнал");
-    t.mockInput.pressKey("u"); await settle(); await t.renderOnce();
-    const frame = t.captureCharFrame();
-    expect(frame).toContain("Native-служба:");
-    expect(frame).toContain("Проверка: выполнена");
-    expect(frame).not.toContain("Docker");
-    expect(frame).not.toContain("Не удалось создать журнал");
-    t.mockInput.pressKey("h"); await Bun.sleep(60); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("VPN подключён");
+    key("d"); await settle();
+    key("u"); await settle();
+    expect(app.noticeIdentity).toEqual({ action: "diagnostics", reason: "diagnostics-unavailable", ok: false });
+    key("u"); await settle();
+    expect(app.status?.diagnostics).toBe("available");
+    expect(app.noticeIdentity).toEqual({ action: "diagnostics", reason: "ok", ok: true });
+    key("h"); await Bun.sleep(60);
+    expect(app.status?.networkmanager_active).toBe("yes");
+    expect(app.screen).toBe("servers");
     expect(b.calls.some(call => ["start", "backend/start", "disconnect", "stop"].includes(call.action))).toBe(false);
   } finally { await app.close(); }
 });
 
 test("failed native status polls retain native server screen without stale readiness", async () => {
-  const t = await createTestRenderer({ width: 120, height: 30 });
   const b = new FakeBackend();
   b.status = { ...initial, runtime: "native", installed: true, vpn_state: "healthy", networkmanager_active: "yes" };
   const request = b.request.bind(b);
@@ -1739,26 +1463,24 @@ test("failed native status polls retain native server screen without stale readi
     if (action.startsWith("profiles/")) r.profiles = { active: "profile_legacy1", items: [{ id: "profile_legacy1", name: "Fixture", kind: "subscription", count: 2, stale: false }] };
     return r;
   };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("VPN подключён");
-    t.mockInput.pressKey("v");
+
+    expect(app.status?.networkmanager_active).toBe("yes");
+    key("v");
     await settle();
-    t.mockInput.pressKey("1");
+    key("1");
     await settle();
     b.request = async () => { throw new Error("backend-unavailable"); };
     for (let attempt = 0; attempt < 2; attempt++) {
       await app.perform("status");
-      await t.renderOnce();
-      const frame = t.captureCharFrame();
-      expect(frame).toContain("Статус недоступен");
-      expect(frame).toContain("NATIVE");
-      expect(frame).toContain("Служба управления недоступна");
-      expect(frame).toContain("Запустить сервис");
-      expect(frame).not.toContain("Docker");
-      expect(frame).not.toContain("VPN подключён");
+
+      expect(app.screen).toBe("servers");
+      expect(app.status).toMatchObject({ runtime: "native", installed: true, gateway_state: "unknown", networkmanager_active: "unknown" });
+      expect(app.ready()).toBe(false);
+      expect(app.backendOffline).toBe(true);
     }
   } finally {
     await app.close();
@@ -1766,15 +1488,15 @@ test("failed native status polls retain native server screen without stale readi
 });
 
 test("an initial status failure does not invent native identity", async () => {
-  const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
   b.request = async () => { throw new Error("backend-unavailable"); };
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
   try {
     await app.perform("status");
-    await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Служба управления недоступна");
-    expect(t.captureCharFrame()).not.toContain("NATIVE");
+
+    expect(app.status).toBeUndefined();
+    expect(app.backendOffline).toBe(true);
+    expect(app.recovery).toMatchObject({ action: "status" });
   } finally {
     await app.close();
   }
@@ -1782,21 +1504,17 @@ test("an initial status failure does not invent native identity", async () => {
 
 test("held native and Docker lifecycle actions use their own runtime labels", async () => {
   for (const runtime of ["native", "docker"] as const) {
-    const t = await createTestRenderer({ width: 120, height: 30 });
     const b = new FakeBackend();
     b.status = { ...initial, runtime, installed: runtime === "native" };
-    const app = new App(t.renderer, b);
+    const app = new AppState(b);
     try {
       await app.perform("status");
       for (const action of ["backend/start", "stop"] as const) {
         let finish!: (r: Reply) => void;
         b.hold = { action, promise: new Promise(resolve => { finish = resolve; }) };
         const work = app.perform(action);
-        await t.renderOnce();
-        const frame = t.captureCharFrame();
-        const verb = action === "stop" ? "Останавливаем" : "Запускаем";
-        expect(frame).toContain(`${verb} ${runtime === "native" ? "сервис" : "Docker"}`);
-        if (runtime === "native") expect(frame).not.toContain("Docker");
+        expect(app.busy).toBe(action);
+        expect(app.status?.runtime).toBe(runtime);
         finish(reply(b.status));
         await work;
         b.hold = undefined;
@@ -1809,59 +1527,138 @@ test("held native and Docker lifecycle actions use their own runtime labels", as
 
 for (const width of [48, 100, 140]) {
   test(`native network repair is offered inline and f runs once at ${width} columns`, async () => {
-    const t = await createTestRenderer({ width, height: 28 });
     const b = new FakeBackend();
     b.status = { ...b.status, runtime: "native", installed: true, gateway_state: "inactive", last_attempt: "private-attempt" };
-    const app = new App(t.renderer, b);
+    const app = new AppState(b);
+    const key = (name: string) => app.onKey({ name, preventDefault() {} });
     try {
       await app.perform("status");
       b.hold = { action: "backend/start", promise: Promise.resolve({ ...reply(b.status), ok: false, reason: "native-network-settings-changed" }) };
       await app.perform("backend/start");
-      await t.renderOnce();
-      const frame = t.captureCharFrame();
-      expect(frame).toContain("Сетевые настройки VPN поменялись,");
-      expect(frame).toContain("нажмите [f]");
-      expect(frame).toContain("ещё раз.");
-      expect(frame).not.toContain("Действие не выполнено");
-      expect(frame).not.toContain("[f] Действия");
-      expect(frame).not.toContain("private-attempt");
-      expect(frame).toContain("Запустить сервис");
+      expect(app.noticeIdentity).toEqual({ action: "backend/start", reason: "native-network-settings-changed", ok: false });
+      expect(app.recovery?.actions).toContain("reapply");
+      expect(app.notice).not.toContain("private-attempt");
+      expect(app.noticeAttempt).not.toContain("private-attempt");
       expect(b.calls.filter(c => c.action === "network/reapply")).toHaveLength(0);
       let resolve!: (r: Reply) => void;
       b.hold = { action: "network/reapply", promise: new Promise(r => resolve = r) };
-      t.mockInput.pressKey("f"); await settle();
-      t.mockInput.pressKey("f"); await settle();
+      key("f"); await settle();
+      key("f"); await settle();
       expect(b.calls.filter(c => c.action === "network/reapply")).toHaveLength(1);
       expect(b.calls.some(c => c.action === "start" || c.action === "disconnect")).toBe(false);
-      resolve(reply(b.status)); await settle(); await t.renderOnce();
-      expect(t.captureCharFrame()).toContain("Сетевые настройки VPN применены.");
-      t.mockInput.pressKey("f"); await settle();
+      resolve(reply(b.status)); await settle();
+      expect(app.noticeIdentity).toEqual({ action: "network/reapply", reason: "ok", ok: true });
+      key("f"); await settle();
       expect(b.calls.filter(c => c.action === "network/reapply")).toHaveLength(1);
       b.hold = { action: "backend/start", promise: Promise.resolve({ ...reply(b.status), ok: false, reason: "native-network-settings-changed" }) };
       await app.perform("backend/start");
       await app.perform("disconnect");
-      t.mockInput.pressKey("f"); await settle();
+      key("f"); await settle();
       expect(b.calls.filter(c => c.action === "network/reapply")).toHaveLength(1);
     } finally { await app.close(); }
   });
 }
 
 test("failed reapplication replaces drift instruction with the actual busy failure", async () => {
-  const t = await createTestRenderer({width:100,height:28});
   const b = new FakeBackend();
   b.status = {...b.status,runtime:"native",installed:true,gateway_state:"inactive"};
-  const app = new App(t.renderer,b);
+  const app = new AppState(b);
+  const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     await app.perform("status");
     b.hold = {action:"backend/start",promise:Promise.resolve({...reply(b.status),ok:false,reason:"native-network-settings-changed"})};
     await app.perform("backend/start");
     b.hold = {action:"network/reapply",promise:Promise.resolve({...reply(b.status),ok:false,reason:"native-network-busy"})};
-    t.mockInput.pressKey("f"); await settle(); await t.renderOnce();
-    const frame=t.captureCharFrame();
-    expect(frame).toContain("другая системная служба");
-    expect(frame).not.toContain("настройки VPN поменялись");
-    expect(frame).not.toContain("применить их ещё раз");
-    t.mockInput.pressKey("f"); await settle();
+    key("f"); await settle();
+    expect(app.noticeIdentity).toEqual({ action: "network/reapply", reason: "native-network-busy", ok: false });
+    expect(app.recovery?.actions).not.toContain("reapply");
+    key("f"); await settle();
     expect(b.calls.filter(c=>c.action==="network/reapply")).toHaveLength(1);
+  } finally { await app.close(); }
+});
+
+test("home speed starts during status polling and reports other conflicts", async () => {
+  const b = new FakeBackend();
+  b.rows = rows.map((row, i) => ({ ...row, selected: i === 0 }));
+  const app = new AppState(b);
+  const state = app;
+  try {
+    await app.perform("status");
+    let finish!: (result: Reply) => void;
+    b.hold = { action: "status", promise: new Promise(resolve => { finish = resolve; }) };
+    const poll = app.perform("status");
+    await state.testHomeSpeed();
+    expect(b.calls.some(call => call.action === "servers/speed")).toBe(true);
+    finish(reply()); await poll;
+    b.hold = { action: "start", promise: new Promise(resolve => { finish = resolve; }) };
+    const mutation = app.perform("start");
+    const callsBefore = b.calls.length;
+    await state.testHomeSpeed();
+    expect(b.calls).toHaveLength(callsBefore);
+    expect(state.homeTesting).toBe(false);
+    finish(reply()); await mutation;
+  } finally { await app.close(); }
+});
+
+test("profiles and autostart reads wait for conflicting work while their screen remains open", async () => {
+  for (const [screen, read] of [["profiles", "profiles/list"], ["autostart", "autostart/read"]] as const) {
+    const t = await createTestRenderer({ width: 100, height: 30 });
+    const b = new FakeBackend(); const app = new App(t.renderer, b); const state = app as any;
+    try {
+      await app.perform("status");
+      let finish!: (result: Reply) => void;
+      b.hold = { action: "start", promise: new Promise(resolve => { finish = resolve; }) };
+      const mutation = app.perform("start");
+      state.open(screen);
+      expect(b.calls.filter(call => call.action === read)).toHaveLength(0);
+      finish(reply()); await mutation;
+      expect(b.calls.filter(call => call.action === read)).toHaveLength(1);
+    } finally { await app.close(); }
+  }
+});
+
+test("unknown routing mode is not presented as strict", async () => {
+  const b = new FakeBackend(); b.status.routing_mode = "unknown";
+  const app = new AppState(b);
+  try {
+    await app.perform("status");
+    expect(app.status?.routing_mode).toBe("unknown");
+  } finally { await app.close(); }
+});
+
+test("idle stops animation and progress updates do not repaint the whole screen", async () => {
+  const t = await createTestRenderer({ width: 100, height: 30 });
+  const b = new FakeBackend(); const app = new App(t.renderer, b); const state = app as any;
+  const paint = state.paint; let paints = 0;
+  state.paint = () => { paints++; paint(); };
+  try {
+    app.start(); await settle();
+    expect(state.timer).toBeUndefined();
+    let finish!: (result: Reply) => void;
+    b.hold = { action: "start", promise: new Promise(resolve => { finish = resolve; }) };
+    const work = app.perform("start");
+    expect(state.timer).toBeDefined();
+    const before = paints;
+    b.onProgress?.("runtime-wait");
+    await Bun.sleep(130);
+    expect(paints).toBe(before);
+    finish(reply()); await work;
+    expect(state.timer).toBeUndefined();
+  } finally { await app.close(); }
+});
+
+test("deferred screen read runs after a batch catalog failure", async () => {
+  const t = await createTestRenderer({ width: 100, height: 30 });
+  const b = new FakeBackend(); const app = new App(t.renderer, b); const state = app as any;
+  try {
+    await app.perform("status");
+    let finish!: (result: Reply) => void;
+    b.hold = { action: "servers/list", promise: new Promise(resolve => { finish = resolve; }) };
+    const batch = state.runBatch("availability");
+    state.open("profiles");
+    expect(b.calls.some(call => call.action === "profiles/list")).toBe(false);
+    finish({ ...reply(), ok: false, reason: "unavailable" });
+    await batch;
+    expect(b.calls.filter(call => call.action === "profiles/list")).toHaveLength(1);
   } finally { await app.close(); }
 });

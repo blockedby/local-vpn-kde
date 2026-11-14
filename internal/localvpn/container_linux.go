@@ -43,6 +43,10 @@ func (child *runtimeChild) stop() {
 	child.cancel()
 	<-child.done
 }
+
+var errRuntimeChildExited = errors.New("runtime child exited before readiness")
+var errRuntimeReadinessTimeout = errors.New("runtime readiness timed out")
+
 func waitRuntime(ctx context.Context, child *runtimeChild, ready func() bool) error {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -50,7 +54,7 @@ func waitRuntime(ctx context.Context, child *runtimeChild, ready func() bool) er
 	defer timer.Stop()
 	for {
 		if child.stopped() {
-			return errors.New("runtime child exited before readiness")
+			return errRuntimeChildExited
 		}
 		if ready() {
 			return nil
@@ -59,9 +63,9 @@ func waitRuntime(ctx context.Context, child *runtimeChild, ready func() bool) er
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-child.done:
-			return errors.New("runtime child exited before readiness")
+			return errRuntimeChildExited
 		case <-timer.C:
-			return errors.New("runtime readiness timed out")
+			return errRuntimeReadinessTimeout
 		case <-ticker.C:
 		}
 	}
@@ -79,6 +83,7 @@ type gatewayRuntimeOptions struct {
 	bootstrapLogDir       string
 	watchDNS              func(context.Context, io.Writer)
 	onReady               func(context.Context) error
+	redactChildOutput     bool
 }
 
 // ServeContainer replaces shell process supervision. It serves restart tokens
@@ -115,18 +120,22 @@ func (c ContainerConfig) serveGateway(parent context.Context, output io.Writer, 
 		}
 	}
 	env := append(options.environment(), "VIBE_VPN_DEFER_TRANSACTION_RECOVERY=1")
+	childOutput := output
+	if options.redactChildOutput {
+		childOutput = io.Discard
+	}
 	syncCtx, syncCancel := context.WithTimeout(ctx, 30*time.Second)
 	syncArgs := []string{"sync-sing-box-config", "--source", c.Source, "--runtime", c.Runtime}
 	if options.helperConfig != "" {
 		syncArgs = append([]string{"--config", options.helperConfig}, syncArgs...)
 	}
-	result := RunProcess(syncCtx, options.helper, syncArgs, env, output, output, time.Second)
+	result := RunProcess(syncCtx, options.helper, syncArgs, env, childOutput, childOutput, time.Second)
 	syncCancel()
 	if result.Reason != "ok" {
-		return errors.New("runtime configuration synchronization failed")
+		return gatewayFailure("config-sync", result.Reason, nil)
 	}
 	if _, err := runtimeCommand(ctx, c.Binary, "check", "-c", c.Runtime); err != nil {
-		return err
+		return gatewayFailure("config-check", "failed", err)
 	}
 	var singbox, openvpn, recovery, bootstrap *runtimeChild
 	health := func(ctx context.Context) error {
@@ -168,29 +177,38 @@ func (c ContainerConfig) serveGateway(parent context.Context, output io.Writer, 
 		defer done()
 		_ = c.RemoveBarrier(cleanup)
 	}()
+	var singboxFailure *gatewayChildDiagnostics
 	startSingbox := func() error {
-		singbox = startRuntimeChild(processCtx, c.Binary, []string{"run", "-c", c.Runtime}, options.environment(), output)
+		singboxOutput := childOutput
+		if options.redactChildOutput {
+			singboxFailure = &gatewayChildDiagnostics{}
+			singboxOutput = singboxFailure
+		}
+		singbox = startRuntimeChild(processCtx, c.Binary, []string{"run", "-c", c.Runtime}, options.environment(), singboxOutput)
 		return waitRuntime(ctx, singbox, func() bool { _, err := runtimeCommand(ctx, "ip", "link", "show", c.Interface); return err == nil })
 	}
 	if err := startSingbox(); err != nil {
-		return err
+		if errors.Is(err, errRuntimeChildExited) && singboxFailure != nil {
+			return gatewayFailure("sing-box", singboxFailure.reason(), err)
+		}
+		return gatewayReadinessFailure("sing-box", err)
 	}
 	if err := c.InstallBarrier(ctx); err != nil {
-		return err
+		return gatewayFailure("barrier", "failed", err)
 	}
-	openvpn = startRuntimeChild(processCtx, options.openVPN, []string{"--config", c.OpenVPN}, options.environment(), output)
+	openvpn = startRuntimeChild(processCtx, options.openVPN, []string{"--config", c.OpenVPN}, options.environment(), childOutput)
 	if err := waitRuntime(ctx, openvpn, func() bool { _, e := runtimeCommand(ctx, "ip", "link", "show", "tun0"); return e == nil }); err != nil {
-		return err
+		return gatewayReadinessFailure("openvpn", err)
 	}
 	if err := c.ApplyRouting(ctx); err != nil {
-		return err
+		return gatewayFailure("routing", "failed", err)
 	}
 	if err := health(ctx); err != nil {
-		return err
+		return gatewayFailure("health", "failed", err)
 	}
 	if options.onReady != nil {
 		if err := options.onReady(ctx); err != nil {
-			return err
+			return gatewayFailure("notify", "failed", err)
 		}
 	}
 	fmt.Fprintln(output, "vpnkit_phase=runtime-ready")

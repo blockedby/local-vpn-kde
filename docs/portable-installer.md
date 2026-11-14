@@ -50,7 +50,7 @@ An existing setup must still be reviewed through the normal application flow.
 
 ## Included and required components
 
-Included: three Go executables, a Bun-compiled OpenTUI 0.5.11 frontend with its
+Included: three Go executables, a Bun-compiled OpenTUI frontend with its
 native code, sing-box copied from the version-bounded Arch build dependency,
 OpenVPN/sing-box templates and rule fixtures, service/policy assets and dependency
 license notices. There is no installed TypeScript source or `node_modules`, and

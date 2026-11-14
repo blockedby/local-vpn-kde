@@ -504,6 +504,7 @@ func (s NativeService) Start(parent context.Context) error {
 		return err
 	}
 	beforeInvocation, _ := s.networkInvocation(ctx)
+	beforeGatewayInvocation, _ := s.unitInvocation(ctx, nativegateway.GatewayUnit)
 	if _, err := s.call(ctx, "systemctl", "start", nativegateway.GatewayUnit); err != nil {
 		if afterInvocation, invocationErr := s.networkInvocation(ctx); invocationErr == nil && beforeInvocation != "" && afterInvocation != "not-started" && afterInvocation != beforeInvocation && ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			data, queryErr := s.call(ctx, "systemctl", "show", "--property=ExecMainStatus", "--value", nativegateway.NetworkUnit)
@@ -513,6 +514,13 @@ func (s NativeService) Start(parent context.Context) error {
 					return ErrNativeNetworkChanged
 				case strconv.Itoa(NativeNetworkBusyExitCode):
 					return ErrNativeNetworkBusy
+				}
+			}
+		}
+		if after, invocationErr := s.unitInvocation(ctx, nativegateway.GatewayUnit); invocationErr == nil && beforeGatewayInvocation != "" && after != "not-started" && after != beforeGatewayInvocation && ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			if data, journalErr := s.call(ctx, "journalctl", "--no-pager", "-b", "-o", "cat", "_SYSTEMD_INVOCATION_ID="+after); journalErr == nil {
+				if reason := gatewayJournalReason(data); reason != "" {
+					return &nativeGatewayStartError{reason: reason}
 				}
 			}
 		}
@@ -531,7 +539,18 @@ func (s NativeService) Start(parent context.Context) error {
 // A prior failed invocation must not mask a new authorization, cancellation,
 // start-limit, or gateway error with a stale network exit status.
 func (s NativeService) networkInvocation(ctx context.Context) (string, error) {
-	data, err := s.call(ctx, "systemctl", "show", "--property=InvocationID", "--value", nativegateway.NetworkUnit)
+	return s.unitInvocation(ctx, nativegateway.NetworkUnit)
+}
+
+type nativeGatewayStartError struct{ reason string }
+
+func (e *nativeGatewayStartError) Error() string { return "native gateway start failed" }
+
+func (s NativeService) unitInvocation(ctx context.Context, unit string) (string, error) {
+	if unit != nativegateway.NetworkUnit && unit != nativegateway.GatewayUnit {
+		return "", errors.New("invalid native unit")
+	}
+	data, err := s.call(ctx, "systemctl", "show", "--property=InvocationID", "--value", unit)
 	if err != nil {
 		return "", err
 	}

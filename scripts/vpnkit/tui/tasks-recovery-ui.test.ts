@@ -1,6 +1,5 @@
 import { test, expect } from "bun:test";
-import { createTestRenderer } from "@opentui/core/testing";
-import { App } from "./app";
+import { AppState } from "./app-state";
 import type { Action, Backend, Reply, SpeedProgress } from "./bridge";
 
 const status = { vpn_state: "healthy", gateway_state: "healthy", subscription: "configured", routing_mode: "smart", networkmanager_configured: "yes", networkmanager_active: "yes", diagnostics: "not-run" };
@@ -30,14 +29,12 @@ class BackendFixture implements Backend {
   async close() {}
 }
 async function fixture() {
-  const t = await createTestRenderer({ width: 100, height: 35 });
   const b = new BackendFixture();
-  const app = new App(t.renderer, b);
+  const app = new AppState(b);
   await app.perform("status");
-  const key = async (key: string) => { t.mockInput.pressKey(key); await settle(); await t.renderOnce(); };
-  const frame = async () => { await t.renderOnce(); return t.captureCharFrame(); };
+  const key = async (name: string) => { app.onKey({ name, preventDefault() {} }); await settle(); };
   const close = async () => { for (const h of b.held.values()) h.resolve(reply()); await settle(); await app.close(); };
-  return { t, b, app, key, frame, close };
+  return { b, app, key, close };
 }
 
 test("task chooser cancels only the chosen measurement and confirms mutation cancellation", async () => {
@@ -47,26 +44,25 @@ test("task chooser cancels only the chosen measurement and confirms mutation can
     const a = f.app.perform("servers/check-batch", "{}", true);
     const b = f.app.perform("servers/select", rows[1].server_id);
     await f.key("k");
-    expect(await f.frame()).toContain("Текущие задачи");
-    expect(await f.frame()).toContain("Отменить: Применяем сервер");
+    expect(f.app.screen).toBe("tasks");
+    expect(f.app.actions().map(action => action.id)).toContain(`task:cancel:${f.b.calls.find(c => c.action === "servers/select")!.id}`);
     await f.key("1");
     const checkID = f.b.calls.find(c => c.action === "servers/check-batch")!.id;
     const selectID = f.b.calls.find(c => c.action === "servers/select")!.id;
     expect(f.b.cancelled).toEqual([checkID]);
     await f.key("2");
-    expect(await f.frame()).toContain("Точно отменить");
+    expect(f.app.screen).toBe("cancel-confirm");
     await f.key("return");
     expect(f.b.cancelled).toEqual([checkID]);
     await f.key("2");
-    f.t.mockInput.pressEscape(); await settle();
+    await f.key("escape");
     expect(f.b.cancelled).toEqual([checkID]);
     await f.key("j"); await f.key("2"); await f.key("y");
     expect(f.b.cancelled).toEqual([checkID, selectID]);
     f.b.held.get("servers/select")!.resolve(reply()); await b;
-    expect(await f.frame()).not.toContain("Отменить: Применяем сервер");
-    expect(await f.frame()).toContain("Ping");
+    expect([...f.app.tasks.values()].map(task => task.action)).toEqual(["servers/check-batch"]);
     f.b.held.get("servers/check-batch")!.resolve(reply()); await a;
-    expect(await f.frame()).toContain("Нет выполняющихся задач");
+    expect(f.app.tasks.size).toBe(0);
   } finally { await f.close(); }
 });
 
@@ -77,9 +73,10 @@ test("DNS failure offers server choice without replaying failed connection", asy
     const task = f.app.perform("start");
     f.b.held.get("start")!.resolve({ ...reply(), ok: false, reason: "dns-failed" }); await task;
     await f.key("f");
-    expect(await f.frame()).toContain("Выбрать другой сервер");
+    expect(f.app.recovery?.actions).toContain("servers");
     await f.key("v");
-    expect(await f.frame()).toContain("Alpha");
+    expect(f.app.screen).toBe("servers");
+    expect(f.app.servers.map(server => server.server_id)).toContain(rows[0].server_id);
     expect(f.b.calls.filter(c => c.action === "start")).toHaveLength(1);
   } finally { await f.close(); }
 });
@@ -96,7 +93,8 @@ test("explicit recovery rereads status and catalog without replaying interrupted
     expect(f.b.reconnects).toBe(1);
     expect(f.b.calls.slice(before).map(c => c.action)).toEqual(["status", "servers/list"]);
     expect(f.b.calls.filter(c => c.action === "servers/select")).toHaveLength(1);
-    expect(await f.frame()).toContain("Связь восстановлена");
+    expect(f.app.backendOffline).toBe(false);
+    expect(f.app.reconnecting).toBe(false);
   } finally { await f.close(); }
 });
 
@@ -106,8 +104,8 @@ test("failed reconnect leaves explicit retry available without issuing actions",
     f.b.reconnectError = true; f.b.onDisconnect?.();
     const before = f.b.calls.length;
     await f.key("f"); await f.key("u");
-    expect(await f.frame()).toContain("Не удалось восстановить связь");
-    expect(await f.frame()).toContain("Восстановить связь");
+    expect(f.app.backendOffline).toBe(true);
+    expect(f.app.actions().some(action => action.key === "u")).toBe(true);
     expect(f.b.calls).toHaveLength(before);
     await f.key("u");
     expect(f.b.reconnects).toBe(2);
@@ -118,22 +116,22 @@ test("live speed belongs to measured server and late samples cannot overwrite fi
   const f = await fixture();
   f.b.holds.add("servers/speed");
   try {
-    await f.key("t");
+    await f.key("v");
+    await f.key("T");
     const id = f.b.calls.find(c => c.action === "servers/speed")!.id;
     const sample: SpeedProgress = { event: "speed-progress", server_id: rows[0].server_id, downloaded_bytes: 2000000, elapsed_seconds: 1, download_mbps: 16 };
     f.b.onSpeedProgress?.(sample, id);
-    expect(await f.frame()).toContain("16.0");
+    expect(f.app.homeSpeed).toBe(16);
     f.b.onSpeedProgress?.({ ...sample, server_id: rows[1].server_id, download_mbps: 999 }, id);
-    expect(await f.frame()).not.toContain("999");
-    expect(await f.frame()).toContain("16.0");
+    expect(f.app.liveSpeeds.has(rows[1].server_id)).toBe(false);
+    expect(f.app.homeSpeed).toBe(16);
     await f.app.perform("servers/select", rows[1].server_id);
     f.b.onSpeedProgress?.({ ...sample, download_mbps: 24 }, id);
-    expect(await f.frame()).toContain("24.0");
+    expect(f.app.homeSpeed).toBe(24);
     f.b.held.get("servers/speed")!.resolve({ ...reply(), catalog: { status: "ok", server: { ...rows[0], status: "ready", download_mbps: 32 } } });
     await settle();
     f.b.onSpeedProgress?.({ ...sample, download_mbps: 999 }, id);
-    const frame = await f.frame();
-    expect(frame).not.toContain("999");
-    expect(frame).toContain("32.0");
+    expect(f.app.homeSpeed).toBe(32);
+    expect(f.app.liveSpeeds.has(rows[0].server_id)).toBe(false);
   } finally { await f.close(); }
 });

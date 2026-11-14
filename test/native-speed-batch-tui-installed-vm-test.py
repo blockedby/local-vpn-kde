@@ -28,6 +28,30 @@ import termios
 import time
 import pyte
 
+# Compiled-layout contract: keep visible labels and shortcuts together so a UI
+# redesign has one review point; measurement and cleanup assertions stay below.
+SCREEN = {
+    'title': 'VPNKIT', 'native': 'NATIVE', 'docker': 'Docker',
+    'servers': 'Серверы', 'ping_column': 'Ping мс',
+    'fixture_profile': 'Lab compiled speed acceptance', 'fixture_node': 'Lab compiled real node',
+    'https': 'HTTPS', 'site_editor': 'Адрес сайта', 'site_saved': 'Адрес сайта сохранён.',
+    'speed_stage': 'замер', 'speed_action': 'Скорость + сайт',
+    'batch_complete': r'Завершено:\s*(\d+)/(\d+)\s*·\s*ошибок\s*(\d+)',
+    'batch_stopped': 'Остановлено:', 'diagnostics_updated': 'Состояние компонентов обновлено.',
+    'backend_unavailable': 'Служба управления недоступна',
+    'connection_lost': 'Связь потеряна. Действие могло продолжиться.',
+    'restore_connection': 'Восстановить связь', 'status_unavailable': 'Статус недоступен',
+    'filter': 'Фильтр:', 'queued': 'в очереди 1 [j]', 'tasks': 'Задачи',
+    'running': 'Выполняются', 'queue_heading': 'В очереди', 'history': 'Завершены',
+    'ping_task': 'Ping и сайт', 'speed_task': 'Скорость и сайт',
+    'conflict': 'Эта операция конфликтует с текущей.',
+}
+KEY = {
+    'site': 'e', 'diagnostics': 'd', 'refresh': 'u', 'servers': 'v', 'servers_alias': 'h',
+    'profiles': 'c', 'speed_batch': 't', 'cancel': 'k', 'quit': 'q', 'escape': '\x1b',
+    'filter': '/', 'ping_batch': 'p', 'tasks': 'j',
+}
+
 assert os.environ.get('VPNKIT_NATIVE_VM_LAB') == '1'
 assert pathlib.Path('/etc/hostname').read_text().strip() == 'vpn-native-lab'
 assert not shutil.which('docker') and not pathlib.Path('/var/run/docker.sock').exists(), 'Docker-free guest required'
@@ -64,7 +88,13 @@ seen_speed = False
 
 
 def setup():
-    global created, expected_count, master, process, screen, stream, decoder, active_index, expected_display_name
+    global created, expected_count, master, process, screen, stream, decoder, active_index, expected_display_name, original_index, filter_name, original_count
+    original_rows = [row for row in cli('servers/list')['catalog']['servers'] if row.get('profile_id') == before['profile']]
+    original_count = len(original_rows)
+    assert original_count > 1, 'filter acceptance requires a multi-server original profile'
+    names = [row['display_name'] for row in original_rows]
+    filter_name = next((name for name in names if name and len(name) <= 256 and '\n' not in name and sum(name.casefold() in other.casefold() for other in names) == 1), None)
+    assert filter_name, 'filter acceptance needs a uniquely matching server name'
     if os.environ.get('VPNKIT_NATIVE_LAB_SERVER_FILE'):
         import stat
         path=pathlib.Path(os.environ['VPNKIT_NATIVE_LAB_SERVER_FILE']);info=path.lstat()
@@ -79,7 +109,9 @@ def setup():
     created = added['active']
     profiles = cli('profiles/list')['profiles']
     active_index = next(i for i,p in enumerate(profiles['items']) if p['id']==profiles['active'])
+    original_index = next(i for i,p in enumerate(profiles['items']) if p['id']==before['profile'])
     assert active_index < 4, 'active profile must be visible on first page'
+    assert original_index < 9, 'original profile must be visible on first page'
     expected_count = profiles['items'][active_index]['count']
     assert 0 < expected_count <= 8, 'requires a populated bounded lab profile'
     candidates=[row for row in cli('servers/list')['catalog']['servers'] if row.get('profile_id')==created]
@@ -127,7 +159,7 @@ def pump(seconds=.1):
         raw.extend(data)
         if b'\x1b[6n' in data:os.write(master,b'\x1b[1;1R')
         stream.feed(decoder.decode(data))
-        seen_speed |= any('замер' in line and 'Скорость + сайт' not in line for line in screen.display)
+        seen_speed |= any(SCREEN['speed_stage'] in line and SCREEN['speed_action'] not in line for line in screen.display)
 
 
 def wait(predicate, label, timeout=150, allow_unavailable=False):
@@ -136,7 +168,7 @@ def wait(predicate, label, timeout=150, allow_unavailable=False):
         pump()
         text=frame()
         if not allow_unavailable:
-            assert 'Служба управления недоступна' not in text, 'compiled TUI lost backend: '+label
+            assert SCREEN['backend_unavailable'] not in text, 'compiled TUI lost backend: '+label
         assert process.poll() is None, 'compiled TUI exited: '+label
         if predicate(text):return text
         assert time.monotonic()<deadline, 'compiled TUI timeout: '+label
@@ -147,16 +179,34 @@ def key(value):
     pump(.2)
 
 
+def open_profile(index):
+    # Profile reads and status polls can still be in flight when the cached
+    # profile rows appear. Retry the same selection only on a visible conflict.
+    deadline = time.monotonic() + 30
+    while True:
+        key(str(index + 1))
+        text = wait(lambda text: SCREEN['ping_column'] in text or SCREEN['conflict'] in text,
+                    'open profile', timeout=max(.1, deadline - time.monotonic()))
+        if SCREEN['ping_column'] in text:
+            return
+        assert time.monotonic() < deadline, 'profile selection remained busy'
+        pump(1)
+
+
 def site(url):
-    key('e')
-    wait(lambda text:'HTTPS' in text or 'Адрес сайта' in text,'site editor')
+    key(KEY['site'])
+    wait(lambda text:SCREEN['https'] in text or SCREEN['site_editor'] in text,'site editor')
     # End + backspaces is independent of editor Ctrl+A/selection bindings.
     key('\x1b[F'+'\x7f'*200+url+'\r')
-    wait(lambda text:'Ping всех' in text and re.search(r'Сайт:\s*'+re.escape(url)+r'\s*(?:\n|$)',text),'saved exact site')
+    wait(lambda text:SCREEN['site_saved'] in text and SCREEN['servers'] in text,'saved site')
+    key(KEY['site'])
+    wait(lambda text:SCREEN['https'] in text and url in text,'reopened exact site')
+    key(KEY['escape'])
+    wait(lambda text:SCREEN['servers'] in text and SCREEN['ping_column'] in text,'returned to server table')
 
 
 def completed(errors=None):
-    pattern=r'Завершено:\s*(\d+)/(\d+)\s*·\s*ошибок\s*(\d+)'
+    pattern=SCREEN['batch_complete']
     text=wait(lambda text:re.search(pattern,text),'batch complete')
     result=re.search(pattern,text)
     assert int(result[1])==expected_count and int(result[2])==expected_count, 'compiled batch incomplete'
@@ -170,16 +220,16 @@ def record(result):
 
 
 def second_action():
-    key('d');key('u')
-    wait(lambda text:'Состояние компонентов обновлено.' in text,'second diagnostic action')
-    assert 'Docker' not in frame(), 'native diagnostics displays Docker wording'
-    key('v')
-    wait(lambda text:'Ping всех' in text,'return to server table')
+    key(KEY['diagnostics']);key(KEY['refresh'])
+    wait(lambda text:SCREEN['diagnostics_updated'] in text,'second diagnostic action')
+    assert SCREEN['docker'] not in frame(), 'native diagnostics displays Docker wording'
+    key(KEY['servers'])
+    wait(lambda text:SCREEN['ping_column'] in text and expected_display_name in text,'return to server table')
 
 
 try:
     setup()
-    wait(lambda text:'VPNKIT' in text and 'NATIVE' in text,'native UI startup',30)
+    wait(lambda text:SCREEN['title'] in text and SCREEN['native'] in text,'native UI startup',30)
     if '--trace-requests' in sys.argv:
         trace_path=private/'ui-private-writes.trace';trace_path.write_text('')
         threads=[part for tid in pathlib.Path('/proc/'+str(process.pid)+'/task').iterdir() for part in ('-p',tid.name)]
@@ -189,33 +239,64 @@ try:
         kernel=subprocess.check_output(['sudo','-n','journalctl','-k','-b','--no-pager','-o','cat'],text=True)
         print(json.dumps({'ui_alive_mem_available_kib':memory['MemAvailable'],'swap_free_kib':memory['SwapFree'],'ui_rss_kib':int(rss),'kernel_oom_kill_lines':sum('Killed process' in line or 'Out of memory:' in line for line in kernel.splitlines())}),flush=True)
         pump(.5)
-    assert 'Docker' not in frame(), 'native UI displays Docker wording'
-    key('v')
-    wait(lambda text:'Lab compiled speed acceptance' in text,'loaded profile list',30)
-    key(str(active_index+1))
-    wait(lambda text:'Ping всех' in text and 'Lab compiled speed acceptance' in text and '1 серверов' in text and 'Lab compiled real node' in text,'loaded fixture server table',30)
+    assert SCREEN['docker'] not in frame(), 'native UI displays Docker wording'
+    key(KEY['profiles'])
+    wait(lambda text:SCREEN['fixture_profile'] in text,'loaded profile list',30)
+    open_profile(original_index)
+    wait(lambda text:SCREEN['ping_column'] in text,'original server table',30)
+    key(KEY['filter']); key(filter_name); key('\r')
+    wait(lambda text: SCREEN['filter'] in text and f'1/{original_count}' in text, 'filter narrows original catalog')
+    key(KEY['ping_batch'])
+    filtered = wait(lambda text: re.search(SCREEN['batch_complete'], text), 'filtered ping batch')
+    result = re.search(SCREEN['batch_complete'], filtered)
+    assert (int(result[1]), int(result[2])) == (1, 1), 'filtered batch did not measure exactly the shown row'
+    key(KEY['escape'])
+    wait(lambda text: SCREEN['filter'] not in text, 'filter cleared')
+    record({'filtered_catalog_and_ping_batch':'passed','shown':1,'total':original_count})
+    key(KEY['profiles'])
+    wait(lambda text:SCREEN['fixture_profile'] in text,'return to profile list',30)
+    open_profile(active_index)
+    table = wait(lambda text:SCREEN['ping_column'] in text and SCREEN['fixture_node'] in text,'loaded fixture server table',30)
+    # At 140 columns the details pane has its own nonblank lines beside the
+    # table.  Count only the table's columns, not the entire terminal row.
+    lines = [line[:140 - 1 - 36] for line in table.splitlines()]
+    header = next(i for i, line in enumerate(lines) if SCREEN['ping_column'] in line)
+    data_rows = []
+    for line in lines[header + 1:]:
+        if not line.strip(): break
+        data_rows.append(line)
+    assert len(data_rows) == expected_count and expected_display_name in data_rows[0], 'fixture catalog not fully displayed'
     site('https://www.gstatic.com/generate_204')
     seen_speed=False
     if '--trace-requests' in sys.argv:
         expected=json.loads((private/'expected-batch.json').read_text())
         parity=cli('servers/speed-batch',json.dumps({'ids':[expected['server_id']],'url':expected['url']}))['catalog']['servers'][0]
         print(json.dumps({'raw_while_compiled_ui_alive':{key:parity.get(key) for key in ('status','ping_status','availability','downloaded_bytes')}}),flush=True)
-    key('t')
+    key(KEY['speed_batch'])
     if '--expect-broken' in sys.argv:
-        wait(lambda text:'Служба управления недоступна' in text,'old speed validator failure',40,True)
-        key('d');key('u')
-        wait(lambda text:'Служба управления недоступна' in text,'old bridge remains unusable',30,True)
+        wait(lambda text:SCREEN['backend_unavailable'] in text,'old speed validator failure',40,True)
+        key(KEY['diagnostics']);key(KEY['refresh'])
+        wait(lambda text:SCREEN['backend_unavailable'] in text,'old bridge remains unusable',30,True)
         record({'baseline_compiled_speed_stage_backend_loss':'reproduced','docker_installed':False})
     else:
+        # A second pass must be visible in the activity panel and run after
+        # the active speed pass, rather than being rejected or discarded.
+        wait(lambda text: 'Проверка' in text, 'active speed batch')
+        key(KEY['ping_batch'])
+        wait(lambda text: SCREEN['queued'] in text, 'queued ping batch')
+        key(KEY['tasks'])
+        wait(lambda text: all(SCREEN[name] in text for name in ('tasks', 'running', 'queue_heading', 'ping_task', 'speed_task')), 'activity panel lists both passes')
+        wait(lambda text: SCREEN['history'] in text and text.count('Завершено') >= 2 and SCREEN['ping_task'] in text and SCREEN['speed_task'] in text, 'both queued passes finished')
+        key(KEY['escape'])
         completed(errors=0)
         assert seen_speed, 'compiled UI never rendered the real speed stage'
-        assert 'Docker' not in frame(), 'native batch displays Docker wording'
+        assert SCREEN['docker'] not in frame(), 'native batch displays Docker wording'
         second_action()
-        record({'compiled_speed_site_complete':'passed','real_speed_stage_rendered':True,'second_action':'passed','docker_installed':False})
+        record({'compiled_speed_site_complete':'passed','real_speed_stage_rendered':True,'queued_ping_and_activity':'passed','second_action':'passed','docker_installed':False})
         # Failed website evidence must not destroy the bridge/throughput pass.
         site('https://127.0.0.1:9/unavailable')
         seen_speed=False
-        key('t');completed(errors=expected_count)
+        key(KEY['speed_batch']);completed(errors=expected_count)
         assert seen_speed, 'failed site suppressed the real throughput stage'
         failed_rows=[row for row in cli('servers/list')['catalog']['servers'] if row.get('profile_id')==created]
         assert len(failed_rows)==expected_count
@@ -225,10 +306,10 @@ try:
         # Cancel only once a real throughput stage is visible, then reuse bridge.
         site('https://www.gstatic.com/generate_204')
         seen_speed=False
-        key('t')
+        key(KEY['speed_batch'])
         wait(lambda text:seen_speed,'active speed cancellation')
-        key('k')
-        wait(lambda text:'Остановлено:' in text,'cancelled speed batch')
+        key(KEY['cancel'])
+        wait(lambda text:SCREEN['batch_stopped'] in text,'cancelled speed batch')
         second_action()
         record({'active_speed_cancel_without_backend_loss':'passed','second_action':'passed'})
     if '--expect-broken' not in sys.argv:
@@ -245,15 +326,18 @@ try:
                 bridges.append(pid)
         assert len(bridges)==1, 'cannot identify UI-owned bridge for controlled failure'
         os.kill(bridges[0],signal.SIGTERM)
-        key('h');key('u')
-        wait(lambda text:'Служба управления недоступна' in text,'controlled status transport failure',30,True)
-        assert 'NATIVE' in frame() and 'Docker' not in frame(), 'transport failure changed native identity to Docker'
-        assert 'Статус недоступен' in frame(), 'failed transport retained stale healthy status'
-        key('v');pump(.3)
-        assert 'NATIVE' in frame() and 'Docker' not in frame(), 'unavailable native server controls display Docker'
-        assert 'Статус недоступен' in frame(), 'server screen retained stale healthy status'
+        # Let the automatic status poll detect the failure. Sending refresh
+        # first can overwrite its loss notice if the poll wins the race.
+        wait(lambda text:SCREEN['connection_lost'] in text and SCREEN['restore_connection'] in text,
+             'controlled status transport failure',30,True)
+        assert SCREEN['native'] in frame() and SCREEN['docker'] not in frame(), 'transport failure changed native identity to Docker'
+        assert SCREEN['status_unavailable'] in frame(), 'failed transport retained stale healthy status'
+        key(KEY['servers_alias']);key(KEY['refresh'])
+        key(KEY['servers']);pump(.3)
+        assert SCREEN['native'] in frame() and SCREEN['docker'] not in frame(), 'unavailable native server controls display Docker'
+        assert SCREEN['status_unavailable'] in frame(), 'server screen retained stale healthy status'
         record({'controlled_transport_failure_native_identity':'preserved','false_docker_wording':False})
-    key('q')
+    key(KEY['quit'])
     process.wait(timeout=45)
     assert process.returncode==0, 'compiled UI did not exit cleanly'
     restore_profiles()

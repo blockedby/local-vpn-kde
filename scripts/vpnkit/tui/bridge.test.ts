@@ -272,3 +272,12 @@ test("bridge rejects unknown stages and speed without completed site evidence", 
     await f.bridge.close();
   }
 });
+
+test("demo speed test publishes scoped samples for the details pane", async () => {
+  const backend = new DemoBackend();
+  const samples: number[] = [];
+  (backend as import("./bridge").Backend).onSpeedProgress = (row, id) => { if (id === "speed") samples.push(row.download_mbps); };
+  await backend.request("servers/speed", backend.servers[0]!.server_id, "speed");
+  expect(samples.length).toBeGreaterThanOrEqual(2);
+  await backend.close();
+});

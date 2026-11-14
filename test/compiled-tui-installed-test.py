@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """PTY acceptance for the installed compiled UI in a disposable container."""
 import errno
+import fcntl
+import struct
+import termios
 import os
 import pty
 import select
 import signal
 import subprocess
 import time
+
+# Compiled-layout contract for the startup screen.
+SCREEN_TITLE = b'VPNKIT'
+SCREEN_TABS = '[Серверы]'.encode()
 
 assert not os.path.exists('/usr/share/local-vpn-kde/scripts/vpnkit/tui/node_modules')
 assert not os.path.exists('/usr/share/local-vpn-kde/scripts/vpnkit/tui/index.ts')
@@ -35,6 +42,7 @@ def descendants(pid):
 
 for arguments in (['--demo'], []):
     master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 80, 0, 0))
     child = subprocess.Popen(['runuser', '-u', 'builder', '--', '/usr/bin/local-vpn-kde', 'ui', *arguments],
                              stdin=slave, stdout=slave, stderr=slave,
                              env={**os.environ, 'TERM': 'xterm-256color'}, start_new_session=True)
@@ -54,11 +62,12 @@ for arguments in (['--demo'], []):
                 # OpenTUI's renderer waits for terminal capability responses.
                 if b'\x1b[6n' in data:
                     os.write(master, b'\x1b[1;1R')
-            if b'VPNKIT' in output:
+            if SCREEN_TITLE in output and SCREEN_TABS in output:
                 break
             if child.poll() is not None:
                 break
-        assert b'VPNKIT' in output, output.decode(errors='replace')[-3000:]
+        assert SCREEN_TITLE in output, output.decode(errors='replace')[-3000:]
+        assert SCREEN_TABS in output, output.decode(errors='replace')[-3000:]
         assert child.poll() is None, output.decode(errors='replace')[-3000:]
         if not arguments:
             commands = descendants(child.pid)

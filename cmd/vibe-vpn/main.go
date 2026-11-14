@@ -34,6 +34,11 @@ import (
 
 var browserSignalContextReadyHook func()
 
+// Starting a temporary sing-box process can take several seconds on a cold,
+// resource-constrained system. Wait for the listener itself, while retaining a
+// bound and allowing cancellation, before declaring the benchmark unavailable.
+const benchmarkBackendStartTimeout = 15 * time.Second
+
 func executeRootCommand(root *cobra.Command, args []string) error {
 	root.SetArgs(args)
 	if !isBrowserJSONInvocation(args) {
@@ -352,7 +357,7 @@ func testOneContextUsing(ctx context.Context, c config.Config, n vless.Node, deb
 		return nettest.Result{}, err
 	}
 	defer func() { cancel(); _ = cmd.Process.Kill(); _ = cmd.Wait() }()
-	if err := waitTCPContext(backendCtx, c.TestSocks, 3*time.Second); err != nil {
+	if err := waitTCPContext(backendCtx, c.TestSocks, benchmarkBackendStartTimeout); err != nil {
 		return nettest.Result{}, err
 	}
 	resultCh := make(chan struct {

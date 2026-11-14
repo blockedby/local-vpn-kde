@@ -22,10 +22,13 @@ import time
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--ssh', required=True, help='dedicated lab ssh.sh wrapper')
-parser.add_argument('--case-group', choices=('all', 'runtime', 'holder'), default='all', help='focused rerun of active/off runtime cases or namespace-holder cases')
+parser.add_argument('--case-group', choices=('all', 'runtime', 'holder', 'smart-connect'), default='all', help='focused rerun of active/off runtime cases, namespace-holder cases, or smart connected normal reboot')
+parser.add_argument('--repeat', type=int, default=1, help='repeat selected cases (1 to 100)')
 parser.add_argument('--qmp-host', help='dedicated hypervisor SSH alias; enables abrupt QMP reset cases')
 parser.add_argument('--qmp-control-socket', help='optional existing SSH multiplex socket for hypervisor')
 args = parser.parse_args()
+if not 1 <= args.repeat <= 100:
+    parser.error('--repeat must be between 1 and 100')
 if os.environ.get('VPNKIT_NATIVE_VM_LAB') != '1':
     parser.error('VPNKIT_NATIVE_VM_LAB=1 required')
 ssh = os.path.abspath(args.ssh)
@@ -92,6 +95,116 @@ def https():
     remote('curl --silent --fail --max-time 25 https://www.gstatic.com/generate_204 >/dev/null', timeout=35)
 
 
+def failure_evidence():
+    # Collect only fixed fields and categories; journals, routes, resolver
+    # addresses and configuration may contain private endpoints. This runs
+    # before cleanup and never transfers those raw inputs off the guest.
+    script = r'''
+import json,os,pathlib,re,subprocess,tempfile
+def run(args):
+ p=subprocess.run(args,capture_output=True,text=True,timeout=30)
+ return p.returncode,p.stdout
+# Probe the same DNS server and public rule-source name from both the native
+# namespace and the physical uplink concurrently, before collecting journals.
+# Only response categories leave the guest; DNS packets/addresses do not.
+dns_probe=r"""
+import json,os,socket,struct,sys
+result='error'
+try:
+ qid=os.urandom(2);name='raw.githubusercontent.com'
+ query=qid+struct.pack('!HHHHH',0x100,1,0,0,0)+b''.join(bytes([len(x)])+x.encode() for x in name.split('.'))+b'\0'+struct.pack('!HH',1,1)
+ s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(3)
+ if sys.argv[1]=='uplink':s.setsockopt(socket.SOL_SOCKET,socket.SO_BINDTODEVICE,b'eth0\0')
+ s.sendto(query,('8.8.8.8',53));data,_=s.recvfrom(4096)
+ if len(data)>=12 and data[:2]==qid:
+  flags,questions,answers=struct.unpack('!HHH',data[2:8])
+  result='answered' if (flags&15)==0 and answers else 'dns-error-or-empty'
+ else:result='invalid-response'
+except socket.timeout:result='timeout'
+except OSError as e:
+ result={101:'network-unreachable',113:'host-unreachable',111:'refused'}.get(e.errno,'socket-error')
+print(result)
+"""
+probes={}
+for name,command in {
+ 'namespace':['sudo','-n','ip','netns','exec','vpnkit-native','python3','-c',dns_probe,'namespace'],
+ 'uplink':['sudo','-n','python3','-c',dns_probe,'uplink'],
+}.items():
+ probes[name]=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
+dns_results={}
+for name,process in probes.items():
+ try: out,_=process.communicate(timeout=8)
+ except subprocess.TimeoutExpired: process.kill();process.communicate();out='timeout'
+ value=out.strip()
+ dns_results[name]=value if value in ('answered','dns-error-or-empty','invalid-response','timeout','network-unreachable','host-unreachable','refused','socket-error','error') else 'unavailable'
+os.umask(0o077)
+evidence=pathlib.Path(tempfile.mkdtemp(prefix='vpnkit-reboot-evidence-',dir='/var/tmp'))
+def capture(name,args):
+ try:
+  code,out=run(args)
+  (evidence/name).write_text('exit='+str(code)+'\n'+out)
+ except (OSError,subprocess.TimeoutExpired):
+  (evidence/name).write_text('capture unavailable\n')
+for name,command in {
+ 'system-units.txt':['systemctl','show','local-vpn-kde-network.service','local-vpn-kde-gateway.service','NetworkManager.service','network-online.target'],
+ 'autostart-unit.txt':['systemctl','--user','show','local-vpn-kde-native-autostart.service'],
+ 'system-journal.txt':['sudo','-n','journalctl','-b','-n','1000','-u','local-vpn-kde-network.service','-u','local-vpn-kde-gateway.service','-u','NetworkManager.service','-u','network-online.target','--no-pager','-o','short-monotonic'],
+ 'autostart-journal.txt':['journalctl','--user','-b','-n','300','-u','local-vpn-kde-native-autostart.service','--no-pager','-o','short-monotonic'],
+ 'routes.txt':['ip','-4','route','show','table','all'],
+ 'rules.txt':['ip','-4','rule','show'],
+ 'namespace-routes.txt':['sudo','-n','ip','netns','exec','vpnkit-native','ip','-4','route','show','table','all'],
+ 'namespace-rules.txt':['sudo','-n','ip','netns','exec','vpnkit-native','ip','-4','rule','show'],
+ 'resolver.txt':['cat','/etc/resolv.conf'],
+ 'namespace-resolver.txt':['cat','/etc/netns/vpnkit-native/resolv.conf'],
+}.items(): capture(name,command)
+def props(args):
+ _,out=run(args)
+ allowed={'ActiveState','SubState','Result','ExecMainStatus','ActiveEnterTimestampMonotonic','InactiveEnterTimestampMonotonic','ExecMainStartTimestampMonotonic','ExecMainExitTimestampMonotonic'}
+ return {k:v for line in out.splitlines() if '=' in line for k,v in [line.split('=',1)] if k in allowed and re.fullmatch(r'[a-zA-Z0-9_-]*',v)}
+properties=['-p','ActiveState','-p','SubState','-p','Result','-p','ExecMainStatus','-p','ActiveEnterTimestampMonotonic','-p','InactiveEnterTimestampMonotonic','-p','ExecMainStartTimestampMonotonic','-p','ExecMainExitTimestampMonotonic']
+units={}
+for unit in ('local-vpn-kde-network.service','local-vpn-kde-gateway.service','NetworkManager.service','network-online.target'):
+ units[unit]=props(['systemctl','show',unit,*properties])
+units['autostart']=props(['systemctl','--user','show','local-vpn-kde-native-autostart.service',*properties])
+_,journal=run(['sudo','-n','journalctl','-b','-u','local-vpn-kde-network.service','-u','local-vpn-kde-gateway.service','-u','NetworkManager.service','-u','network-online.target','--no-pager','-o','cat'])
+codes=sorted(set(re.findall(r'native_gateway_start_failure=([a-z0-9-]+):',journal)))
+signals={name:bool(re.search(pattern,journal,re.I)) for name,pattern in {'dns':r'\bdns\b|name resolution|no such host','timeout':r'timed? ?out|deadline exceeded','failed':r'\bfailed\b'}.items()}
+_,routes=run(['ip','-4','route','show','table','all'])
+_,rules=run(['ip','-4','rule','show'])
+resolver=pathlib.Path('/etc/resolv.conf').read_text(errors='replace')
+_,status=run(['/usr/bin/local-vpn-kde','autostart','--runtime','native','--action','status'])
+try: result=json.loads(status)
+except ValueError: result={}
+safe_status={k:result.get(k) for k in ('last_result','last_reason','last_gateway_reason')}
+dns_ok=run(['getent','ahostsv4','www.gstatic.com'])[0]==0
+https_ok=run(['curl','--silent','--fail','--max-time','10','https://www.gstatic.com/generate_204','-o','/dev/null'])[0]==0
+upstream_script="""
+import json,socket
+try:
+ c=json.load(open('/etc/local-vpn-kde/sing-box/config.json'))
+ node=next(o for o in c['outbounds'] if o.get('tag')=='selected-native-out')
+ host,port=node['server'],int(node['server_port'])
+ addresses=socket.getaddrinfo(host,port,socket.AF_INET,socket.SOCK_STREAM)
+ if node.get('type') not in ('vless','trojan','shadowsocks'):
+  print('dns-resolved-transport-unproven')
+ else:
+  s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.settimeout(5)
+  s.setsockopt(socket.SOL_SOCKET,socket.SO_BINDTODEVICE,b'eth0\\0')
+  s.connect(addresses[0][4]);s.close();print('direct-tcp-connected')
+except Exception: print('direct-probe-failed-or-unsupported')
+"""
+_,upstream=run(['sudo','-n','python3','-c',upstream_script])
+upstream=upstream.strip()
+if upstream not in ('dns-resolved-transport-unproven','direct-tcp-connected','direct-probe-failed-or-unsupported'): upstream='unavailable'
+print(json.dumps({'private_guest_evidence':str(evidence),'rule_dns_probes':dns_results,'units':units,'gateway_codes':codes,'journal_signals':signals,'route_count':len(routes.splitlines()),'rule_count':len(rules.splitlines()),'tun_route_present':bool(re.search(r'\bdev tun\d+\b',routes)),'resolver_nameserver_count':sum(line.lstrip().startswith('nameserver ') for line in resolver.splitlines()),'autostart':safe_status,'guest_dns_probe':dns_ok,'guest_https_probe':https_ok,'upstream_direct_probe':upstream}))
+'''
+    result = remote('python3 -c ' + shlex.quote(script), timeout=90, check=False)
+    try:
+        print(json.dumps({'failure_evidence': json.loads(result.stdout)}), flush=True)
+    except json.JSONDecodeError:
+        print(json.dumps({'failure_evidence': 'unavailable'}), flush=True)
+
+
 saved = json.loads(run_cli('autostart', '--runtime', 'native', '--action', 'status'))
 before = snapshot()
 linger = remote('loginctl show-user lab -p Linger --value').stdout.strip()
@@ -111,9 +224,11 @@ try:
     # normal shutdown refuse deletion; the following normal reboot clears only
     # volatile kernel state, leaving the durable journal for automatic recovery.
     cases += [(mode, 'connect', 'holder-normal') for mode in ('strict', 'smart')]
-    if args.case_group != 'all':
+    if args.case_group == 'smart-connect':
+        cases = [('smart', 'connect', 'normal')]
+    elif args.case_group != 'all':
         cases = [case for case in cases if (case[2] == 'holder-normal') == (args.case_group == 'holder')]
-    for mode, action, kind in cases:
+    for mode, action, kind in cases * args.repeat:
         if snapshot()['mode'] != mode:
             run_cli('native-desktop', '--action', 'toggle-mode', '--yes')
         remote('systemctl --user stop ' + session_unit + ' graphical-session.target')
@@ -160,19 +275,27 @@ assert (p/'ns/net').stat().st_ino==pathlib.Path('/run/netns/vpnkit-native').stat
             network_result = remote('systemctl show local-vpn-kde-network.service -p Result --value').stdout.strip()
             assert network_result == 'exit-code', 'held network unit did not refuse cleanup'
             guard_log = remote('sudo -n journalctl -b -u local-vpn-kde-network.service -n 12 --no-pager -o cat').stdout
-            assert 'still has running processes' in guard_log, 'stop failed for a different reason than owned holder protection'
+            assert 'native namespace is held by another process; cleanup was not performed' in guard_log, 'stop failed for a different reason than owned holder protection'
             remote('sudo -n test -e /run/netns/vpnkit-native && sudo -n test -s /var/lib/local-vpn-kde-network/journal.json')
         at_reboot = snapshot()
         booted = reboot(baseline['boot'], abrupt=kind == 'abrupt')
         assert not booted['gateway'] and not booted['connected'], 'runtime started before graphical session'
         remote('systemctl --user start --no-block ' + session_unit)
         deadline = time.monotonic() + 180
-        while True:
-            current = snapshot()
-            if current['gateway'] == (action != 'off') and current['connected'] == (action == 'connect'):
-                break
-            assert time.monotonic() < deadline, 'autostart runtime state timed out: ' + action
-            time.sleep(2)
+        if action != 'off':
+            # NM lists an activating VPN before its tunnel routes are ready.
+            # The autostart oneshot completes only after its owned connection
+            # and full-tunnel routes have passed the product's readiness proof.
+            while True:
+                state = remote('systemctl --user show ' + unit + ' -p ActiveState --value').stdout.strip()
+                if state == 'active':
+                    break
+                if state == 'failed' or time.monotonic() >= deadline:
+                    failure_evidence()
+                    raise AssertionError('autostart unit failed or timed out before readiness: ' + action)
+                time.sleep(1)
+        current = snapshot()
+        assert current['gateway'] == (action != 'off') and current['connected'] == (action == 'connect'), 'runtime state does not match completed autostart: ' + action
         if action != 'off':
             assert current['journal_version'] == 5 and current['journal_boot'] == current['boot'], 'active journal is not bound to current kernel boot'
         assert current['config_hash'] == baseline['config_hash'], 'configuration changed over reboot'
@@ -181,6 +304,7 @@ assert (p/'ns/net').stat().st_ino==pathlib.Path('/run/netns/vpnkit-native').stat
         time.sleep(5)
         settled = snapshot()
         assert settled['gateway'] == current['gateway'] and settled['connected'] == current['connected'], 'autostart state did not settle'
+        assert settled['route_tun'] == current['route_tun'], 'desktop route changed after autostart completed'
         https()
         if action == 'off':
             disabled = remote('systemctl --user is-enabled ' + unit, check=False).stdout.strip()

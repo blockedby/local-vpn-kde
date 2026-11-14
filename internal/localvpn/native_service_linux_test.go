@@ -159,6 +159,55 @@ func TestNativeServiceStartFailureIsGenericAndDoesNotPrompt(t *testing.T) {
 	}
 }
 
+func TestNativeServiceStartReadsOnlyNewGatewayInvocationReason(t *testing.T) {
+	for _, tc := range []struct {
+		name                          string
+		newInvocation, journalVisible bool
+		want                          string
+	}{
+		{"current invocation", true, true, "sing-box-rule-init-refused"},
+		{"stale invocation", false, true, ""},
+		{"journal unavailable", true, false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			states := nativeServiceReadyTestStates()
+			service, _ := newNativeServiceTestFixture(t, states)
+			started := false
+			service.command = func(_ context.Context, name string, args ...string) ([]byte, error) {
+				if name == "journalctl" {
+					if !tc.journalVisible {
+						return nil, errors.New("no access")
+					}
+					if !strings.Contains(strings.Join(args, " "), "_SYSTEMD_INVOCATION_ID=22222222222222222222222222222222") {
+						t.Fatal(args)
+					}
+					return []byte(NativeGatewayFailureMessage(gatewayFailure("sing-box", "rule-init-refused", nil)) + "\n"), nil
+				}
+				if args[0] == "start" {
+					started = true
+					return nil, errors.New("private data")
+				}
+				if strings.Contains(strings.Join(args, " "), "--property=InvocationID") {
+					if args[len(args)-1] == nativegateway.GatewayUnit && started && tc.newInvocation {
+						return []byte("22222222222222222222222222222222\n"), nil
+					}
+					return []byte("11111111111111111111111111111111\n"), nil
+				}
+				return states[args[len(args)-1]], nil
+			}
+			err := service.Start(context.Background())
+			var failure *nativeGatewayStartError
+			if tc.want != "" {
+				if !errors.As(err, &failure) || failure.reason != tc.want {
+					t.Fatal(err)
+				}
+			} else if err == nil || errors.As(err, &failure) {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestNativeServiceRefusesForeignUnitsAndDropInsBeforeMutation(t *testing.T) {
 	t.Run("foreign unit", func(t *testing.T) {
 		service, calls := newNativeServiceTestFixture(t, nativeServiceReadyTestStates())

@@ -216,10 +216,35 @@ func TestNativeAutostartErrorsAreCoarse(t *testing.T) {
 			if err == nil || strings.Contains(err.Error(), secret) {
 				t.Fatal(err)
 			}
+			wantReason := "gateway-start-failed"
+			if tc.connect {
+				wantReason = "network-connect-failed"
+			}
+			status, statusErr := a.Status(context.Background())
+			if statusErr != nil || status.LastResult != "failed" || status.LastReason != wantReason {
+				t.Fatal(status, statusErr)
+			}
+			message := AutostartFailureMessage(err)
+			if !strings.Contains(message, wantReason) || strings.Contains(message, secret) {
+				t.Fatal(message)
+			}
 			data, readErr := os.ReadFile(filepath.Join(a.Base, "autostart-result.json"))
 			if readErr != nil || strings.Contains(string(data), secret) || !strings.Contains(string(data), `"failed"`) {
 				t.Fatal(string(data), readErr)
 			}
 		})
+	}
+}
+
+func TestNativeAutostartStoresSafeGatewayReason(t *testing.T) {
+	a := configuredNativeAutostart(t, false)
+	a.nativeStatus = func(context.Context) (GatewayStatus, error) { return availableNativeStatus(), nil }
+	a.nativeStart = func(context.Context) error { return &nativeGatewayStartError{reason: "sing-box-rule-init-refused"} }
+	if err := a.Run(context.Background()); err == nil {
+		t.Fatal("failure was lost")
+	}
+	status, err := a.Status(context.Background())
+	if err != nil || status.LastGatewayReason != "sing-box-rule-init-refused" {
+		t.Fatal(status, err)
 	}
 }

@@ -101,7 +101,11 @@ try:
     original = profiles["active"]
     catalog = run("servers/list")[0]["catalog"]["servers"]
     if "--baseline" in sys.argv:
-        candidates = [selected] + [r["server_id"] for r in catalog if r["server_id"] != selected][:5]
+        # Cached availability is only an ordering hint: retest every candidate
+        # until the required two have passed both live probes.
+        others = [r for r in catalog if r["server_id"] != selected]
+        candidates = [selected] + [r["server_id"] for r in others if r.get("availability") == "ready"]
+        candidates += [r["server_id"] for r in others if r.get("availability") != "ready"]
         ids = []
         for server_id in candidates:
             ping = run("servers/ping", server_id, ok=None)[0]

@@ -55,6 +55,7 @@ func nativeGatewayRuntimeOptions(c ContainerConfig) gatewayRuntimeOptions {
 		helper:              nativePinnedRuntime + "/vibe-vpn",
 		helperConfig:        c.Vibe,
 		ownedChildrenHealth: true,
+		redactChildOutput:   true,
 		onReady:             nativeReady,
 		openVPN:             "/usr/sbin/openvpn",
 		environment:         fixedEnvironment,
