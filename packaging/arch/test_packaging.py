@@ -97,6 +97,8 @@ class PackagingTests(unittest.TestCase):
         self.assertNotIn("run.sh", template)
         self.assertIn("go run ./packaging/arch/generate-units", template)
         self.assertIn("bun install --frozen-lockfile --production", template)
+        # Bun skips the musl optional package on glibc; an unresolved import fails the bundle.
+        self.assertIn("--external '@opentui/core-linux-x64-musl'", template)
         hook = (HERE / "local-vpn-kde-native.install").read_text()
         transaction = (HERE / "local-vpn-kde-native.hook").read_text()
         self.assertIn("When = PreTransaction", transaction)

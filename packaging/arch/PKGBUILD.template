@@ -49,7 +49,7 @@ build() {
 
   cd scripts/vpnkit/tui
   bun install --frozen-lockfile --production
-  bun build --compile --define 'process.env.VPNKIT_COMPILED_NATIVE="1"' index.ts --outfile ../../../build/vpnkit-tui
+  bun build --compile --external '@opentui/core-linux-x64-musl' --define 'process.env.VPNKIT_COMPILED_NATIVE="1"' index.ts --outfile ../../../build/vpnkit-tui
 }
 
 check() {
