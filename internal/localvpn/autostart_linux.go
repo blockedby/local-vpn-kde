@@ -457,16 +457,46 @@ func (a Autostart) Run(ctx context.Context) (runErr error) {
 		if start == nil {
 			start = (NativeService{}).Start
 		}
-		if err = start(ctx); err != nil {
+		// Smart mode downloads its rule sets while sing-box starts, so one lost
+		// DNS or network exchange at boot fails the whole start. Such a failure
+		// says nothing about the configuration: try again a bounded number of
+		// times instead of leaving the session without a gateway.
+		for attempt := 0; ; attempt++ {
+			if err = start(ctx); err == nil {
+				break
+			}
 			if contextErr := ctx.Err(); contextErr != nil {
 				return contextErr
 			}
-			reason = "gateway-start-failed"
+			startReason := ""
 			var failure *nativeGatewayStartError
 			if errors.As(err, &failure) && gatewayReasonAllowed(failure.reason) {
-				gatewayReason = failure.reason
+				startReason = failure.reason
 			}
-			return &autostartFailure{reason: reason}
+			if attempt == 2 || !transientGatewayStartReason(startReason) {
+				reason, gatewayReason = "gateway-start-failed", startReason
+				return &autostartFailure{reason: reason}
+			}
+			if a.wait != nil {
+				err = a.wait(ctx)
+			} else {
+				select {
+				case <-ctx.Done():
+					err = ctx.Err()
+				case <-time.After(5 * time.Second):
+				}
+			}
+			if err != nil {
+				return err
+			}
+			// Disabling autostart while waiting wins over the retry.
+			if current, err = a.Status(ctx); err != nil {
+				return err
+			}
+			if !current.Gateway {
+				result = "disabled"
+				return nil
+			}
 		}
 		// Starting the notify service can take time. Re-read immediately before
 		// the optional desktop VPN mutation so a concurrent disable wins.
@@ -521,4 +551,15 @@ func (a Autostart) Run(ctx context.Context) (runErr error) {
 	}
 	result = "ready"
 	return nil
+}
+
+// transientGatewayStartReason reports rule-set download failures caused by a
+// network or name-resolution exchange, which can succeed on the next attempt.
+func transientGatewayStartReason(code string) bool {
+	for _, reason := range []string{"rule-init-dns", "rule-init-dns-timeout", "rule-init-dns-refused", "rule-init-dns-network", "rule-init-timeout", "rule-init-refused", "rule-init-network"} {
+		if strings.HasSuffix(code, "-"+reason) {
+			return true
+		}
+	}
+	return false
 }

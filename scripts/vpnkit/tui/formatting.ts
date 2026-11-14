@@ -27,10 +27,11 @@ export function wrapText(text: string, width: number): string[] {
   return lines.map(value => cell(value, width).trimEnd());
 }
 
-/** Public form of a check URL; credentials, query and fragment stay in the editor. */
+/** Public form of a check URL; credentials, path, query and fragment stay in the editor. */
 export function displayCheckAddress(value: string, width = 45): string {
   try {
     const url = new URL(value);
-    return cell(`${url.protocol}//${url.host}${url.pathname}`, width).trimEnd();
+    // A path can carry a private token just as a query can, so only its presence is shown.
+    return cell(`${url.protocol}//${url.host}${url.pathname.length > 1 ? "/…" : "/"}`, width).trimEnd();
   } catch { return "недоступен"; }
 }

@@ -248,3 +248,49 @@ func TestNativeAutostartStoresSafeGatewayReason(t *testing.T) {
 		t.Fatal(status, err)
 	}
 }
+
+func TestNativeAutostartRetriesTransientRuleSetFailure(t *testing.T) {
+	a := configuredNativeAutostart(t, true)
+	a.nativeStatus = func(context.Context) (GatewayStatus, error) { return availableNativeStatus(), nil }
+	a.command = func(context.Context, string, ...string) ([]byte, error) { return []byte("connected"), nil }
+	a.wait = func(context.Context) error { return nil }
+	starts, connects := 0, 0
+	a.nativeStart = func(context.Context) error {
+		if starts++; starts == 1 {
+			return &nativeGatewayStartError{reason: "sing-box-rule-init-dns-timeout"}
+		}
+		return nil
+	}
+	a.nativeConnect = func(context.Context) error { connects++; return nil }
+	if err := a.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status, err := a.Status(context.Background())
+	if err != nil || starts != 2 || connects != 1 || status.LastResult != "ready" || status.LastGatewayReason != "" {
+		t.Fatal(starts, connects, status, err)
+	}
+}
+
+func TestNativeAutostartRetryIsBoundedAndSkipsPermanentFailures(t *testing.T) {
+	for _, tc := range []struct {
+		reason string
+		starts int
+	}{
+		{"sing-box-rule-init-dns-timeout", 3},
+		{"sing-box-rule-init-failed", 1},
+		{"config-check-failed", 1},
+	} {
+		a := configuredNativeAutostart(t, false)
+		a.nativeStatus = func(context.Context) (GatewayStatus, error) { return availableNativeStatus(), nil }
+		a.wait = func(context.Context) error { return nil }
+		starts := 0
+		a.nativeStart = func(context.Context) error { starts++; return &nativeGatewayStartError{reason: tc.reason} }
+		if err := a.Run(context.Background()); err == nil {
+			t.Fatal("failure was lost", tc.reason)
+		}
+		status, err := a.Status(context.Background())
+		if err != nil || starts != tc.starts || status.LastReason != "gateway-start-failed" || status.LastGatewayReason != tc.reason {
+			t.Fatal(tc.reason, starts, status, err)
+		}
+	}
+}
