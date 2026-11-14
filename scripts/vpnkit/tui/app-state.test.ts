@@ -238,7 +238,7 @@ test("opening a profile loads its servers while the automatic status refresh is 
   }
 });
 
-test("site check address hides query and fragment outside its editor", async () => {
+test("site check address hides path, query and fragment outside its editor", async () => {
   const { detailsLines } = await import("./details-view");
   const state = new AppState(new FakeBackend());
   try {
@@ -391,5 +391,53 @@ test("retrying connection captures and names its selected server", async () => {
     state.servers[0]!.display_name = "Changed";
     key(state, "y"); await settle();
     expect(backend.calls.some(call => call.action === "start")).toBe(false);
+  } finally { await state.close(); }
+});
+
+test("navigating to servers while a profile opens still loads the new catalog", async () => {
+  const backend = new FakeBackend();
+  let finish!: (reply: Reply) => void;
+  backend.hold = { action: "profiles/open", promise: new Promise(resolve => { finish = resolve; }) };
+  const state = new AppState(backend);
+  state.status = { ...backend.status };
+  try {
+    state.open("profiles", true, false);
+    const work = state.browseProfile("a");
+    state.open("servers");
+    finish(reply()); await work; await settle();
+    expect(state.screen).toBe("servers");
+    expect(backend.calls.map(call => call.action)).toContain("servers/list");
+    expect(state.catalogLoaded).toBe(true);
+  } finally { await state.close(); }
+});
+
+test("leaving and returning to servers before the first status reply still loads the catalog", async () => {
+  const backend = new FakeBackend();
+  let finish!: (reply: Reply) => void;
+  backend.hold = { action: "status", promise: new Promise(resolve => { finish = resolve; }) };
+  const state = new AppState(backend);
+  try {
+    state.start();
+    state.open("settings", true, false);
+    state.open("servers");
+    finish(reply()); await settle();
+    expect(backend.calls.map(call => call.action)).toContain("servers/list");
+    expect(state.catalogLoaded).toBe(true);
+  } finally { await state.close(); }
+});
+
+test("session history records only what the finished action measured", async () => {
+  const backend = new FakeBackend();
+  const state = new AppState(backend);
+  state.status = { ...backend.status };
+  try {
+    state.servers = structuredClone(rows).map(row => ({ ...row, status: "ready", download_mbps: 88, availability: "ready" }));
+    state.catalogLoaded = true;
+    await state.perform("servers/ping", rows[0]!.server_id);
+    const [entry] = state.sessionMeasurements.get(rows[0]!.server_id)!;
+    expect(entry).toMatchObject({ ping: 24, site: "untested" });
+    expect(entry!.speed).toBeUndefined();
+    await state.perform("servers/speed-batch", JSON.stringify({ ids: [rows[0]!.server_id] }));
+    expect(state.sessionMeasurements.get(rows[0]!.server_id)![0]).toMatchObject({ ping: 24, speed: 40, site: "ready" });
   } finally { await state.close(); }
 });

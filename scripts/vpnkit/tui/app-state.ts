@@ -115,6 +115,7 @@ export class AppState {
     if (!reply?.ok) return;
     this.resetProfileCatalog();
     if (navigation === this.navigationRevision) this.open("servers");
+    else this.loadCatalogIfShown();
   }
 
   async addProfile(source: string) {
@@ -127,6 +128,7 @@ export class AppState {
     if (navigation === this.navigationRevision && editor === this.editorRevision) this.editorValue = "";
     this.resetProfileCatalog();
     if (navigation === this.navigationRevision && editor === this.editorRevision) this.open("profiles");
+    else this.loadCatalogIfShown();
   }
 
   async removeProfile() {
@@ -143,6 +145,7 @@ export class AppState {
     if (!reply?.ok) return;
     this.resetProfileCatalog();
     if (navigation === this.navigationRevision) this.open("profiles");
+    else this.loadCatalogIfShown();
   }
   tasks = new Map<string, { action: Action; measurement: boolean; started: number; phase: string; value?: string; cancelRequested?: boolean }>();
   nextTask = 0;
@@ -384,7 +387,10 @@ export class AppState {
     this.syncAnimation();
     this.poll = setInterval(() => this.pollStatus(), 5000);
     const navigation = this.navigationRevision;
-    void this.perform("status").then(() => { if (navigation === this.navigationRevision && this.screen === "servers" && !this.closing) this.open("servers"); });
+    void this.perform("status").then(() => {
+      if (navigation === this.navigationRevision && this.screen === "servers" && !this.closing) this.open("servers");
+      else this.loadCatalogIfShown();
+    });
   }
   pollStatus() {
     if (!this.closing && !this.backendOffline && !this.reconnecting && ![...this.tasks.values()].some(task => task.action !== "status" && !compatible("status", task.action)))
@@ -565,8 +571,14 @@ export class AppState {
     if (loadScreen && screen === "autostart") { this.pendingScreenRead = "autostart/read"; void this.loadPendingScreenRead(); }
     if (screen === "target") this.editorValue = this.target;
     this.paint();
+    if (load) this.loadCatalogIfShown();
+    // Diagnostics immediately displays the cached evidence. Refresh is explicit.
+  }
+
+  /** Reads the cached catalog when the server table is showing an unloaded one. A cached read only. */
+  loadCatalogIfShown() {
     if (
-      load && screen === "servers" &&
+      !this.closing && this.screen === "servers" &&
       this.ready() &&
       this.status?.subscription === "configured" &&
       !this.catalogLoaded &&
@@ -576,7 +588,6 @@ export class AppState {
       !this.nativePreviewOnly()
     )
       void this.perform("servers/list");
-    // Diagnostics immediately displays the cached evidence. Refresh is explicit.
   }
   confirmFastest() {
     if (!this.ready() || this.catalogStale) { this.notify("Сначала запустите сервис и обновите список серверов.", true); return; }
