@@ -25,7 +25,7 @@ const backend: Backend = {
 const t = await createTestRenderer({width:100,height:20});
 const app = new App(t.renderer,backend);
 try {
-  app.target = "";
+  app.target = "https://example.com/";
   await app.perform("status");
   await app.perform("profiles/list");
   await app.perform("servers/list");
