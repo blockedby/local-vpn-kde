@@ -1390,7 +1390,7 @@ func assertSafeBrowserJSON(t *testing.T, body string) {
 		}
 		servers = append(servers, server)
 	}
-	allowedServer := map[string]bool{"availability": true, "ping_status": true, "download_mbps": true, "download_seconds": true, "downloaded_bytes": true, "server_id": true, "display_name": true, "transport": true, "security": true, "status": true, "latency_ms": true, "selected": true}
+	allowedServer := map[string]bool{"availability": true, "ping_status": true, "download_mbps": true, "download_seconds": true, "downloaded_bytes": true, "server_id": true, "display_name": true, "country": true, "transport": true, "security": true, "status": true, "latency_ms": true, "selected": true}
 	mandatoryServer := []string{"server_id", "display_name", "transport", "security", "status", "selected"}
 	for _, server := range servers {
 		for key := range server {
@@ -1407,6 +1407,9 @@ func assertSafeBrowserJSON(t *testing.T, body string) {
 		encoded, err := json.Marshal(server)
 		if err != nil || json.Unmarshal(encoded, &safe) != nil || safe.ServerID == "" || safe.DisplayName == "" || safe.Status == "" {
 			t.Fatalf("invalid server schema in %s", body)
+		}
+		if safe.Country != "" && (len(safe.Country) != 2 || safe.Country[0] < 'A' || safe.Country[0] > 'Z' || safe.Country[1] < 'A' || safe.Country[1] > 'Z') {
+			t.Fatalf("invalid country in %s", body)
 		}
 	}
 }

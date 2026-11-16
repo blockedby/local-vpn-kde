@@ -153,7 +153,9 @@ func defaultBrowserDependencies() browserDependencies {
 			node := vless.Node{Link: result.Link, Name: result.Name, Host: result.Host, Port: result.Port, Network: result.Network, Security: result.Security, Outbound: result.Outbound}
 			// The browser explicitly measures download throughput, never RTT.
 			c.TestDurationSeconds = 3
-			return testOneContext(ctx, c, node, false)
+			return measureProxyCountry(ctx, node.Host, func(ctx context.Context) (nettest.Result, error) {
+				return testOneContext(ctx, c, node, false)
+			})
 		},
 		apply: func(ctx context.Context, c config.Config, result picker.NodeResult) error {
 			return applyResultLockedWithOptionsOutput(ctx, c, result, false, false)
@@ -166,17 +168,21 @@ func (d browserDependencies) measure(ctx context.Context, c config.Config, r pic
 	if d.targetURL != "" {
 		c.TestURL, c.TestDurationSeconds, c.TestLimitKiB = d.targetURL, 0, 1
 		n := vless.Node{Link: r.Link, Name: r.Name, Host: r.Host, Port: r.Port, Network: r.Network, Security: r.Security, Outbound: r.Outbound}
-		return testOneContextUsing(ctx, c, n, false, func() (nettest.Result, error) {
-			return nettest.Result{}, nettest.CheckAvailability(ctx, c.TestSocks, d.targetURL, 10*time.Second)
+		return measureProxyCountry(ctx, n.Host, func(ctx context.Context) (nettest.Result, error) {
+			return testOneContextUsing(ctx, c, n, false, func() (nettest.Result, error) {
+				return nettest.Result{}, nettest.CheckAvailability(ctx, c.TestSocks, d.targetURL, 10*time.Second)
+			})
 		})
 	}
 	if d.tcpPing && r.Network == "quic" {
 		n := vless.Node{Link: r.Link, Name: r.Name, Host: r.Host, Port: r.Port, Network: r.Network, Security: r.Security, Outbound: r.Outbound}
 		started := time.Now()
-		_, err := testOneContextUsing(ctx, c, n, false, func() (nettest.Result, error) {
-			return nettest.Result{}, nettest.CheckAvailability(ctx, c.TestSocks, c.TestURL, 10*time.Second)
+		probe, err := measureProxyCountry(ctx, n.Host, func(ctx context.Context) (nettest.Result, error) {
+			return testOneContextUsing(ctx, c, n, false, func() (nettest.Result, error) {
+				return nettest.Result{}, nettest.CheckAvailability(ctx, c.TestSocks, c.TestURL, 10*time.Second)
+			})
 		})
-		return nettest.Result{Seconds: time.Since(started).Seconds()}, err
+		return nettest.Result{Seconds: time.Since(started).Seconds(), Country: probe.Country}, err
 	}
 	if d.tcpPing {
 		started := time.Now()

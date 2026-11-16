@@ -42,7 +42,11 @@ func checkNode(ctx context.Context, c config.Config, result picker.NodeResult, t
 		emit(result)
 	}
 	result.Availability = "failed"
-	if _, err := (browserDependencies{targetURL: target}).measure(ctx, c, result); err == nil {
+	probe, err := (browserDependencies{targetURL: target}).measure(ctx, c, result)
+	if probe.Country != "" {
+		result.Country = probe.Country
+	}
+	if err == nil {
 		result.Availability = "ready"
 	}
 	return result

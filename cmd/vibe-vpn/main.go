@@ -341,7 +341,8 @@ func testOneContextUsing(ctx context.Context, c config.Config, n vless.Node, deb
 	if tcpOpen(c.TestSocks, 200*time.Millisecond) {
 		return nettest.Result{}, fmt.Errorf("test SOCKS address %s became busy during run", c.TestSocks)
 	}
-	backend, err := tempBenchmarkBackend(c, n)
+	collector, _ := ctx.Value(benchmarkCountryKey{}).(*benchmarkCountryCollector)
+	backend, err := tempBenchmarkBackend(c, n, collector != nil && !debug)
 	if err != nil {
 		return nettest.Result{}, err
 	}
@@ -352,6 +353,8 @@ func testOneContextUsing(ctx context.Context, c config.Config, n vless.Node, deb
 	if debug {
 		cmd.Stdout = os.Stderr
 		cmd.Stderr = os.Stderr
+	} else if collector != nil {
+		cmd.Stderr = collector
 	}
 	if err := cmd.Start(); err != nil {
 		return nettest.Result{}, err
@@ -399,9 +402,9 @@ type benchmarkBackend struct {
 	configPath string
 }
 
-func tempBenchmarkBackend(c config.Config, n vless.Node) (benchmarkBackend, error) {
+func tempBenchmarkBackend(c config.Config, n vless.Node, countryLog ...bool) (benchmarkBackend, error) {
 
-	b, err := singBoxTempConfig(n, c.TestSocks)
+	b, err := singBoxTempConfig(n, c.TestSocks, countryLog...)
 	if err != nil {
 		return benchmarkBackend{}, err
 	}
@@ -430,7 +433,7 @@ func writeTempBenchmarkConfig(pattern string, b []byte) (string, error) {
 	return path, nil
 }
 
-func singBoxTempConfig(n vless.Node, socksAddr string) ([]byte, error) {
+func singBoxTempConfig(n vless.Node, socksAddr string, countryLog ...bool) ([]byte, error) {
 	host, portText, err := net.SplitHostPort(socksAddr)
 	if err != nil {
 		return nil, err
@@ -444,8 +447,12 @@ func singBoxTempConfig(n vless.Node, socksAddr string) ([]byte, error) {
 		return nil, err
 	}
 	out["tag"] = "benchmark-out"
+	level := "warn"
+	if len(countryLog) > 0 && countryLog[0] {
+		level = "debug"
+	}
 	cfg := map[string]any{
-		"log":       map[string]any{"level": "warn"},
+		"log":       map[string]any{"level": level},
 		"inbounds":  []any{map[string]any{"type": "socks", "tag": "test-socks", "listen": host, "listen_port": port}},
 		"outbounds": []any{out},
 		"route":     map[string]any{"final": "benchmark-out"},

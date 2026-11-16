@@ -105,6 +105,10 @@ func speedNodeUsing(ctx context.Context, c config.Config, r picker.NodeResult, t
 		emitPing()
 	}
 	n := vless.Node{Link: r.Link, Name: r.Name, Host: r.Host, Port: r.Port, Network: r.Network, Security: r.Security, Outbound: r.Outbound}
+	collector := newBenchmarkCountryCollector(n.Host)
+	if collector != nil {
+		ctx = context.WithValue(ctx, benchmarkCountryKey{}, collector)
+	}
 	err := deps.proxy(ctx, c, n, func() error {
 		if r.Network == "quic" {
 			started := time.Now()
@@ -138,6 +142,9 @@ func speedNodeUsing(ctx context.Context, c config.Config, r picker.NodeResult, t
 		}
 		return downloadErr
 	})
+	if country := collector.country(); country != "" && r.PingStatus == "ready" {
+		r.Country = country
+	}
 	if err != nil {
 		r.OK = false
 	}
@@ -315,7 +322,8 @@ func withSpeedProxy(ctx context.Context, c config.Config, n vless.Node, check fu
 	if tcpOpen(c.TestSocks, 200*time.Millisecond) {
 		return fmt.Errorf("test SOCKS address became busy")
 	}
-	backend, err := tempBenchmarkBackend(c, n)
+	collector, _ := ctx.Value(benchmarkCountryKey{}).(*benchmarkCountryCollector)
+	backend, err := tempBenchmarkBackend(c, n, collector != nil)
 	if err != nil {
 		return err
 	}
@@ -323,6 +331,9 @@ func withSpeedProxy(ctx context.Context, c config.Config, n vless.Node, check fu
 	backendCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	command := exec.CommandContext(backendCtx, backend.bin, backend.args...)
+	if collector != nil {
+		command.Stderr = collector
+	}
 	if err := command.Start(); err != nil {
 		return err
 	}
