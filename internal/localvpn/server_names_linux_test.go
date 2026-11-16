@@ -258,3 +258,100 @@ func TestUserNamesAreSanitizedWithoutSubscriptionRestrictions(t *testing.T) {
 		}
 	}
 }
+
+func TestRenameSucceedsWhenCatalogUnavailable(t *testing.T) {
+	b, id, _ := namesFixture(t)
+	if err := os.WriteFile(b.options.Executable, []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	reply := namesRequest(t, b, "servers/rename", map[string]any{"id": id, "name": "Stored"})
+	if reply["ok"] != true || reply["reason"] != "ok" {
+		t.Fatalf("saved rename reported failure: %#v", reply)
+	}
+	if _, ok := reply["catalog"]; ok {
+		t.Fatalf("failed catalog included: %#v", reply)
+	}
+	if got := b.readServerNames()[id]; got != "Stored" {
+		t.Fatalf("name not stored: %q", got)
+	}
+	if err := os.Remove(filepath.Join(b.options.Base, serverNamesLock)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "outside"), filepath.Join(b.options.Base, serverNamesLock)); err != nil {
+		t.Fatal(err)
+	}
+	reply = namesRequest(t, b, "servers/rename", map[string]any{"id": id, "name": "Failed"})
+	if reply["ok"] != false || reply["reason"] != "server-names-unavailable" {
+		t.Fatalf("failed save reported success: %#v", reply)
+	}
+}
+
+func TestNamesResetAtCapacity(t *testing.T) {
+	b, _, _ := namesFixture(t)
+	names := make(map[string]string, maxServerNames)
+	for i := 0; i < maxServerNames; i++ {
+		names[fmt.Sprintf("srv_%027d", i)] = "Stored Name"
+	}
+	data, err := json.Marshal(serverNamesData{Schema: 1, Names: names})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(b.options.Base, serverNamesFile), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	id := fmt.Sprintf("srv_%027d", 0)
+	reply := namesRequest(t, b, "servers/rename", map[string]any{"id": id, "name": ""})
+	if reply["ok"] != true {
+		t.Fatal(reply)
+	}
+	got := b.readServerNames()
+	if len(got) != maxServerNames-1 {
+		t.Fatalf("got %d names", len(got))
+	}
+	if _, ok := got[id]; ok {
+		t.Fatal("reset did not remove entry")
+	}
+}
+
+func TestHostileNamesFilesStayInDirectory(t *testing.T) {
+	for name, data := range map[string]string{
+		"huge":        strings.Repeat("x", 17*1024*1024),
+		"deep":        strings.Repeat("[", 11000) + strings.Repeat("]", 11000),
+		"wrong types": `{"schema":1,"names":{"srv_aaaaaaaaaaaaaaaaaaaaaaaaaaa":["x"]}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			b, id, _ := namesFixture(t)
+			if err := os.WriteFile(filepath.Join(b.options.Base, serverNamesFile), []byte(data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			reply := namesRequest(t, b, "servers/rename", map[string]any{"id": id, "name": "Safe"})
+			if reply["ok"] != true {
+				t.Fatal(reply)
+			}
+			if b.readServerNames()[id] != "Safe" {
+				t.Fatal("valid replacement missing")
+			}
+		})
+	}
+	for _, target := range []string{serverNamesFile, serverNamesLock} {
+		t.Run(target, func(t *testing.T) {
+			b, id, _ := namesFixture(t)
+			outside := filepath.Join(t.TempDir(), "outside")
+			if err := os.WriteFile(outside, []byte("untouched"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, filepath.Join(b.options.Base, target)); err != nil {
+				t.Fatal(err)
+			}
+			_ = namesRequest(t, b, "servers/list", "")
+			reply := namesRequest(t, b, "servers/rename", map[string]any{"id": id, "name": "Safe"})
+			if target == serverNamesLock && reply["ok"] != false {
+				t.Fatal(reply)
+			}
+			contents, err := os.ReadFile(outside)
+			if err != nil || string(contents) != "untouched" {
+				t.Fatalf("outside file changed: %q %v", contents, err)
+			}
+		})
+	}
+}

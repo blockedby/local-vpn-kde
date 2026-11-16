@@ -376,6 +376,7 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 			return reply, nil
 		}
 	}
+	renameSaved := false
 	if request.Action == "servers/rename" {
 		var fields map[string]json.RawMessage
 		raw := request.Value
@@ -395,6 +396,7 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 			reply["ok"], reply["reason"], reply["status"] = false, reason, b.Status()
 			return reply, nil
 		}
+		renameSaved = true
 		request.Action = "servers/list"
 	}
 	switch request.Action {
@@ -567,6 +569,12 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 		} else {
 			invalid()
 		}
+	}
+	if renameSaved {
+		if reply["ok"] != true {
+			delete(reply, "catalog")
+		}
+		reply["ok"], reply["reason"] = true, "ok"
 	}
 	reply["status"] = b.Status()
 	return reply, nil
