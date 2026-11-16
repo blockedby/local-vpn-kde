@@ -79,15 +79,19 @@ func (b *Bridge) readServerNames() map[string]string {
 	return names
 }
 
-// Caller holds namesMu exclusively through the subsequent list rewrite.
-func (b *Bridge) renameServer(id, name string) string {
+func (b *Bridge) renameServer(ctx context.Context, id, name string) string {
+	b.namesMu.Lock()
+	defer b.namesMu.Unlock()
 	fd, err := directory(b.options.Base, true, true)
 	if err != nil {
 		return "server-names-unavailable"
 	}
 	defer unix.Close(fd)
-	lock, err := lockFile(context.Background(), fd, serverNamesLock)
+	lock, err := lockFile(ctx, fd, serverNamesLock)
 	if err != nil {
+		if ctx.Err() != nil {
+			return "cancelled"
+		}
 		return "server-names-unavailable"
 	}
 	defer unix.Close(lock)
@@ -115,6 +119,9 @@ func (b *Bridge) renameServer(id, name string) string {
 	if err != nil {
 		return "server-names-unavailable"
 	}
+	if ctx.Err() != nil {
+		return "cancelled"
+	}
 	if err = atomicWrite(fd, serverNamesFile, append(data, '\n')); err != nil {
 		return "server-names-unavailable"
 	}
@@ -122,7 +129,7 @@ func (b *Bridge) renameServer(id, name string) string {
 	return "ok"
 }
 
-// Caller holds namesMu for reading or writing. All rows have already passed
+// All rows have already passed
 // sanitizeCatalog; do not expose an upstream original_name without an override.
 func (b *Bridge) applyServerNames(catalog map[string]any) {
 	names := b.readServerNames()

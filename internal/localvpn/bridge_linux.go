@@ -345,15 +345,6 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 		reply["status"] = b.Status()
 		return reply, nil
 	}
-	if strings.HasPrefix(request.Action, "servers/") {
-		if request.Action == "servers/rename" {
-			b.namesMu.Lock()
-			defer b.namesMu.Unlock()
-		} else {
-			b.namesMu.RLock()
-			defer b.namesMu.RUnlock()
-		}
-	}
 	if !request.Progress {
 		progress = nil
 		checkProgress = nil
@@ -400,7 +391,7 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 			reply["status"] = b.Status()
 			return reply, nil
 		}
-		if reason := b.renameServer(id, name); reason != "ok" {
+		if reason := b.renameServer(ctx, id, name); reason != "ok" {
 			reply["ok"], reply["reason"], reply["status"] = false, reason, b.Status()
 			return reply, nil
 		}

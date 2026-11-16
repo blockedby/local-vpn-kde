@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func namesRequest(t *testing.T, b *Bridge, action string, value any) map[string]any {
@@ -180,5 +181,59 @@ func TestServerNamesAcrossBridgeInstances(t *testing.T) {
 		if rows[0].(map[string]any)["display_name"] != "First Name" || rows[1].(map[string]any)["display_name"] != "Second Name" {
 			t.Fatalf("lost or stale names: %#v", rows)
 		}
+	}
+}
+
+func TestRenameDuringMeasurementAndCancellation(t *testing.T) {
+	b, id, _ := namesFixture(t)
+	dir := t.TempDir()
+	started := filepath.Join(dir, "started")
+	release := filepath.Join(dir, "release")
+	script := fmt.Sprintf("#!/bin/sh\nif [ \"$2\" = ping ]; then touch %q; while [ ! -f %q ]; do sleep 0.02; done; fi\nprintf '%%s\\n' '%s'\n", started, release, `{"schema":"vibe-vpn.server-browser.v2","status":"ok","servers":[]}`)
+	if err := os.WriteFile(b.options.Executable, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); namesRequest(t, b, "servers/ping", id) }()
+	defer func() { _ = os.WriteFile(release, nil, 0600); <-done }()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("measurement did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	renamed := make(chan map[string]any, 1)
+	go func() {
+		renamed <- namesRequest(t, b, "servers/rename", map[string]any{"id": id, "name": "Quick Name"})
+	}()
+	select {
+	case reply := <-renamed:
+		if reply["reason"] != "ok" {
+			t.Fatal(reply)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("rename blocked by measurement")
+	}
+}
+
+func TestCancelledRenameDoesNotSave(t *testing.T) {
+	b, id, _ := namesFixture(t)
+	namesRequest(t, b, "servers/rename", map[string]any{"id": id, "name": "Quick Name"})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	raw, _ := json.Marshal(map[string]any{"action": "servers/rename", "value": map[string]any{"id": id, "name": "Cancelled Name"}})
+	reply, err := b.request(ctx, raw, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply["ok"] != false {
+		t.Fatalf("cancelled rename succeeded: %#v", reply)
+	}
+	if got := b.readServerNames()[id]; got != "Quick Name" {
+		t.Fatalf("cancelled rename wrote %q", got)
 	}
 }
