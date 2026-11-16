@@ -1,0 +1,15 @@
+{
+  "source": "sapics/ip-location-db server-country",
+  "date_utc": "2026-11-16",
+  "licence": "PDDL 1.0 (Public Domain Dedication and License)",
+  "inputs": [
+    {
+      "url": "https://github.com/sapics/ip-location-db/releases/download/latest/server-country-ipv4-num.csv",
+      "sha256": "b35cab6c12f3044bd58468ac788db7e308ce866169c419fd0759b03da80e446e"
+    },
+    {
+      "url": "https://github.com/sapics/ip-location-db/releases/download/latest/server-country-ipv6-num.csv",
+      "sha256": "b4dc5d4e1dc8f8bb049e837887aa199203bec04d429f41f57078b798616d5a24"
+    }
+  ]
+}

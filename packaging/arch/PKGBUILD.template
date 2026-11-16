@@ -68,6 +68,7 @@ package() {
   install -Dm755 build/vibe-vpn "$pkgdir/usr/libexec/local-vpn-kde/vibe-vpn"
   install -Dm755 build/vibe-vpn-server-op-supervisor "$pkgdir/usr/libexec/local-vpn-kde/vibe-vpn-server-op-supervisor"
   install -Dm755 /usr/bin/sing-box "$pkgdir/usr/libexec/local-vpn-kde/sing-box"
+  install -Dm644 packaging/licenses/ip-location-db.LICENSE "$pkgdir/usr/share/licenses/$pkgname/ip-location-db.LICENSE"
   install -Dm644 /usr/share/licenses/sing-box/LICENSE "$pkgdir/usr/share/licenses/$pkgname/sing-box.LICENSE"
   /usr/bin/sing-box version > build/sing-box-version.txt
   install -Dm644 build/sing-box-version.txt "$pkgdir/usr/share/licenses/$pkgname/sing-box-version.txt"

@@ -1,0 +1,8 @@
+sapics/ip-location-db server-country database
+https://github.com/sapics/ip-location-db
+
+The upstream project publishes server-country under the Open Data Commons
+Public Domain Dedication and License v1.0 (PDDL), allowing use without
+attribution. See https://opendatacommons.org/licenses/pddl/1.0/ for the
+license text. The database is derived from public network data as described
+in the upstream README. The included manifest records the source downloads.

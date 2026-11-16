@@ -32,6 +32,7 @@ install -Dm644 packaging/arch/49-local-vpn-kde.rules "$stage/usr/share/polkit-1/
 install -Dm644 packaging/arch/org.local-vpn-kde.configure.policy "$stage/usr/share/polkit-1/actions/org.local-vpn-kde.configure.policy"
 mkdir -p "$stage/usr/share/local-vpn-kde/config"
 cp -a --no-preserve=ownership config/openvpn config/sing-box "$stage/usr/share/local-vpn-kde/config/"
+install -Dm644 packaging/licenses/ip-location-db.LICENSE "$stage/usr/share/doc/local-vpn-kde-native/ip-location-db.LICENSE"
 install -Dm644 /usr/share/licenses/sing-box/LICENSE "$stage/usr/share/doc/local-vpn-kde-native/sing-box.LICENSE"
 # Bun includes its own license inventory in the executable.
 bun --license > "$stage/usr/share/doc/local-vpn-kde-native/bun.LICENSE"
