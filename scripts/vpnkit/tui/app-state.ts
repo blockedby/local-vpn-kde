@@ -659,7 +659,17 @@ export class AppState {
       this.notify("Переименование уже выполняется. Дождитесь завершения.", true); return;
     }
     const revision = this.navigationRevision;
+    const typed = this.editorValue.replace(/\s+/g, " ").trim();
     const reply = await this.perform("servers/rename", JSON.stringify({ id: target.id, name: this.editorValue }));
+    // The name is saved even when the backend could not attach a fresh catalog;
+    // show it on the row now and let the next catalog read confirm it.
+    if (reply?.ok && !reply.catalog?.servers) {
+      const at = this.servers.findIndex(s => s.server_id === target.id);
+      if (at >= 0) {
+        const { original_name, ...row } = this.servers[at]!;
+        this.servers[at] = typed ? { ...row, display_name: typed, original_name: target.original } : { ...row, display_name: original_name ?? row.display_name };
+      }
+    }
     if (reply?.ok && this.screen === "server-rename" && this.navigationRevision === revision) {
       this.serverID = target.id; this.open(this.overlayBase, false); this.syncServerViewport(); this.paint();
     }

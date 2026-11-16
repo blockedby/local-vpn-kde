@@ -15,6 +15,9 @@ export function updateCatalog(state: AppState, reply: Reply, action: Action) {
             ...(action === "servers/speed-batch" ? { status: row.status, download_mbps: row.download_mbps, download_seconds: row.download_seconds, downloaded_bytes: row.downloaded_bytes } : {}),
             ping_status: row.ping_status,
             latency_ms: row.latency_ms,
+            // A measurement is where a hostname server's country becomes known,
+            // or stops being known when its addresses no longer agree.
+            country: row.country,
             availability:
               state.batch?.target === state.target
                 ? row.availability
@@ -51,6 +54,7 @@ export function updateCatalog(state: AppState, reply: Reply, action: Action) {
         if (action === "servers/speed")
           state.servers[at] = {
             ...previous,
+            country: row.country,
             status: row.status,
             download_mbps: row.download_mbps,
             download_seconds: row.download_seconds,
@@ -59,6 +63,7 @@ export function updateCatalog(state: AppState, reply: Reply, action: Action) {
         else if (action === "servers/ping")
           state.servers[at] = {
             ...previous,
+            country: row.country,
             ping_status: row.ping_status,
             latency_ms: row.latency_ms,
           };
@@ -66,7 +71,7 @@ export function updateCatalog(state: AppState, reply: Reply, action: Action) {
           action === "servers/availability" &&
           state.batch?.target === state.target
         )
-          state.servers[at] = { ...previous, availability: row.availability };
+          state.servers[at] = { ...previous, country: row.country, availability: row.availability };
       }
     }
     if (!state.servers.some((s) => s.server_id === state.serverID))

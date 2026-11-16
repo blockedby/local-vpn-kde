@@ -88,3 +88,57 @@ test("help registry includes the row rename action", async () => {
   expect(serverMenuActions(state).map(a => a.label)).toContain("Переименовать");
   expect(state.groupedActions().flatMap(g => g.actions).map(a => a.id)).toContain("servers:rename"); await state.close();
 });
+
+test("a measurement reply sets and clears the country of its server", async () => {
+  const backend = new FakeBackend();
+  const state = new AppState(backend);
+  state.status = { ...backend.status };
+  try {
+    state.servers = structuredClone(rows).map(({ country, ...row }) => row);
+    state.catalogLoaded = true;
+    const id = rows[0]!.server_id;
+    const original = backend.request.bind(backend);
+    let country: string | undefined = "JP";
+    backend.request = async (action, value) => {
+      const reply = await original(action, value);
+      for (const row of [...(reply.catalog?.servers ?? []), ...(reply.catalog?.server ? [reply.catalog.server] : [])])
+        if (row.server_id === id) { if (country) row.country = country; else delete row.country; }
+      return reply;
+    };
+    const shown = () => state.servers.find(row => row.server_id === id)!.country;
+    await state.perform("servers/ping", id); expect(shown()).toBe("JP");
+    country = undefined;
+    await state.perform("servers/check-batch", JSON.stringify({ ids: [id] })); expect(shown()).toBeUndefined();
+    country = "NL";
+    await state.perform("servers/speed-batch", JSON.stringify({ ids: [id] })); expect(shown()).toBe("NL");
+    country = "DE";
+    await state.perform("servers/speed", id); expect(shown()).toBe("DE");
+  } finally { await state.close(); }
+});
+
+test("a saved rename without a catalog in the reply still shows on the row", async () => {
+  const backend = new FakeBackend();
+  const state = new AppState(backend);
+  state.status = { ...backend.status };
+  try {
+    state.servers = structuredClone(rows); state.catalogLoaded = true; state.open("servers", false);
+    const target = state.servers[0]!; state.serverID = target.server_id;
+    const original = backend.request.bind(backend);
+    backend.request = async (action, value) => {
+      const reply = await original(action, value);
+      if (action === "servers/rename") delete reply.catalog;
+      return reply;
+    };
+    state.openServerRename(); state.edit("  My   node ");
+    await state.saveServerRename();
+    const renamed = state.servers.find(row => row.server_id === target.server_id)!;
+    expect(renamed.display_name).toBe("My node");
+    expect(renamed.original_name).toBe(target.display_name);
+    expect(state.screen).not.toBe("server-rename");
+    state.openServerRename(); state.edit("");
+    await state.saveServerRename();
+    const reset = state.servers.find(row => row.server_id === target.server_id)!;
+    expect(reset.display_name).toBe(target.display_name);
+    expect(reset.original_name).toBeUndefined();
+  } finally { await state.close(); }
+});
