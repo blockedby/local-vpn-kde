@@ -36,6 +36,8 @@ type Bridge struct {
 	refreshMu   bridgeGate
 	mutationMu  bridgeGate
 	operationMu bridgeGate
+	namesMu     sync.RWMutex
+	serverNames map[string]string
 }
 
 // bridgeGate is a cancellable read/write gate. Waiting never owns a worker's
@@ -149,6 +151,7 @@ func NewBridge(o BridgeOptions) (*Bridge, error) {
 	if !o.Mock && SubscriptionConfigured(o.Base) {
 		b.status["subscription"] = "configured"
 	}
+	b.loadServerNames()
 	return b, nil
 }
 func (b *Bridge) Cancel() {
@@ -265,7 +268,7 @@ func (b *Bridge) Serve(ctx context.Context, input io.Reader, output io.Writer) e
 			defer func() { stop(); b.mu.Lock(); delete(b.active, head.ID); b.mu.Unlock() }()
 			// Selection changes only the active proxy. Probes own independent proxies;
 			// lifecycle and catalog mutations must wait for those proxies to finish.
-			shared := head.Action == "servers/select" || head.Action == "servers/list" || head.Action == "servers/current" || head.Action == "servers/ping" || head.Action == "servers/speed" || head.Action == "servers/availability" || head.Action == "servers/check-batch" || head.Action == "servers/speed-batch" || head.Action == "status" || head.Action == "subscription/read"
+			shared := head.Action == "servers/rename" || head.Action == "servers/select" || head.Action == "servers/list" || head.Action == "servers/current" || head.Action == "servers/ping" || head.Action == "servers/speed" || head.Action == "servers/availability" || head.Action == "servers/check-batch" || head.Action == "servers/speed-batch" || head.Action == "status" || head.Action == "subscription/read"
 			mutation := !shared || head.Action == "servers/select"
 			canceled := func() {
 				reason := "cancelled"
@@ -342,13 +345,22 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 		reply["status"] = b.Status()
 		return reply, nil
 	}
+	if strings.HasPrefix(request.Action, "servers/") {
+		if request.Action == "servers/rename" {
+			b.namesMu.Lock()
+			defer b.namesMu.Unlock()
+		} else {
+			b.namesMu.RLock()
+			defer b.namesMu.RUnlock()
+		}
+	}
 	if !request.Progress {
 		progress = nil
 		checkProgress = nil
 		speedProgress = nil
 	}
 	var value string
-	if len(request.Value) > 0 && string(request.Value) != "null" {
+	if request.Action != "servers/rename" && len(request.Value) > 0 && string(request.Value) != "null" {
 		if err := json.Unmarshal(request.Value, &value); err != nil {
 			invalid()
 			reply["status"] = b.Status()
@@ -362,7 +374,7 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 	}
 	if b.options.Runtime == "native" {
 		switch request.Action {
-		case "status", "backend/start", "network/reapply", "start", "disconnect", "stop", "autostart/read", "autostart/set":
+		case "status", "backend/start", "network/reapply", "start", "disconnect", "stop", "autostart/read", "autostart/set", "servers/rename":
 		case "profiles/list", "profiles/add", "profiles/open", "profiles/remove", "subscription", "subscription/read", "servers/list", "servers/refresh", "servers/current", "servers/select", "servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch", "toggle-mode", "diagnostics":
 			if b.options.Repo != InstalledAssetRoot {
 				reply["ok"], reply["reason"], reply["status"] = false, "unsupported-native-action", b.Status()
@@ -372,6 +384,27 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 			reply["ok"], reply["reason"], reply["status"] = false, "unsupported-native-action", b.Status()
 			return reply, nil
 		}
+	}
+	if request.Action == "servers/rename" {
+		var fields map[string]json.RawMessage
+		raw := request.Value
+		if len(raw) > 0 && raw[0] == '"' {
+			var encoded string
+			if json.Unmarshal(raw, &encoded) == nil {
+				raw = []byte(encoded)
+			}
+		}
+		var id, name string
+		if json.Unmarshal(raw, &fields) != nil || len(fields) != 2 || len(fields["id"]) == 0 || fields["id"][0] != '"' || len(fields["name"]) == 0 || fields["name"][0] != '"' || json.Unmarshal(fields["id"], &id) != nil || json.Unmarshal(fields["name"], &name) != nil || !serverID.MatchString(id) {
+			invalid()
+			reply["status"] = b.Status()
+			return reply, nil
+		}
+		if reason := b.renameServer(id, name); reason != "ok" {
+			reply["ok"], reply["reason"], reply["status"] = false, reason, b.Status()
+			return reply, nil
+		}
+		request.Action = "servers/list"
 	}
 	switch request.Action {
 	case "status":
@@ -513,6 +546,7 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 				}
 			}
 			if err == nil {
+				b.applyServerNames(catalog)
 				reply["catalog"] = catalog
 				reply["ok"] = catalog["status"] == "ok"
 				reply["reason"] = catalog["status"]
