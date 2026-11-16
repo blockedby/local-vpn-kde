@@ -8,7 +8,10 @@ import (
 	"encoding/json"
 	"math"
 	"net"
+	"net/netip"
 	"net/url"
+
+	"github.com/blockedby/local-vpn-kde/internal/geoip"
 	"regexp"
 	"sort"
 	"strings"
@@ -56,6 +59,7 @@ type BrowserServer struct {
 	PingStatus      string   `json:"ping_status,omitempty"`
 	ServerID        string   `json:"server_id"`
 	DisplayName     string   `json:"display_name"`
+	Country         string   `json:"country,omitempty"`
 	Transport       string   `json:"transport"`
 	Security        string   `json:"security"`
 	Status          string   `json:"status"`
@@ -89,6 +93,9 @@ func NewBrowserCatalog(generation uint64, salt []byte, results []NodeResult) Bro
 		}
 		if _, exists := byID[id]; exists {
 			continue
+		}
+		if addr, err := netip.ParseAddr(strings.Trim(result.Host, "[]")); err == nil {
+			result.Country, _ = geoip.Lookup(addr)
 		}
 		byID[id] = BrowserRecord{ID: id, DisplayName: SafeDisplayName(result.Name), Result: result}
 	}
@@ -238,7 +245,7 @@ func (r BrowserRecord) Safe(selected bool) BrowserServer {
 	}
 	return BrowserServer{
 		ProfileID: r.Result.ProfileID, ServerID: r.ID, DisplayName: SafeDisplayName(r.DisplayName),
-		Transport: safeTransport(r.Result.Network), Security: safeSecurity(r.Result.Security),
+		Country: safeCountry(r.Result.Country), Transport: safeTransport(r.Result.Network), Security: safeSecurity(r.Result.Security),
 		Availability: safeAvailability(r.Result.Availability), PingStatus: pingStatus, Status: status, LatencyMS: latency, Selected: selected, DownloadMbps: speed, DownloadSeconds: seconds, DownloadedBytes: size,
 	}
 }
@@ -369,4 +376,11 @@ func safeAvailability(value string) string {
 		return value
 	}
 	return "untested"
+}
+
+func safeCountry(s string) string {
+	if len(s) == 2 && s[0] >= 'A' && s[0] <= 'Z' && s[1] >= 'A' && s[1] <= 'Z' {
+		return s
+	}
+	return ""
 }

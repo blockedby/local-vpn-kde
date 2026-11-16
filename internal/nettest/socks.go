@@ -14,6 +14,7 @@ import (
 )
 
 type Result struct {
+	Country string  `json:"-"`
 	Bytes   int64   `json:"bytes"`
 	Seconds float64 `json:"seconds"`
 	Mbps    float64 `json:"mbps"`
@@ -61,7 +62,7 @@ func DownloadForContext(ctx context.Context, socksAddr, testURL string, duration
 		if sec <= 0 {
 			return nil
 		}
-		return progress(Result{current, sec, float64(current) * 8 / sec / 1e6})
+		return progress(Result{Bytes: current, Seconds: sec, Mbps: float64(current) * 8 / sec / 1e6})
 	}
 	for time.Now().Before(deadline) {
 		r, err := downloadContext(ctx, socksAddr, testURL, 0, deadline, func(n int64) error { return emit(total+n, false) })
@@ -93,7 +94,7 @@ func DownloadForContext(ctx context.Context, socksAddr, testURL string, duration
 	if err := emit(total, true); err != nil {
 		return Result{}, err
 	}
-	return Result{total, sec, float64(total) * 8 / sec / 1e6}, nil
+	return Result{Bytes: total, Seconds: sec, Mbps: float64(total) * 8 / sec / 1e6}, nil
 }
 
 type progressError struct{ error }
@@ -224,7 +225,7 @@ func downloadContext(ctx context.Context, socksAddr, testURL string, limit int64
 	if sec <= 0 {
 		return Result{}, fmt.Errorf("download completed too quickly to measure")
 	}
-	return Result{n, sec, float64(n) * 8 / sec / 1e6}, nil
+	return Result{Bytes: n, Seconds: sec, Mbps: float64(n) * 8 / sec / 1e6}, nil
 }
 
 type HTTPResult struct {

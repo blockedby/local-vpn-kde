@@ -726,17 +726,14 @@ func sanitizeCatalog(data []byte, ids []string) (map[string]any, error) {
 		if !ok {
 			name = "Server"
 		}
-		runes := []rune(name)
-		if len(runes) > 160 {
-			runes = runes[:160]
-		}
-		name = strings.Map(func(r rune) rune {
-			if unicode.IsControl(r) {
-				return -1
-			}
-			return r
-		}, string(runes))
+		name = picker.SafeDisplayName(name)
 		safe := map[string]any{"server_id": id, "display_name": name, "selected": item["selected"] == true}
+		if original, ok := item["original_name"].(string); ok {
+			safe["original_name"] = picker.SafeDisplayName(original)
+		}
+		if country, ok := item["country"].(string); ok && len(country) == 2 && country[0] >= 'A' && country[0] <= 'Z' && country[1] >= 'A' && country[1] <= 'Z' {
+			safe["country"] = country
+		}
 		if id, ok := item["profile_id"].(string); ok && profiles.IDPattern.MatchString(id) {
 			safe["profile_id"] = id
 		}

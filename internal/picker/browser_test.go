@@ -174,3 +174,21 @@ func TestBrowserCatalogKeepsSameEndpointInSeparateProfiles(t *testing.T) {
 		t.Fatal("response lost profile boundaries")
 	}
 }
+
+func TestCatalogCountryUsesIPLiteralWithoutResolvingHostnames(t *testing.T) {
+	salt := []byte("0123456789abcdef0123456789abcdef")
+	cat := NewBrowserCatalog(1, salt, []NodeResult{
+		{Name: "Public Server", Host: "1.1.1.1", Port: 443},
+		{Name: "Private Server", Host: "192.0.2.1", Port: 443},
+		{Name: "Domain Server", Host: "private.invalid", Port: 443},
+	})
+	for _, r := range cat.Servers {
+		want := ""
+		if r.Result.Host == "1.1.1.1" {
+			want = "AU"
+		}
+		if got := r.Safe(false).Country; got != want {
+			t.Fatalf("country for %s = %q, want %q", r.Result.Host, got, want)
+		}
+	}
+}

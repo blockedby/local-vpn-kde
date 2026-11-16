@@ -27,6 +27,9 @@ type serverCheckProbe func(context.Context, config.Config, picker.NodeResult, st
 func checkNode(ctx context.Context, c config.Config, result picker.NodeResult, target string) picker.NodeResult {
 	result.PingMS, result.PingStatus, result.Availability = 0, "failed", "untested"
 	ping, err := (browserDependencies{tcpPing: true}).measure(ctx, c, result)
+	if ping.Country != "" {
+		result.Country = ping.Country
+	}
 	if err != nil || ctx.Err() != nil {
 		if emit, ok := ctx.Value(checkProgressKey{}).(func(picker.NodeResult)); ok {
 			emit(result)
@@ -214,6 +217,9 @@ func runBrowserCheckBatch(cmd *cobra.Command, o *cliOptions, ids []string, targe
 		for j := range latest.Servers {
 			if latest.Servers[j].ID == record.ID {
 				// Only this pipeline's evidence changes; speed and selection stay intact.
+				if results[i].Country != "" {
+					latest.Servers[j].Result.Country = results[i].Country
+				}
 				latest.Servers[j].Result.PingMS = results[i].PingMS
 				latest.Servers[j].Result.PingStatus = results[i].PingStatus
 				latest.Servers[j].Result.Availability = results[i].Availability

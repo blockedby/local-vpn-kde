@@ -1647,3 +1647,47 @@ func TestBrowserSpeedAndBatchAllowSelectionWhileProbeRuns(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserHostnameCountryPersistsAfterMeasurementAndRefresh(t *testing.T) {
+	dir, cfg, cat := browserFixture(t)
+	record := cat.Servers[0]
+	if record.Safe(false).Country != "" {
+		t.Fatal("hostname acquired country before measurement")
+	}
+	deps := browserDependencies{probe: func(context.Context, config.Config, picker.NodeResult) (nettest.Result, error) {
+		return nettest.Result{Country: "JP", Seconds: .1}, nil
+	}}
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	if err := runBrowserPing(cmd, &cliOptions{configPath: cfg}, record.ID, deps); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := loadBrowserCatalogLocked(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := stored.Find(record.ID)
+	if got.Safe(false).Country != "JP" {
+		t.Fatalf("country after measurement = %q", got.Safe(false).Country)
+	}
+	results := make([]picker.NodeResult, 0, len(stored.Servers))
+	for _, r := range stored.Servers {
+		fresh := r.Result
+		fresh.Country = ""
+		results = append(results, fresh)
+	}
+	refresh := browserDependencies{listOnly: true, load: func(context.Context, config.Config) ([]picker.NodeResult, error) { return results, nil }}
+	cmd = &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	if err := runBrowserTestAll(cmd, &cliOptions{configPath: cfg}, refresh); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = loadBrowserCatalogLocked(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ = stored.Find(record.ID)
+	if got.Safe(false).Country != "JP" {
+		t.Fatalf("country after refresh = %q", got.Safe(false).Country)
+	}
+}
