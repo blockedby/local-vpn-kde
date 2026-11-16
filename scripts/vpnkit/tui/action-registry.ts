@@ -195,8 +195,12 @@ export function serverMenuActions(state: AppState): ActionDefinition[] {
   if (target) state.serverID = target.id;
   const actions = actionRegistry(state, true);
   state.serverID = previousID;
-  return ["servers:select", "servers:single-speed", "servers:details"].flatMap(id => {
-    const action = actions.find(item => item.id === id);
+  const ping = actions.find(item => item.id === "servers:p" || item.id === "servers:ping-alias");
+  const singlePing = ping && { ...ping, id: "servers:single-check", key: "", keys: [], label: "Ping и сайт",
+    unavailableReason: state.catalogStale ? "Подписка изменена. Обновите список серверов." : ping.unavailableReason,
+    run: () => { if (target) void state.runBatch("ping", { ids: [target.id], target: state.target }); } };
+  return ["servers:select", "servers:single-check", "servers:single-speed", "servers:details"].flatMap(id => {
+    const action = id === "servers:single-check" ? singlePing : actions.find(item => item.id === id);
     if (!action) return [];
     const valid = !!target && state.servers.some(s => s.server_id === target.id && s.display_name === target.name);
     const reason = !valid ? "Сервер изменился. Выберите сервер заново." : action.unavailableReason;

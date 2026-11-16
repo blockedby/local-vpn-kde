@@ -31,7 +31,7 @@ export class OverlayView {
     this.rowMenu = new BoxRenderable(renderer, { position: "absolute", top: 3, left: 2, width: 48, height: 7, zIndex: 49, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, overflow: "hidden", flexDirection: "column", visible: false });
     this.rowMenu.onMouseDown = event => event.stopPropagation();
     this.rowHeader = new TextRenderable(renderer, { content: "", height: 1, fg: p.muted, flexShrink: 0 }); this.rowMenu.add(this.rowHeader);
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 4; i++) {
       const row = new TextRenderable(renderer, { content: "", height: 1, flexShrink: 0, onMouseDown: event => {
         if (event.button !== 0 || !this.current) return;
         event.stopPropagation(); const state = this.current; state.serverMenuIndex = i;

@@ -11,7 +11,7 @@ for (const [width, height] of [[100, 35], [60, 16]] as const) test(`row menu fit
     Object.assign(app.servers.find(server => server.server_id === app.serverID)!, { latency_ms: 24, download_mbps: 112, ping_status: "ready" });
     terminal.mockInput.pressEnter(); await terminal.renderOnce();
     const frame = terminal.captureCharFrame();
-    for (const text of ["Tokyo-03 · 24 мс · 112.0 Мбит/с", "Выбрать сервер", "Скорость сервера", "Подробности сервера", "↑↓ действие · Enter выполнить · Esc закрыть"]) expect(frame).toContain(text);
+    for (const text of ["Tokyo-03 · 24 мс · 112.0 Мбит/с", "Выбрать сервер", "Ping и сайт", "Скорость сервера", "Подробности сервера", "↑↓ действие · Enter выполнить · Esc закрыть"]) expect(frame).toContain(text);
     if (process.env.TILE_HOME_CAPTURE === "1") await Bun.write(`../../../.build/tile-home-frames/${width}x${height}-row-menu.txt`, frame + "\n");
     terminal.mockInput.pressEnter(); await terminal.renderOnce();
     const confirm = terminal.captureCharFrame(); expect(confirm).toContain("Выбрать сервер Tokyo-03?"); expect(app.selected).toBe(0);
@@ -37,8 +37,8 @@ test("unavailable row entries and reasons remain visible at the minimum size", a
     await app.perform("status"); app.open("servers", false); await app.perform("servers/list"); app.notice = ""; app.paint();
     terminal.mockInput.pressEnter(); app.catalogStale = true; app.paint(); await terminal.renderOnce();
     let frame = terminal.captureCharFrame();
-    for (const text of ["Выбрать сервер", "Скорость сервера", "Подробности сервера", "Подписка изменена.", "Обновите список серверов."]) expect(frame).toContain(text);
+    for (const text of ["Выбрать сервер", "Ping и сайт", "Скорость сервера", "Подробности сервера", "Подписка изменена.", "Обновите список серверов."]) expect(frame).toContain(text);
     app.servers = []; app.paint(); await terminal.renderOnce(); frame = terminal.captureCharFrame();
-    for (const text of ["Выбрать сервер", "Скорость сервера", "Подробности сервера", "Сервер изменился."]) expect(frame).toContain(text);
+    for (const text of ["Выбрать сервер", "Ping и сайт", "Скорость сервера", "Подробности сервера", "Сервер изменился."]) expect(frame).toContain(text);
   } finally { await app.close(); }
 });

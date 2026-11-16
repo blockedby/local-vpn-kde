@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { AppState } from "./app-state";
 import { serverMenuActions } from "./action-registry";
-import { FakeBackend, initial, rows } from "./app-test-fixtures";
+import { FakeBackend, initial, reply, rows, settle } from "./app-test-fixtures";
 
 function fixture() {
   const backend = new FakeBackend(), state = new AppState(backend);
@@ -15,8 +15,8 @@ test("row menu navigates with clamping, Home/End and escape restores its server"
   const { state, key } = fixture();
   try {
     key("return"); expect(state.serverMenu).toBe(true); expect(state.serverMenuIndex).toBe(0);
-    expect(serverMenuActions(state).map(a => [a.id, a.key])).toEqual([["servers:select", "return"], ["servers:single-speed", "shift+t"], ["servers:details", "l"]]);
-    key("up"); expect(state.serverMenuIndex).toBe(0); key("end"); key("down"); expect(state.serverMenuIndex).toBe(2);
+    expect(serverMenuActions(state).map(a => [a.id, a.key])).toEqual([["servers:select", "return"], ["servers:single-check", ""], ["servers:single-speed", "shift+t"], ["servers:details", "l"]]);
+    key("up"); expect(state.serverMenuIndex).toBe(0); key("end"); key("down"); expect(state.serverMenuIndex).toBe(3);
     key("home"); key("down"); expect(state.serverMenuIndex).toBe(1);
     state.serverID = rows[1]!.server_id; key("escape"); expect(state.serverMenu).toBe(false); expect(state.serverID).toBe(rows[0]!.server_id);
   } finally { await state.close(); }
@@ -26,7 +26,7 @@ test("menu actions use the existing handlers and captured target, including queu
   for (const trigger of ["return", "T"]) {
     const { state, key } = fixture(); let speedID: string | undefined;
     state.testHomeSpeed = async id => { speedID = id; };
-    try { key("return"); state.serverID = rows[1]!.server_id; if (trigger === "return") key("down"); key(trigger); expect(speedID).toBe(rows[0]!.server_id); expect(state.serverMenu).toBe(false); } finally { await state.close(); }
+    try { key("return"); state.serverID = rows[1]!.server_id; if (trigger === "return") { key("down"); key("down"); } key(trigger); expect(speedID).toBe(rows[0]!.server_id); expect(state.serverMenu).toBe(false); } finally { await state.close(); }
   }
   {
     const { state, key } = fixture(); let speedID: string | undefined;
@@ -88,4 +88,34 @@ test("confirmation navigation includes Tab and horizontal arrows with safe defau
     const { state, key } = fixture();
     try { state.open(screen, false, false); const safe = screen === "profile-remove" ? 1 : 0; expect(state.selected).toBe(safe); key("tab"); expect(state.selected).toBe(1 - safe); key("left"); expect(state.selected).toBe(safe); key("right"); expect(state.selected).toBe(1 - safe); } finally { await state.close(); }
   }
+});
+
+
+test("row check uses its captured server and records session history", async () => {
+  const { state, backend, key } = fixture();
+  try {
+    key("return"); state.serverID = rows[1]!.server_id; key("down"); key("return");
+    await settle();
+    const calls = backend.calls.filter(call => call.action === "servers/check-batch");
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(calls[0]!.value!).ids).toEqual([rows[0]!.server_id]);
+    expect(state.history.some(entry => entry.action === "servers/check-batch" && entry.count === 1)).toBe(true);
+  } finally { await state.close(); }
+});
+
+test("row check queues behind a measurement with the captured server", async () => {
+  const { state, backend, key } = fixture();
+  let finish!: (result: ReturnType<typeof reply>) => void;
+  backend.hold = { action: "servers/speed-batch", promise: new Promise(resolve => { finish = resolve; }) };
+  try {
+    const active = state.runBatch("speed"); await settle();
+    key("return"); state.serverID = rows[1]!.server_id; key("down"); key("return");
+    expect(state.queue).toHaveLength(1);
+    expect(JSON.parse(state.queue[0]!.value!).ids).toEqual([rows[0]!.server_id]);
+    expect(backend.calls.some(call => call.action === "servers/check-batch")).toBe(false);
+    finish(reply()); await active; await settle();
+    const call = backend.calls.find(item => item.action === "servers/check-batch");
+    expect(JSON.parse(call!.value!).ids).toEqual([rows[0]!.server_id]);
+    expect(state.history.some(entry => entry.action === "servers/check-batch" && entry.count === 1)).toBe(true);
+  } finally { finish(reply()); await settle(); await state.close(); }
 });
