@@ -6,6 +6,7 @@ Usage: python3 docs/render-tui-captures.py CAPTURE_DIRECTORY FONT_PATH
 import json
 from pathlib import Path
 import sys
+import unicodedata
 from PIL import Image, ImageDraw, ImageFont
 
 source = Path(sys.argv[1])
@@ -22,6 +23,12 @@ for name in ("home", "servers", "profiles"):
             width = span["width"] * cell
             top = padding + y * line_height
             draw.rectangle((x, top, x + width - 1, top + line_height - 1), fill=tuple(span["bg"][:3]))
-            draw.text((x, top), span["text"], font=font, fill=tuple(span["fg"][:3]))
+            # Place every character on its own cell: a glyph taken from a fallback
+            # font can be wider than a cell and would otherwise push the rest of
+            # the span under the next span's background.
+            column = x
+            for char in span["text"]:
+                draw.text((column, top), char, font=font, fill=tuple(span["fg"][:3]))
+                column += cell * (2 if unicodedata.east_asian_width(char) in "WF" else 1)
             x += width
     image.save(source / f"{name}.png", optimize=True)
