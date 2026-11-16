@@ -31,3 +31,14 @@ test("clicking a tile activates the section and escape returns its highlight", a
   const t = await createTestRenderer({ width: 100, height: 35 }); const app = new App(t.renderer, new FakeBackend());
   try { await app.perform("status"); await t.renderOnce(); await t.mockMouse.click(38, 2); await t.renderOnce(); expect(app.screen).toBe("servers"); expect(t.captureCharFrame()).toContain("‹ Главная › Серверы"); t.mockInput.pressEscape(); await Bun.sleep(60); await t.renderOnce(); expect(app.screen).toBe("home"); expect(app.homeIndex).toBe(1); } finally { await app.close(); }
 });
+
+
+test("connection title retains its start shortcut when connected", async () => {
+  const t = await createTestRenderer({ width: 100, height: 35 }); const b = new FakeBackend();
+  b.status.networkmanager_active = "yes"; const app = new App(t.renderer, b);
+  try {
+    await app.perform("status"); await t.renderOnce();
+    const line = t.captureCharFrame().split("\n").find(line => line.includes("Подключение"))!;
+    expect(line.split("│")[1]).toMatch(/Подключение +s *$/);
+  } finally { await app.close(); }
+});

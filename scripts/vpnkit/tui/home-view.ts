@@ -1,5 +1,6 @@
 import { BoxRenderable, TextAttributes, TextRenderable, type CliRenderer } from "@opentui/core";
 import type { AppState } from "./app-state";
+import { HOME_CONNECT_KEY } from "./action-registry";
 import { cell, displayCheckAddress, pluralRu } from "./formatting";
 import { connection, palette as p } from "./model";
 
@@ -65,7 +66,7 @@ export class HomeView {
       if (tile.box.parent !== row) { tile.box.parent?.remove(tile.box); row.add(tile.box); }
       tile.box.height = compact ? 4 : 5 + (Math.floor(i / cols) === Math.floor(5 / cols) ? extra : 0); tile.box.borderColor = i === state.homeIndex ? p.accent : p.edge;
       const title = `${i === state.homeIndex ? "›" : " "} ${glyphs[i]} ${data[i]![0]!}`;
-      const shortcut = titleActions[i]?.keys[0];
+      const shortcut = titleActions[i]?.keys[0] ?? (i === 0 ? HOME_CONNECT_KEY : undefined);
       tile.title.content = shortcut && Bun.stringWidth(title) + 1 + Bun.stringWidth(shortcut) <= width
         ? title + " ".repeat(width - Bun.stringWidth(title) - Bun.stringWidth(shortcut)) + shortcut
         : cell(title, width).trimEnd();

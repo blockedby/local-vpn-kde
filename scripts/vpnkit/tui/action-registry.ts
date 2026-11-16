@@ -2,6 +2,8 @@ import { isOverlay, type AppKeyEvent, type AppState, type Screen } from "./app-s
 import { compatible } from "./request-policy";
 import type { ActionDefinition, ActionScope } from "./menu-actions";
 
+export const HOME_CONNECT_KEY = "s";
+
 /** Keys use OpenTUI names; modified keys use ctrl+ / shift+ prefixes. */
 export function actionRegistry(state: AppState, rowActions = false): ActionDefinition[] {
   const editor = ["subscription", "target", "profile-name", "profile-source"].includes(state.screen);
@@ -127,7 +129,7 @@ export function actionRegistry(state: AppState, rowActions = false): ActionDefin
   // Reuse the established lifecycle actions and their availability rules on every tab.
   const originalScreen = state.screen;
   state.screen = "home";
-  const lifecycle = state.items().filter(item => ["s", "x", "z", "m"].includes(item.key));
+  const lifecycle = state.items().filter(item => [HOME_CONNECT_KEY, "x", "z", "m"].includes(item.key));
   state.screen = originalScreen;
   if (!["confirm", "profile-remove", "retry-confirm", "cancel-confirm"].includes(state.screen))
     for (const item of lifecycle) actions.push({ ...item, scope: "global", run: () => { item.run(); state.paint(); } });
