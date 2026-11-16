@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +61,10 @@ func TestMeasureProxyCountryPreservesMeasurement(t *testing.T) {
 			})
 			want := expected
 			want.Country = tc.country
+			want.CountryObserved = tc.log != ""
+			if tc.err != nil {
+				want.Country = "AU"
+			}
 			if got != want || err != tc.err {
 				t.Fatalf("result = %+v, err = %v; want %+v, %v", got, err, want, tc.err)
 			}
@@ -170,5 +175,105 @@ func TestProxyCountrySpeedBatchPersistsAndRemainsRedacted(t *testing.T) {
 	row, _ = stored.Find(id)
 	if row.Result.Country != "AU" {
 		t.Fatalf("country after refresh = %q", row.Result.Country)
+	}
+}
+
+func TestAmbiguousCountryClearsPreviousMeasurement(t *testing.T) {
+	dir, cfg, cat := browserFixture(t)
+	id := cat.Servers[0].ID
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	known := browserDependencies{probe: func(context.Context, config.Config, picker.NodeResult) (nettest.Result, error) {
+		return nettest.Result{Country: "JP"}, nil
+	}}
+	if err := runBrowserPing(cmd, &cliOptions{configPath: cfg}, id, known); err != nil {
+		t.Fatal(err)
+	}
+	noObservation := browserDependencies{probe: func(context.Context, config.Config, picker.NodeResult) (nettest.Result, error) {
+		return nettest.Result{}, nil
+	}}
+	if err := runBrowserPing(cmd, &cliOptions{configPath: cfg}, id, noObservation); err != nil {
+		t.Fatal(err)
+	}
+	previous, err := loadBrowserCatalogLocked(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := previous.Find(id)
+	if before.Result.Country != "JP" {
+		t.Fatalf("no observation erased %q", before.Result.Country)
+	}
+	ambiguous := browserDependencies{probe: func(ctx context.Context, _ config.Config, _ picker.NodeResult) (nettest.Result, error) {
+		return measureProxyCountry(ctx, "host.example", func(ctx context.Context) (nettest.Result, error) {
+			c := ctx.Value(benchmarkCountryKey{}).(*benchmarkCountryCollector)
+			_, _ = c.Write([]byte("DEBUG dns: lookup succeed for host.example: 1.1.1.1 2001:200::1\n"))
+			return nettest.Result{}, nil
+		})
+	}}
+	if err := runBrowserPing(cmd, &cliOptions{configPath: cfg}, id, ambiguous); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := loadBrowserCatalogLocked(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, _ := stored.Find(id)
+	if row.Result.Country != "" {
+		t.Fatalf("ambiguous country retained %q", row.Result.Country)
+	}
+}
+
+func TestSpeedAmbiguousCountryClearsPrevious(t *testing.T) {
+	deps := speedProbeDependencies{
+		proxy: func(ctx context.Context, _ config.Config, _ vless.Node, check func() error) error {
+			c := ctx.Value(benchmarkCountryKey{}).(*benchmarkCountryCollector)
+			_, _ = c.Write([]byte("DEBUG dns: lookup succeed for host.example: 1.1.1.1 2001:200::1\n"))
+			return check()
+		},
+		site: func(context.Context, string, string, time.Duration) error { return nil },
+		download: func(context.Context, string, string, time.Duration, time.Duration) (nettest.Result, error) {
+			return nettest.Result{}, nil
+		},
+	}
+	r := speedNodeUsing(context.Background(), config.Config{}, picker.NodeResult{Host: "host.example", Network: "quic", Country: "JP"}, "https://example.com", make(chan struct{}, 1), deps)
+	if r.Country != "" {
+		t.Fatalf("ambiguous speed country retained %q", r.Country)
+	}
+}
+
+func TestBatchPublishesClearedCountry(t *testing.T) {
+	for _, speed := range []bool{false, true} {
+		t.Run(fmt.Sprint(speed), func(t *testing.T) {
+			dir, cfg, cat := browserFixture(t)
+			id := cat.Servers[0].ID
+			cmd := &cobra.Command{}
+			cmd.SetOut(&bytes.Buffer{})
+			if err := runBrowserPing(cmd, &cliOptions{configPath: cfg}, id, browserDependencies{probe: func(context.Context, config.Config, picker.NodeResult) (nettest.Result, error) {
+				return nettest.Result{Country: "JP"}, nil
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			probe := func(_ context.Context, _ config.Config, r picker.NodeResult, _ string) picker.NodeResult {
+				r.Country = ""
+				return r
+			}
+			var err error
+			if speed {
+				err = runBrowserSpeedBatch(cmd, &cliOptions{configPath: cfg}, []string{id}, "https://example.com", probe)
+			} else {
+				err = runBrowserCheckBatch(cmd, &cliOptions{configPath: cfg}, []string{id}, "https://example.com", probe)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, err := loadBrowserCatalogLocked(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			row, _ := stored.Find(id)
+			if row.Result.Country != "" {
+				t.Fatalf("batch retained %q", row.Result.Country)
+			}
+		})
 	}
 }

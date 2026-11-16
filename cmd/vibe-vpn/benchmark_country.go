@@ -23,6 +23,7 @@ type benchmarkCountryCollector struct {
 	overflow  bool
 	code      string
 	ambiguous bool
+	observed  bool
 }
 
 func newBenchmarkCountryCollector(host string) *benchmarkCountryCollector {
@@ -66,8 +67,10 @@ func (c *benchmarkCountryCollector) consume(line []byte) {
 	if i < 0 || !bytes.HasPrefix(line, []byte("DEBUG")) {
 		return
 	}
+	c.observed = true
 	fields := bytes.Fields(line[i+len(marker):])
 	if len(fields) == 0 {
+		c.ambiguous = true
 		return
 	}
 	for _, field := range fields {
@@ -82,15 +85,20 @@ func (c *benchmarkCountryCollector) consume(line []byte) {
 }
 
 func (c *benchmarkCountryCollector) country() string {
+	code, _ := c.countryObservation()
+	return code
+}
+
+func (c *benchmarkCountryCollector) countryObservation() (string, bool) {
 	if c == nil {
-		return ""
+		return "", false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.ambiguous {
-		return ""
+		return "", c.observed
 	}
-	return c.code
+	return c.code, c.observed
 }
 
 func measureProxyCountry(ctx context.Context, host string, measure func(context.Context) (nettest.Result, error)) (nettest.Result, error) {
@@ -99,8 +107,6 @@ func measureProxyCountry(ctx context.Context, host string, measure func(context.
 		ctx = context.WithValue(ctx, benchmarkCountryKey{}, collector)
 	}
 	result, err := measure(ctx)
-	if err == nil {
-		result.Country = collector.country()
-	}
+	result.Country, result.CountryObserved = collector.countryObservation()
 	return result, err
 }

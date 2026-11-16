@@ -94,7 +94,7 @@ func speedNodeUsing(ctx context.Context, c config.Config, r picker.NodeResult, t
 	}
 	if r.Network != "quic" {
 		ping, err := deps.ping(ctx, c, r)
-		if ping.Country != "" {
+		if ping.CountryObserved || ping.Country != "" {
 			r.Country = ping.Country
 		}
 		if err != nil || ctx.Err() != nil {
@@ -142,7 +142,7 @@ func speedNodeUsing(ctx context.Context, c config.Config, r picker.NodeResult, t
 		}
 		return downloadErr
 	})
-	if country := collector.country(); country != "" && r.PingStatus == "ready" {
+	if country, observed := collector.countryObservation(); observed {
 		r.Country = country
 	}
 	if err != nil {
@@ -251,9 +251,7 @@ func runBrowserSpeedBatch(cmd *cobra.Command, o *cliOptions, ids []string, targe
 		for j := range latest.Servers {
 			if latest.Servers[j].ID == records[i].ID {
 				row := &latest.Servers[j].Result
-				if r.Country != "" {
-					row.Country = r.Country
-				}
+				row.Country = r.Country
 				row.PingMS, row.PingStatus, row.Availability = r.PingMS, r.PingStatus, r.Availability
 				row.OK, row.Error, row.Mbps, row.Seconds, row.Bytes = r.OK, r.Error, r.Mbps, r.Seconds, r.Bytes
 			}

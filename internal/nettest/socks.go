@@ -14,10 +14,11 @@ import (
 )
 
 type Result struct {
-	Country string  `json:"-"`
-	Bytes   int64   `json:"bytes"`
-	Seconds float64 `json:"seconds"`
-	Mbps    float64 `json:"mbps"`
+	Country         string  `json:"-"`
+	CountryObserved bool    `json:"-"`
+	Bytes           int64   `json:"bytes"`
+	Seconds         float64 `json:"seconds"`
+	Mbps            float64 `json:"mbps"`
 }
 
 func Download(socksAddr, testURL string, limit int64, timeout time.Duration) (Result, error) {

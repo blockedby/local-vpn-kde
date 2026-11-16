@@ -182,7 +182,7 @@ func (d browserDependencies) measure(ctx context.Context, c config.Config, r pic
 				return nettest.Result{}, nettest.CheckAvailability(ctx, c.TestSocks, c.TestURL, 10*time.Second)
 			})
 		})
-		return nettest.Result{Seconds: time.Since(started).Seconds(), Country: probe.Country}, err
+		return nettest.Result{Seconds: time.Since(started).Seconds(), Country: probe.Country, CountryObserved: probe.CountryObserved}, err
 	}
 	if d.tcpPing {
 		started := time.Now()
@@ -196,7 +196,7 @@ func (d browserDependencies) measure(ctx context.Context, c config.Config, r pic
 			}
 			_ = conn.Close()
 		}
-		return nettest.Result{Seconds: time.Since(started).Seconds(), Country: country}, err
+		return nettest.Result{Seconds: time.Since(started).Seconds(), Country: country, CountryObserved: conn != nil}, err
 	}
 	if d.probe != nil {
 		return d.probe(ctx, c, r)
@@ -629,7 +629,7 @@ func runBrowserPing(cmd *cobra.Command, o *cliOptions, id string, deps browserDe
 	}
 	for i := range latest.Servers {
 		if latest.Servers[i].ID == updated.ID {
-			if probe.Country != "" {
+			if probe.CountryObserved || probe.Country != "" {
 				latest.Servers[i].Result.Country = probe.Country
 			}
 			if deps.targetURL != "" {
