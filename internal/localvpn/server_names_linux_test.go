@@ -60,7 +60,7 @@ func TestServerNamesLifecycleAndCatalogShapes(t *testing.T) {
 		return namesRequest(t, b, "servers/rename", map[string]any{"id": id, "name": name})
 	}
 	row := nameRow(t, rename("  My !Place  "), false)
-	if row["display_name"] != "My Place" || row["original_name"] != "Original Place" {
+	if row["display_name"] != "My !Place" || row["original_name"] != "Original Place" {
 		t.Fatalf("rename: %#v", row)
 	}
 	st, err := os.Stat(filepath.Join(b.options.Base, serverNamesFile))
@@ -72,7 +72,7 @@ func TestServerNamesLifecycleAndCatalogShapes(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stored serverNamesData
-	if json.Unmarshal(data, &stored) != nil || stored.Schema != 1 || len(stored.Names) != 1 || stored.Names[id] != "My Place" {
+	if json.Unmarshal(data, &stored) != nil || stored.Schema != 1 || len(stored.Names) != 1 || stored.Names[id] != "My !Place" {
 		t.Fatalf("store: %s", data)
 	}
 	if got := nameRow(t, rename("Other Name"), false)["display_name"]; got != "Other Name" {
@@ -111,7 +111,7 @@ func TestServerNamesLifecycleAndCatalogShapes(t *testing.T) {
 
 func TestServerNamesInvalidAndNative(t *testing.T) {
 	b, id, _ := namesFixture(t)
-	for _, name := range []string{" ", "!!!", "bad\nname", "https://example.com", "single"} {
+	for _, name := range []string{" ", "\u202e\x00"} {
 		if got := namesRequest(t, b, "servers/rename", map[string]any{"id": id, "name": name})["reason"]; got != "invalid-name" {
 			t.Fatalf("%q: %v", name, got)
 		}
@@ -235,5 +235,26 @@ func TestCancelledRenameDoesNotSave(t *testing.T) {
 	}
 	if got := b.readServerNames()[id]; got != "Quick Name" {
 		t.Fatalf("cancelled rename wrote %q", got)
+	}
+}
+
+func TestUserNamesAreSanitizedWithoutSubscriptionRestrictions(t *testing.T) {
+	b, id, _ := namesFixture(t)
+	for _, tc := range []struct{ input, want string }{
+		{"Custom", "Custom"}, {"123 !?", "123 !?"}, {"東京 🌍", "東京 🌍"},
+		{"  A\u2003\u2003B\u202eC\x00D  ", "A BCD"},
+		{strings.Repeat("猫", 65), strings.Repeat("猫", 60)},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			row := nameRow(t, namesRequest(t, b, "servers/rename", map[string]any{"id": id, "name": tc.input}), false)
+			if row["display_name"] != tc.want {
+				t.Fatalf("got %q want %q", row["display_name"], tc.want)
+			}
+		})
+	}
+	for _, name := range []string{" \u2003 ", "\u202e\x00"} {
+		if got := namesRequest(t, b, "servers/rename", map[string]any{"id": id, "name": name})["reason"]; got != "invalid-name" {
+			t.Fatalf("%q: %v", name, got)
+		}
 	}
 }

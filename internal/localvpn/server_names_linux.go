@@ -8,7 +8,6 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/blockedby/local-vpn-kde/internal/picker"
 	"golang.org/x/sys/unix"
 )
 
@@ -24,17 +23,31 @@ type serverNamesData struct {
 	Names  map[string]string `json:"names"`
 }
 
-// The picker returns its generic fallback for unsafe or unusable input. Do not
-// persist that fallback as though it were the user's chosen name.
+// User labels are independent of the subscription-derived display-name policy.
 func safeOverride(name string) (string, bool) {
-	if strings.ContainsFunc(name, unicode.IsControl) {
-		return "", false
+	var cleaned []rune
+	space := false
+	for _, r := range name {
+		if unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		if unicode.IsSpace(r) {
+			if len(cleaned) > 0 {
+				space = true
+			}
+			continue
+		}
+		if space {
+			cleaned = append(cleaned, ' ')
+			space = false
+		}
+		cleaned = append(cleaned, r)
 	}
-	safe := picker.SafeDisplayName(name)
-	if safe == "Server" && strings.TrimSpace(name) != "Server" {
-		return "", false
+	if len(cleaned) > 60 {
+		cleaned = cleaned[:60]
 	}
-	return safe, true
+	safe := strings.TrimSpace(string(cleaned))
+	return safe, safe != ""
 }
 
 func (b *Bridge) loadServerNames() {
