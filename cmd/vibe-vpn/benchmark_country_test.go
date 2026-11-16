@@ -277,3 +277,21 @@ func TestBatchPublishesClearedCountry(t *testing.T) {
 		})
 	}
 }
+
+func TestIncompleteLookupInvalidatesCountry(t *testing.T) {
+	for _, tail := range []string{
+		"DEBUG dns: lookup succeed for host.example: " + strings.Repeat("1.1.1.1 ", 3000) + "2001:200::1\n",
+		"DEBUG dns: lookup succeed for host.example: not-an-address\n",
+		"DEBUG dns: lookup succeed for host.example\n",
+		"DEBUG dns: lookup succeed for host.example: \n",
+		"DEBUG dns: lookup succeed for host.example: 2001:200::1",
+	} {
+		t.Run(fmt.Sprint(len(tail)), func(t *testing.T) {
+			c := newBenchmarkCountryCollector("host.example")
+			_, _ = c.Write([]byte("DEBUG dns: lookup succeed for host.example: 1.1.1.1\n" + tail))
+			if got := c.country(); got != "" {
+				t.Fatalf("incomplete or invalid lookup retained %q", got)
+			}
+		})
+	}
+}

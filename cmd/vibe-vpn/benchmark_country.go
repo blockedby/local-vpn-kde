@@ -56,19 +56,29 @@ func (c *benchmarkCountryCollector) Write(p []byte) (int, error) {
 			c.line = append(c.line, b)
 		} else {
 			c.overflow = true
+			c.observed = true
+			c.ambiguous = true
 		}
 	}
 	return len(p), nil
 }
 
 func (c *benchmarkCountryCollector) consume(line []byte) {
-	marker := " dns: lookup succeed for " + c.host + ": "
+	marker := " dns: lookup succeed for " + c.host
 	i := bytes.Index(line, []byte(marker))
 	if i < 0 || !bytes.HasPrefix(line, []byte("DEBUG")) {
 		return
 	}
+	rest := line[i+len(marker):]
+	if len(rest) > 0 && (rest[0] >= 'a' && rest[0] <= 'z' || rest[0] >= 'A' && rest[0] <= 'Z' || rest[0] >= '0' && rest[0] <= '9' || rest[0] == '.' || rest[0] == '-' || rest[0] == '_') {
+		return
+	}
 	c.observed = true
-	fields := bytes.Fields(line[i+len(marker):])
+	if !bytes.HasPrefix(rest, []byte(": ")) {
+		c.ambiguous = true
+		return
+	}
+	fields := bytes.Fields(rest[2:])
 	if len(fields) == 0 {
 		c.ambiguous = true
 		return
@@ -95,6 +105,9 @@ func (c *benchmarkCountryCollector) countryObservation() (string, bool) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if len(c.line) > 0 {
+		return "", true
+	}
 	if c.ambiguous {
 		return "", c.observed
 	}
