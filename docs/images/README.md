@@ -9,9 +9,7 @@ To regenerate from the repository root (Bun, Python/Pillow and Noto Sans Mono):
 
 ```sh
 (cd scripts/vpnkit/tui && bun install --frozen-lockfile)
-bun scripts/vpnkit/tui/capture-readme.ts .build/readme-captures
-python3 docs/render-tui-captures.py .build/readme-captures /usr/share/fonts/noto/NotoSansMono-Regular.ttf
-cp .build/readme-captures/*.png docs/images/
+bun scripts/vpnkit/tui/capture-readme.ts .build/readme-captures docs/images
 ```
 
 The English README uses the same captures because the current TUI labels are
