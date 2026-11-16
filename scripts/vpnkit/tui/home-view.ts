@@ -13,7 +13,7 @@ export class HomeView {
     for (let i = 0; i < 6; i++) {
       const box = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, flexBasis: 0, minWidth: 0, border: true, borderStyle: "rounded", onMouseDown: e => { if (e.button === 0) activate(i); } });
       const title = new TextRenderable(renderer, { height: 1, fg: p.text, attributes: TextAttributes.BOLD }); box.add(title);
-      const lines = [0, 1].map(() => { const line = new TextRenderable(renderer, { height: 1, fg: p.muted }); box.add(line); return line; });
+      const lines = [0, 1, 2, 3].map(() => { const line = new TextRenderable(renderer, { height: 1, fg: p.muted }); box.add(line); return line; });
       this.tiles.push({ box, title, lines });
     }
   }
@@ -41,18 +41,37 @@ export class HomeView {
       ["Настройки", `Режим: ${mode} · автозапуск: ${state.autostart ? (state.autostart.connect ? "VPN" : state.autostart.gateway ? "шлюз" : "нет") : "—"}`, `Сайт: ${displayCheckAddress(state.target)}`],
     ];
     const width = Math.floor((this.renderer.width - 2) / cols) - 2;
-    this.rows.forEach((row, i) => { row.visible = i < 6 / cols; row.height = compact ? 4 : 5; });
+    // Preserve the redacted address and complete status when extra rows are available.
+    const wrap = (text: string): string[] => {
+      const lines: string[] = [];
+      let line = "";
+      for (const word of text.split(" ")) {
+        const next = line ? `${line} ${word}` : word;
+        if (Bun.stringWidth(next) <= width) { line = next; continue; }
+        if (line) { lines.push(line); line = ""; }
+        for (const part of new Intl.Segmenter().segment(word)) {
+          if (Bun.stringWidth(line + part.segment) > width) { lines.push(line); line = ""; }
+          line += part.segment;
+        }
+      }
+      if (line) lines.push(line);
+      return lines;
+    };
+    const settingsLines = compact ? [data[5]![1]!] : [...wrap(data[5]![1]!), ...wrap(data[5]![2]!)];
+    const extra = compact ? 0 : Math.min(2, Math.max(0, this.renderer.height - (6 / cols * 5) - 2), Math.max(0, settingsLines.length - 2));
+    this.rows.forEach((row, i) => { row.visible = i < 6 / cols; row.height = compact ? 4 : 5 + (i === Math.floor(5 / cols) ? extra : 0); });
     this.tiles.forEach((tile, i) => {
       const row = this.rows[Math.floor(i / cols)]!;
       if (tile.box.parent !== row) { tile.box.parent?.remove(tile.box); row.add(tile.box); }
-      tile.box.height = compact ? 4 : 5; tile.box.borderColor = i === state.homeIndex ? p.accent : p.edge;
+      tile.box.height = compact ? 4 : 5 + (Math.floor(i / cols) === Math.floor(5 / cols) ? extra : 0); tile.box.borderColor = i === state.homeIndex ? p.accent : p.edge;
       const title = `${i === state.homeIndex ? "›" : " "} ${glyphs[i]} ${data[i]![0]!}`;
       const shortcut = titleActions[i]?.keys[0];
       tile.title.content = shortcut && Bun.stringWidth(title) + 1 + Bun.stringWidth(shortcut) <= width
         ? title + " ".repeat(width - Bun.stringWidth(title) - Bun.stringWidth(shortcut)) + shortcut
         : cell(title, width).trimEnd();
       tile.title.fg = i === state.homeIndex ? p.accent : p.text;
-      tile.lines.forEach((line, n) => { line.visible = n === 0 || !compact; line.content = cell(data[i]![n + 1]!, width).trimEnd(); });
+      const lines = i === 5 && extra ? settingsLines : data[i]!.slice(1);
+      tile.lines.forEach((line, n) => { line.visible = n < (compact ? 1 : 2 + (Math.floor(i / cols) === Math.floor(5 / cols) ? extra : 0)) && n < lines.length; line.content = cell(lines[n] ?? "", width).trimEnd(); });
     });
   }
 }

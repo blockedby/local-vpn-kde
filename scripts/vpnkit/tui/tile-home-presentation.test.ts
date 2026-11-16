@@ -21,7 +21,7 @@ for (const [width, height] of [[100,35],[60,16]] as const) test(`home tiles fit 
     }
     expect(frame).toContain("←↑↓→ выбор"); expect(frame).toContain("Enter открыть"); expect(frame).toContain("? все клавиши"); expect(frame).toContain("q выход");
     expect(frame).not.toContain("private-token"); expect(frame).not.toContain("secret=hidden"); expect(frame).not.toContain("fragment");
-    if (height >= 20) { expect(frame).toContain("Сайт: https://example.invalid"); expect(frame).toContain("Лучший ping:"); }
+    if (height >= 20) { expect(frame).toContain("Режим: строгий · автозапуск:"); expect(frame).toContain("VPN"); expect(frame).toContain("Сайт:"); expect(frame).toContain("https://example.invalid/…"); expect(frame).toContain("Лучший ping:"); }
     else { expect(frame).not.toContain("Лучший ping:"); expect(frame).not.toContain("Сайт:"); }
     if (process.env.TILE_HOME_CAPTURE === "1") await Bun.write(`../../../.build/tile-home-frames/${width}x${height}-home.txt`, frame + "\n");
   } finally { await app.close(); }
