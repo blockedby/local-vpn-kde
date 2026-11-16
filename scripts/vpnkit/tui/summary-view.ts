@@ -47,7 +47,9 @@ export class SummaryView {
       this.summary.content = `${stages[state.recovery?.stage ?? "unknown"]}\n${state.recovery?.message ?? "Проверьте состояние."}`;
     }
     if (state.screen === "confirm") {
-      if (state.confirmation === "fastest" && state.fastestCandidate) {
+      if (state.confirmation === "select" && state.selectTarget) {
+        this.summary.content = `Выбрать сервер ${safeText(state.selectTarget.name)}?\nПереключение может прервать текущие соединения.`;
+      } else if (state.confirmation === "fastest" && state.fastestCandidate) {
         const candidate = state.fastestCandidate;
         const age = Math.max(0, Math.floor((Date.now() - candidate.measuredAt) / 1000));
         this.summary.content = `${candidate.name} · ${candidate.speed.toFixed(1)} Мбит/с · ${age} с назад${state.filter ? " · среди показанных" : ""}\nПереключение прервёт текущие соединения. Выбрать сервер?`;
@@ -94,6 +96,7 @@ export class SummaryView {
             : "Подписка";
     }
     if(state.screen==="profiles") { this.summary.height = 1; this.summary.content="Выбор профиля не меняет активное VPN-подключение."; }
+    if (state.screen === "server-rename") { this.summary.content = "Переименовать сервер"; }
     if(state.screen==="profile-name") this.summary.content="Новый профиль · имя\nНапример: Моя VPS или Основная подписка";
     if(state.screen==="profile-source") this.summary.content=`${state.profileName} · ссылка\nHTTPS-подписка, vless://, hysteria2:// или hy2://`;
     if(state.screen==="profile-remove") this.summary.content=state.profileRemoval ? `Удалить активный профиль «${safeText(state.profileRemoval.name)}»?\nЭто не останавливает уже работающий сервер.` : "Удалить активный профиль?\nЭто не останавливает уже работающий сервер.";

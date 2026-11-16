@@ -1,6 +1,6 @@
 import type { Server } from "./bridge";
 
-export type ServerSort = "name" | "ping" | "speed" | "availability";
+export type ServerSort = "name" | "country" | "ping" | "speed" | "availability";
 
 /** Return an ordered copy without changing the catalog or its selection identity. */
 export function sortedServers(servers: readonly Server[], sort: ServerSort, frozenOrder?: readonly string[], descending = sort === "speed" || sort === "availability"): Server[] {
@@ -11,6 +11,10 @@ export function sortedServers(servers: readonly Server[], sort: ServerSort, froz
   const compare = (a: Server, b: Server) =>
     a.display_name.localeCompare(b.display_name, "ru", { numeric: true }) || a.server_id.localeCompare(b.server_id);
   return [...servers].sort((a, b) => {
+    if (sort === "country") {
+      if (!a.country || !b.country) return a.country ? -1 : b.country ? 1 : compare(a, b);
+      return a.country.localeCompare(b.country) * (descending ? -1 : 1) || compare(a, b);
+    }
     if (sort === "ping" || sort === "speed") {
       const av = sort === "ping" ? a.latency_ms : a.download_mbps;
       const bv = sort === "ping" ? b.latency_ms : b.download_mbps;

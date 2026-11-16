@@ -13,7 +13,9 @@ import time
 
 # Compiled-layout contract for the startup screen.
 SCREEN_TITLE = b'VPNKIT'
-SCREEN_TABS = '[Серверы]'.encode()
+SCREEN_HOME = 'Подключение'.encode()
+SCREEN_SECTION = 'Главная'.encode()
+KEY_SERVERS = b'v'
 
 assert not os.path.exists('/usr/share/local-vpn-kde/scripts/vpnkit/tui/node_modules')
 assert not os.path.exists('/usr/share/local-vpn-kde/scripts/vpnkit/tui/index.ts')
@@ -49,6 +51,7 @@ for arguments in (['--demo'], []):
     os.close(slave)
     output = bytearray()
     try:
+        opened_servers = False
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline:
             if select.select([master], [], [], 0.1)[0]:
@@ -62,12 +65,16 @@ for arguments in (['--demo'], []):
                 # OpenTUI's renderer waits for terminal capability responses.
                 if b'\x1b[6n' in data:
                     os.write(master, b'\x1b[1;1R')
-            if SCREEN_TITLE in output and SCREEN_TABS in output:
+            if not opened_servers and SCREEN_TITLE in output and SCREEN_HOME in output:
+                os.write(master, KEY_SERVERS)
+                opened_servers = True
+            if opened_servers and SCREEN_SECTION in output:
                 break
             if child.poll() is not None:
                 break
         assert SCREEN_TITLE in output, output.decode(errors='replace')[-3000:]
-        assert SCREEN_TABS in output, output.decode(errors='replace')[-3000:]
+        assert SCREEN_HOME in output
+        assert SCREEN_SECTION in output, output.decode(errors='replace')[-3000:]
         assert child.poll() is None, output.decode(errors='replace')[-3000:]
         if not arguments:
             commands = descendants(child.pid)

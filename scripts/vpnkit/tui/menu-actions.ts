@@ -1,4 +1,5 @@
 import type { Action } from "./bridge";
+import { HOME_CONNECT_KEY } from "./action-registry";
 import type { AppState } from "./app-state";
 import { frames } from "./animation-frames";
 import { compatible, queueable } from "./request-policy";
@@ -82,16 +83,25 @@ export function menuItems(state: AppState): MenuItem[] {
           label: "Нет",
           run: () => {
             if (state.confirmation === "fastest") state.fastestCandidate = undefined;
+            if (state.confirmation === "select") state.selectTarget = undefined;
             if (state.confirmation === "subscription") {
               state.pendingSubscription = undefined;
               state.open("subscription");
-            } else state.open(state.tab, false);
+            } else state.open(state.overlayBase, false);
           },
         },
         {
           key: "y",
           label: "Да",
           run: () => {
+            if (state.confirmation === "select") {
+              const target = state.selectTarget; state.selectTarget = undefined;
+              const valid = target && state.ready() && !state.catalogStale && state.confirmationSnapshot === state.confirmationContext() && state.servers.some(server => server.server_id === target.id && server.display_name === target.name);
+              state.open(state.overlayBase, false);
+              if (valid && target) void state.perform("servers/select", target.id);
+              else state.notify("Сервер или состояние изменились. Выберите сервер заново.", true);
+              return;
+            }
             if (state.confirmation === "subscription") {
               const value = state.pendingSubscription;
               state.pendingSubscription = undefined;
@@ -112,7 +122,7 @@ export function menuItems(state: AppState): MenuItem[] {
             }
             const action = state.confirmation;
             const valid = state.confirmationSnapshot === state.confirmationContext();
-            state.open(state.tab, false);
+            state.open(state.overlayBase, false);
             if (valid) void state.perform(action);
             else state.notify("Состояние изменилось. Подтвердите действие заново.", true);
           },
@@ -122,7 +132,7 @@ export function menuItems(state: AppState): MenuItem[] {
     if (state.screen === "home")
       return [
         ...(!state.ready()
-          ? [{ key: "s", label: `Запустить ${state.serviceObject()}`, run: run("backend/start") }]
+          ? [{ key: HOME_CONNECT_KEY, label: `Запустить ${state.serviceObject()}`, run: run("backend/start") }]
           : []),
         ...(state.ready()
           ? [
@@ -133,7 +143,7 @@ export function menuItems(state: AppState): MenuItem[] {
                     run: () => state.confirm("disconnect"),
                   }
                 : {
-                    key: "s",
+                    key: HOME_CONNECT_KEY,
                     label: "Подключить VPN",
                     run: () => {
                       if (state.status?.subscription !== "configured") {
@@ -238,7 +248,7 @@ export function defineMenuActions(state: AppState, items: MenuItem[]): ActionDef
       id = `task:cancel:${tasks[Number(item.key) - 1] ?? item.key}`;
     } else if (screen === "profiles" && /^[1-9]$/.test(item.key)) {
       id = `profile:open:${state.profiles?.items[state.profilePage * state.profilePageSize() + Number(item.key) - 1]?.id ?? item.key}`;
-    } else if (screen === "home" && item.key === "s") {
+    } else if (screen === "home" && item.key === HOME_CONNECT_KEY) {
       id = state.ready() ? "home:connect" : "home:start-service";
     }
     let reason: string | undefined;
@@ -262,7 +272,7 @@ export function defineMenuActions(state: AppState, items: MenuItem[]): ActionDef
       reason = "Смена режима доступна после запуска Docker.";
     } else {
       const request: Action | undefined = screen === "home" && item.key === "m" ? "toggle-mode"
-        : screen === "home" && item.key === "s" && (!state.ready() || state.status?.subscription === "configured") ? state.ready() ? "start" : "backend/start"
+        : screen === "home" && item.key === HOME_CONNECT_KEY && (!state.ready() || state.status?.subscription === "configured") ? state.ready() ? "start" : "backend/start"
         : screen === "autostart" && item.key === "u" ? "autostart/read"
         : screen === "autostart" && (item.key === "g" || item.key === "a") ? "autostart/set"
         : screen === "diagnostics" && item.key === "u" ? "diagnostics"

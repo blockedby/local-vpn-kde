@@ -89,6 +89,7 @@ test("action definitions expose identity, availability and the same keyboard pat
   try {
     state.servers = structuredClone(rows);
     state.serverID = rows[1]!.server_id;
+    state.open("servers", false);
     const speed = state.actions().find(action => action.id === "servers:single-speed")!;
     expect(speed.key).toBe("shift+t");
     expect(speed.keys).toEqual(["shift+t"]);
@@ -148,6 +149,7 @@ test("fastest confirmation uses session results, rejects unreachable sites and r
       { ...rows[0]!, server_id: "srv_z", display_name: "Other", status: "ready", download_mbps: 50, availability: "untested" },
     ];
     state.catalogLoaded = true;
+    state.open("servers", false);
     key(state, "b"); expect(state.notice).toContain("[t]");
     for (const server of state.servers) state.measurementTimes.set(server.server_id, Date.now());
     key(state, "b");

@@ -5,7 +5,7 @@ import type { Action } from "./bridge";
 // Two probes are deliberately serialized: their catalog publications race and
 // simultaneous downloads distort measured speeds.
 export const requestClasses: Record<Action, "read" | "measurement" | "selection" | "exclusive"> = {
-  status: "read", "subscription/read": "read", "servers/list": "read",
+  status: "read", "subscription/read": "read", "servers/list": "read", "servers/rename": "read",
   "servers/ping": "measurement", "servers/speed": "measurement",
   "servers/availability": "measurement", "servers/check-batch": "measurement", "servers/speed-batch": "measurement",
   "servers/select": "selection",

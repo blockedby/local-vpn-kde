@@ -8,7 +8,7 @@ const key = (name: string) => ({ name, preventDefault() {} });
 function fixture() {
   const backend = new FakeBackend();
   backend.rows = [{ ...rows[0], display_name: "МОСКВА" }, { ...rows[1], display_name: "Berlin" }];
-  const state = new AppState(backend); state.status = { ...initial }; state.servers = structuredClone(backend.rows); state.catalogLoaded = true; state.serverID = state.servers[0]!.server_id;
+  const state = new AppState(backend); state.screen = "servers"; state.status = { ...initial }; state.servers = structuredClone(backend.rows); state.catalogLoaded = true; state.serverID = state.servers[0]!.server_id;
   return { backend, state };
 }
 

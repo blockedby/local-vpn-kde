@@ -42,38 +42,31 @@ test("shell footer has state-specific actions and no stale hints or refresh time
     b.status.gateway_state = "healthy";
     await app.perform("status");
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("s подключить");
+    expect(t.captureCharFrame()).toContain("Enter — Подключить");
     b.status.networkmanager_active = "yes";
     await app.perform("status");
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("x отключить");
+    expect(t.captureCharFrame()).toContain("Enter — Отключить");
     t.resize(60, 20);
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("? помощь");
+    expect(t.captureCharFrame()).toContain("? все клавиши");
   } finally {
     await app.close();
   }
 });
 
-test("shell has one clickable tab row", async () => {
+test("shell has clickable home tiles and a section breadcrumb", async () => {
   const t = await createTestRenderer({ width: 80, height: 24 });
   const app = new App(t.renderer, new FakeBackend());
   try {
-    await app.perform("status");
-    await t.renderOnce();
+    await app.perform("status"); await t.renderOnce();
     const frame = t.captureCharFrame();
-    expect(frame).not.toContain("[h] Главная");
-    for (const label of ["[Серверы]", "Профили", "Диагностика", "Настройки"])
-      expect(frame.split(label)).toHaveLength(2);
-    const row = frame
-      .split("\n")
-      .findIndex((line) => line.includes("Диагностика"));
-    await t.mockMouse.click(26, row);
-    await t.renderOnce();
+    for (const label of ["Подключение", "Серверы", "Замеры", "Профили", "Диагностика", "Настройки"]) expect(frame.split(label)).toHaveLength(2);
+    const row = frame.split("\n").findIndex(line => line.includes("Диагностика"));
+    await t.mockMouse.click(5, row); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("‹ Главная › Диагностика");
     expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
-  } finally {
-    await app.close();
-  }
+  } finally { await app.close(); }
 });
 
 test("autostart screen renders failed and masked service states", async () => {
@@ -149,7 +142,7 @@ test("presentation: completed diagnostics never reopen a screen the user left", 
     await task;
     await t.renderOnce();
     expect(t.captureCharFrame()).not.toContain("OpenVPN / KDE");
-    expect(t.captureCharFrame()).toContain("s подключить");
+    expect(t.captureCharFrame()).toContain("Enter — Подключить");
   } finally {
     finish(reply());
     await settle();
@@ -174,7 +167,7 @@ test("presentation: installed native separates service startup, connection, disc
     await app.perform("status");
     t.mockInput.pressKey("s"); await settle(); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("○ отключён");
-    expect(t.captureCharFrame()).toContain("s подключить");
+    expect(t.captureCharFrame()).toContain("Enter — Подключить");
     t.mockInput.pressKey("s"); await settle(); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("● подключён");
     t.mockInput.pressKey("x"); await settle();
@@ -197,7 +190,6 @@ test("presentation: native runtime shows the supported lifecycle preview and nat
     await t.renderOnce();
     let frame = t.captureCharFrame();
     expect(frame).toContain("NATIVE PREVIEW");
-    expect(frame).toContain("Native-служба");
     expect(frame).toContain("Запустить сервис");
     expect(frame).not.toContain("Docker");
     t.mockInput.pressKey("s");
@@ -1040,7 +1032,7 @@ test("presentation: installed native reuses the server table, selection, checks 
     expect(frame).toContain("Amsterdam");
     expect(frame).toContain("p ping");
     expect(frame).not.toContain("пока не подключены");
-    t.mockInput.pressEnter(); await settle();
+    t.mockInput.pressEnter(); t.mockInput.pressEnter(); t.mockInput.pressKey("y"); await settle();
 
     await app.perform("servers/ping",rows[0]!.server_id);
 
@@ -1392,7 +1384,7 @@ test("presentation: home speed test skips download after failed ping and allows 
     t.resize(60, 16); await t.renderOnce();
     const narrow = t.captureCharFrame();
     expect(narrow).toContain("режим: строгий");
-    expect(narrow).toContain("k отменить");
+    expect(narrow).toContain("Enter действия");
     expect(narrow).not.toContain("Ping · выполняется");
     expect(narrow).toContain("Ping");
     t.mockInput.pressKey("d"); await t.renderOnce();
@@ -1401,7 +1393,7 @@ test("presentation: home speed test skips download after failed ping and allows 
 
     t.mockInput.pressEscape(); await Bun.sleep(60); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Серверы");
-    expect(t.captureCharFrame()).toContain("? помощь");
+    expect(t.captureCharFrame()).toContain("? все клавиши");
   } finally { finish(reply()); await settle(); await app.close(); }
 });
 
@@ -1461,7 +1453,7 @@ for (const width of [48, 100, 140]) {
       expect(frame).not.toContain("Действие не выполнено");
       expect(frame).not.toContain("[f] Действия");
       expect(frame).not.toContain("private-attempt");
-      expect(frame).toContain("s запустить");
+      expect(frame).toContain("? все клавиши");
       let resolve!: (r: Reply) => void;
       b.hold = { action: "network/reapply", promise: new Promise(r => resolve = r) };
       t.mockInput.pressKey("f"); await settle();

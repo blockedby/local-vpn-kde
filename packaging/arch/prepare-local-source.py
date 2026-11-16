@@ -26,6 +26,7 @@ ALLOWLIST = (
     "scripts/vpnkit/tui",
     "scripts/vpnkit/vpnkit-native.sh",
     "packaging/arch",
+    "packaging/licenses",
 )
 BANNED_COMPONENTS = {
     ".git",

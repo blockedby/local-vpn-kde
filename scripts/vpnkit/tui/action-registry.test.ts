@@ -101,7 +101,6 @@ test("connection-affecting shortcuts send the named action and target", async ()
     { screen: "home-stopped", key: "s", action: "backend/start", value: undefined },
     { screen: "home", key: "s", action: "start", value: undefined },
     { screen: "home", key: "m", action: "toggle-mode", value: undefined },
-    { screen: "servers", key: "return", action: "servers/select", value: rows[1]!.server_id },
     { screen: "autostart-loaded", key: "g", action: "autostart/set", value: JSON.stringify({ gateway: true, connect: false }) },
     { screen: "autostart-loaded", key: "a", action: "autostart/set", value: JSON.stringify({ gateway: true, connect: true }) },
     { screen: "subscription", key: "return", action: "subscription", value: "https://example.invalid/" },
@@ -113,6 +112,12 @@ test("connection-affecting shortcuts send the named action and target", async ()
       expect(backend.calls[0]).toEqual({ action: example.action, value: example.value });
       for (let tick = 0; tick < 10; tick++) await Promise.resolve();
     } finally { await state.close(); }
+  }
+  {
+    const { state, backend } = fixture("servers", "docker");
+    state.onKey(event("return")); state.onKey(event("return")); state.onKey(event("y"));
+    expect(backend.calls[0]).toEqual({ action: "servers/select", value: rows[1]!.server_id });
+    await state.close();
   }
   for (const [key, action] of [["x", "disconnect"], ["z", "stop"]] as const) {
     const { state, backend } = fixture("home-connected", "docker");

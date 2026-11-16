@@ -94,6 +94,9 @@ func speedNodeUsing(ctx context.Context, c config.Config, r picker.NodeResult, t
 	}
 	if r.Network != "quic" {
 		ping, err := deps.ping(ctx, c, r)
+		if ping.CountryObserved || ping.Country != "" {
+			r.Country = ping.Country
+		}
 		if err != nil || ctx.Err() != nil {
 			emitPing()
 			return r
@@ -102,6 +105,10 @@ func speedNodeUsing(ctx context.Context, c config.Config, r picker.NodeResult, t
 		emitPing()
 	}
 	n := vless.Node{Link: r.Link, Name: r.Name, Host: r.Host, Port: r.Port, Network: r.Network, Security: r.Security, Outbound: r.Outbound}
+	collector := newBenchmarkCountryCollector(n.Host)
+	if collector != nil {
+		ctx = context.WithValue(ctx, benchmarkCountryKey{}, collector)
+	}
 	err := deps.proxy(ctx, c, n, func() error {
 		if r.Network == "quic" {
 			started := time.Now()
@@ -135,6 +142,9 @@ func speedNodeUsing(ctx context.Context, c config.Config, r picker.NodeResult, t
 		}
 		return downloadErr
 	})
+	if country, observed := collector.countryObservation(); observed {
+		r.Country = country
+	}
 	if err != nil {
 		r.OK = false
 	}
@@ -241,6 +251,7 @@ func runBrowserSpeedBatch(cmd *cobra.Command, o *cliOptions, ids []string, targe
 		for j := range latest.Servers {
 			if latest.Servers[j].ID == records[i].ID {
 				row := &latest.Servers[j].Result
+				row.Country = r.Country
 				row.PingMS, row.PingStatus, row.Availability = r.PingMS, r.PingStatus, r.Availability
 				row.OK, row.Error, row.Mbps, row.Seconds, row.Bytes = r.OK, r.Error, r.Mbps, r.Seconds, r.Bytes
 			}
@@ -309,7 +320,8 @@ func withSpeedProxy(ctx context.Context, c config.Config, n vless.Node, check fu
 	if tcpOpen(c.TestSocks, 200*time.Millisecond) {
 		return fmt.Errorf("test SOCKS address became busy")
 	}
-	backend, err := tempBenchmarkBackend(c, n)
+	collector, _ := ctx.Value(benchmarkCountryKey{}).(*benchmarkCountryCollector)
+	backend, err := tempBenchmarkBackend(c, n, collector != nil)
 	if err != nil {
 		return err
 	}
@@ -317,6 +329,9 @@ func withSpeedProxy(ctx context.Context, c config.Config, n vless.Node, check fu
 	backendCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	command := exec.CommandContext(backendCtx, backend.bin, backend.args...)
+	if collector != nil {
+		command.Stderr = collector
+	}
 	if err := command.Start(); err != nil {
 		return err
 	}

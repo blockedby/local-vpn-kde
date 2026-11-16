@@ -56,7 +56,7 @@ test("presentation: ping sort freezes during progress and reorders when the pass
 test("presentation: home result retains source and completion time after selection and resize",async()=>{
  const t=await createTestRenderer({width:65,height:24}); const b=new CatalogBackend(); const app=new App(t.renderer,b); const s=app as any;
  try {
-  await app.perform("status"); await s.testHomeSpeed(); const at=s.homeSpeedAt;
+  await app.perform("status"); s.open("servers"); await s.testHomeSpeed(); const at=s.homeSpeedAt;
   await t.renderOnce(); expect(t.captureCharFrame().split("\n").find((line:string)=>line.includes("Node 1") && line.includes("80.0"))).toBeDefined(); expect(t.captureCharFrame()).toContain("Node 1");
   await app.perform("servers/select",row(2).server_id); await t.renderOnce(); expect(t.captureCharFrame().split("\n").find((line:string)=>line.includes("Node 2") && line.includes("●"))).toBeDefined(); expect(t.captureCharFrame()).toContain("Node 1");
   t.resize(100,35); await t.renderOnce(); expect(t.captureCharFrame()).toContain("Node 1"); expect(t.captureCharFrame().split("\n").find((line:string)=>line.includes("Node 1") && line.includes("80.0"))).toBeDefined(); expect(s.homeSpeedAt).toBe(at);

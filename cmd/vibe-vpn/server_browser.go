@@ -12,6 +12,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/blockedby/local-vpn-kde/internal/config"
+	"github.com/blockedby/local-vpn-kde/internal/geoip"
 	"github.com/blockedby/local-vpn-kde/internal/profiles"
 
 	"github.com/blockedby/local-vpn-kde/internal/nettest"
@@ -151,7 +153,9 @@ func defaultBrowserDependencies() browserDependencies {
 			node := vless.Node{Link: result.Link, Name: result.Name, Host: result.Host, Port: result.Port, Network: result.Network, Security: result.Security, Outbound: result.Outbound}
 			// The browser explicitly measures download throughput, never RTT.
 			c.TestDurationSeconds = 3
-			return testOneContext(ctx, c, node, false)
+			return measureProxyCountry(ctx, node.Host, func(ctx context.Context) (nettest.Result, error) {
+				return testOneContext(ctx, c, node, false)
+			})
 		},
 		apply: func(ctx context.Context, c config.Config, result picker.NodeResult) error {
 			return applyResultLockedWithOptionsOutput(ctx, c, result, false, false)
@@ -164,25 +168,35 @@ func (d browserDependencies) measure(ctx context.Context, c config.Config, r pic
 	if d.targetURL != "" {
 		c.TestURL, c.TestDurationSeconds, c.TestLimitKiB = d.targetURL, 0, 1
 		n := vless.Node{Link: r.Link, Name: r.Name, Host: r.Host, Port: r.Port, Network: r.Network, Security: r.Security, Outbound: r.Outbound}
-		return testOneContextUsing(ctx, c, n, false, func() (nettest.Result, error) {
-			return nettest.Result{}, nettest.CheckAvailability(ctx, c.TestSocks, d.targetURL, 10*time.Second)
+		return measureProxyCountry(ctx, n.Host, func(ctx context.Context) (nettest.Result, error) {
+			return testOneContextUsing(ctx, c, n, false, func() (nettest.Result, error) {
+				return nettest.Result{}, nettest.CheckAvailability(ctx, c.TestSocks, d.targetURL, 10*time.Second)
+			})
 		})
 	}
 	if d.tcpPing && r.Network == "quic" {
 		n := vless.Node{Link: r.Link, Name: r.Name, Host: r.Host, Port: r.Port, Network: r.Network, Security: r.Security, Outbound: r.Outbound}
 		started := time.Now()
-		_, err := testOneContextUsing(ctx, c, n, false, func() (nettest.Result, error) {
-			return nettest.Result{}, nettest.CheckAvailability(ctx, c.TestSocks, c.TestURL, 10*time.Second)
+		probe, err := measureProxyCountry(ctx, n.Host, func(ctx context.Context) (nettest.Result, error) {
+			return testOneContextUsing(ctx, c, n, false, func() (nettest.Result, error) {
+				return nettest.Result{}, nettest.CheckAvailability(ctx, c.TestSocks, c.TestURL, 10*time.Second)
+			})
 		})
-		return nettest.Result{Seconds: time.Since(started).Seconds()}, err
+		return nettest.Result{Seconds: time.Since(started).Seconds(), Country: probe.Country, CountryObserved: probe.CountryObserved}, err
 	}
 	if d.tcpPing {
 		started := time.Now()
 		conn, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(r.Host, strconv.Itoa(r.Port)))
+		country := ""
 		if conn != nil {
+			if peer, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+				if addr, ok := netip.AddrFromSlice(peer.IP); ok {
+					country, _ = geoip.Lookup(addr)
+				}
+			}
 			_ = conn.Close()
 		}
-		return nettest.Result{Seconds: time.Since(started).Seconds()}, err
+		return nettest.Result{Seconds: time.Since(started).Seconds(), Country: country, CountryObserved: conn != nil}, err
 	}
 	if d.probe != nil {
 		return d.probe(ctx, c, r)
@@ -476,6 +490,7 @@ func runBrowserTestAll(cmd *cobra.Command, o *cliOptions, deps browserDependenci
 		if err := ctx.Err(); err != nil {
 			return writeBrowserContextFailure(cmd, ctx, 0)
 		}
+		results[i].Country = probe.Country
 		results[i].Seconds = boundedSeconds(probe.Seconds)
 		results[i].Mbps = probe.Mbps
 		results[i].Bytes = probe.Bytes
@@ -528,6 +543,12 @@ func runBrowserTestAll(cmd *cobra.Command, o *cliOptions, deps browserDependenci
 	}
 	generation := highWater + 1
 	catalog := picker.NewBrowserCatalog(generation, salt, results)
+	for i := range catalog.Servers {
+		if old, ok := current.catalog.Find(catalog.Servers[i].ID); ok && catalog.Servers[i].Result.Country == "" {
+			catalog.Servers[i].Result.Country = old.Result.Country
+		}
+	}
+	picker.SealBrowserCatalog(salt, &catalog)
 	if len(catalog.Servers) == 0 {
 		return writeBrowserFailure(cmd, "unavailable", generation)
 	}
@@ -608,6 +629,9 @@ func runBrowserPing(cmd *cobra.Command, o *cliOptions, id string, deps browserDe
 	}
 	for i := range latest.Servers {
 		if latest.Servers[i].ID == updated.ID {
+			if probe.CountryObserved || probe.Country != "" {
+				latest.Servers[i].Result.Country = probe.Country
+			}
 			if deps.targetURL != "" {
 				latest.Servers[i].Result.Availability = "failed"
 				if probeErr == nil {

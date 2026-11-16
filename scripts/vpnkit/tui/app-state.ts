@@ -13,7 +13,7 @@ import { testHomeSpeed, runBatch, cancelTask, cancel, retryCheck, reconnectBacke
 import { defineMenuActions, menuItems, type ActionDefinition } from "./menu-actions";
 
 export type Screen =
-  | "details" | "tasks" | "cancel-confirm" | "recovery" | "retry-confirm"
+  | "server-rename" | "details" | "tasks" | "cancel-confirm" | "recovery" | "retry-confirm"
  | "profiles" | "profile-name" | "profile-source" | "profile-remove"
   | "autostart"
   | "home" | "settings"
@@ -22,7 +22,7 @@ export type Screen =
   | "diagnostics"
   | "target"
   | "confirm";
-export const overlayScreens: readonly Screen[] = ["autostart", "details", "confirm", "cancel-confirm", "retry-confirm", "profile-remove", "tasks", "recovery", "subscription", "target", "profile-name", "profile-source"];
+export const overlayScreens: readonly Screen[] = ["server-rename", "autostart", "details", "confirm", "cancel-confirm", "retry-confirm", "profile-remove", "tasks", "recovery", "subscription", "target", "profile-name", "profile-source"];
 export const isOverlay = (screen: Screen) => overlayScreens.includes(screen);
 export type Batch = "ping" | "speed" | "availability";
 const phases: Record<string, string> = {
@@ -66,7 +66,9 @@ export class AppState {
   status?: Status;
   autostart?: AutostartOptions;
   serviceState?: AutostartServiceState;
-  screen: Screen = "servers";
+  screen: Screen = "home";
+  homeIndex = 0;
+  overlayBase: "home" | AppState["tab"] = "home";
   tab: "servers" | "profiles" | "diagnostics" | "settings" = "servers";
   helpOpen = false;
   helpOffset = 0;
@@ -225,8 +227,12 @@ export class AppState {
   error = false;
   selected = 0;
   serverMenu = false;
+  serverMenuIndex = 0;
+  serverMenuTarget?: { id: string; name: string };
+  renameTarget?: { id: string; original: string };
+  selectTarget?: { id: string; name: string };
   confirmationSnapshot?: string;
-  confirmation: "disconnect" | "stop" | "subscription" | "fastest" = "disconnect";
+  confirmation: "disconnect" | "stop" | "subscription" | "fastest" | "select" = "disconnect";
   fastestCandidate?: { id: string; name: string; speed: number; measuredAt: number };
   pendingSubscription?: string;
   serverID?: string;
@@ -374,7 +380,8 @@ export class AppState {
   onBeforeDispose() {}
   async onDispose() {}
   edit(value: string) {
-    const next = safeText(value);
+    const clean = safeText(value);
+    const next = this.screen === "server-rename" ? [...clean].slice(0, 60).join("") : clean;
     if (next === this.editorValue) return;
     this.editorValue = next;
     this.editorRevision++;
@@ -527,12 +534,14 @@ export class AppState {
     this.paint();
   }
   open(screen: Screen, load = true, loadScreen = true) {
-    if (screen === "home") screen = "servers";
     if (this.closing) return;
     if (screen === "subscription" && !this.subscriptionAvailable()) {
       this.notify(this.nativeUnavailable("subscription"), true);
       return;
     }
+    if (isOverlay(screen) && !isOverlay(this.screen)) this.overlayBase = this.screen === "home" ? "home" : this.tab;
+    const tile = ["", "servers", "tasks", "profiles", "diagnostics", "settings"].indexOf(screen);
+    if (tile > 0) this.homeIndex = tile;
     if (this.screen === "subscription") this.draft = this.editorValue;
     this.filterEditing = false;
     this.screen = screen;
@@ -558,6 +567,7 @@ export class AppState {
       this.profileRemoval = profile && { id: profile.id, name: profile.name, kind: profile.kind };
     }
     this.serverMenu = false;
+    this.serverMenuTarget = undefined;
     this.navigationRevision++;
     if (screen === "subscription") {
       this.editorValue = this.draft;
@@ -575,6 +585,24 @@ export class AppState {
     // Diagnostics immediately displays the cached evidence. Refresh is explicit.
   }
 
+  moveHome(key: string) {
+    const columns = this.viewport().width >= 90 ? 3 : 2;
+    const row = Math.floor(this.homeIndex / columns), col = this.homeIndex % columns;
+    if (key === "home") this.homeIndex = 0;
+    else if (key === "end") this.homeIndex = 5;
+    else if (key === "left" && col > 0) this.homeIndex--;
+    else if (key === "right" && col < columns - 1 && this.homeIndex < 5) this.homeIndex++;
+    else if (key === "up" && row > 0) this.homeIndex -= columns;
+    else if (key === "down" && this.homeIndex + columns < 6) this.homeIndex += columns;
+    this.paint();
+  }
+  activateHome() {
+    const target = [undefined, "servers", "tasks", "profiles", "diagnostics", "settings"] as const;
+    if (this.homeIndex) { this.open(target[this.homeIndex]!); return; }
+    const action = this.actions().find(item => ["home:connect", "home:start-service", "home:x"].includes(item.id));
+    if (action?.available) action.run();
+    else if (action?.unavailableBehavior === "notice" && action.unavailableReason) this.notify(action.unavailableReason, true);
+  }
   /** Reads the cached catalog when the server table is showing an unloaded one. A cached read only. */
   loadCatalogIfShown() {
     if (
@@ -599,6 +627,59 @@ export class AppState {
     this.fastestCandidate = { id: server.server_id, name: server.display_name, speed: server.download_mbps!, measuredAt: this.measurementTimes.get(server.server_id)! };
     this.confirmation = "fastest";
     this.open("confirm");
+  }
+  openServerMenu() {
+    const server = this.servers.find(s => s.server_id === this.serverID);
+    if (!server) return;
+    this.serverMenuTarget = { id: server.server_id, name: server.display_name };
+    this.serverMenuIndex = 0; this.serverMenu = true; this.paint();
+  }
+  closeServerMenu() {
+    const target = this.serverMenuTarget;
+    this.serverMenu = false; this.serverMenuTarget = undefined;
+    if (target && this.servers.some(s => s.server_id === target.id && s.display_name === target.name)) this.serverID = target.id;
+    this.syncServerViewport(); this.paint();
+  }
+  openServerRename() {
+    const server = this.servers.find(s => s.server_id === this.serverID);
+    if (!server) return;
+    this.renameTarget = { id: server.server_id, original: server.original_name ?? server.display_name };
+    this.open("server-rename", false);
+    this.editorValue = [...server.display_name].slice(0, 60).join("");
+    this.paint();
+  }
+  async saveServerRename() {
+    const target = this.renameTarget;
+    if (!target || !this.servers.some(s => s.server_id === target.id)) {
+      this.open(this.overlayBase, false);
+      this.notify("Сервер больше не найден. Переименование отменено.", true);
+      return;
+    }
+    if ([...this.tasks.values()].some(task => task.action === "servers/rename")) {
+      this.notify("Переименование уже выполняется. Дождитесь завершения.", true); return;
+    }
+    const revision = this.navigationRevision;
+    const typed = this.editorValue.replace(/\s+/g, " ").trim();
+    const reply = await this.perform("servers/rename", JSON.stringify({ id: target.id, name: this.editorValue }));
+    // The name is saved even when the backend could not attach a fresh catalog;
+    // show it on the row now and let the next catalog read confirm it.
+    if (reply?.ok && !reply.catalog?.servers) {
+      const at = this.servers.findIndex(s => s.server_id === target.id);
+      if (at >= 0) {
+        const { original_name, ...row } = this.servers[at]!;
+        this.servers[at] = typed ? { ...row, display_name: typed, original_name: target.original } : { ...row, display_name: original_name ?? row.display_name };
+      }
+    }
+    if (reply?.ok && this.screen === "server-rename" && this.navigationRevision === revision) {
+      this.serverID = target.id; this.open(this.overlayBase, false); this.syncServerViewport(); this.paint();
+    }
+  }
+  confirmServerSelection() {
+    const server = this.servers.find(s => s.server_id === this.serverID);
+    if (!server) { this.notify("Сервер изменился. Выберите сервер заново.", true); return; }
+    this.selectTarget = { id: server.server_id, name: server.display_name };
+    this.confirmationSnapshot = this.confirmationContext();
+    this.confirmation = "select"; this.open("confirm");
   }
   retryTargetValid() {
     const target = this.retryTarget;
@@ -635,7 +716,7 @@ export class AppState {
   }
   filteredServers() {
     const query = this.filter.trim().toLocaleLowerCase("ru");
-    return query ? this.servers.filter(server => server.display_name.toLocaleLowerCase("ru").includes(query)) : this.servers;
+    return query ? this.servers.filter(server => [server.display_name, server.original_name ?? "", server.country ?? ""].some(value => value.toLocaleLowerCase("ru").includes(query))) : this.servers;
   }
   editFilter(value: string) {
     this.filter = safeText(value);
@@ -660,7 +741,7 @@ export class AppState {
   }
   updateCatalog(reply: Reply, action: Action) { return updateCatalog(this, reply, action); }
   perform(action: Action, value?: string, insideBatch = false): Promise<Reply | undefined> {
-    if (requestClasses[action] !== "read") return perform(this, action, value, insideBatch);
+    if (action === "servers/rename" || requestClasses[action] !== "read") return perform(this, action, value, insideBatch);
     const flight = this.readFlights.get(action);
     if (flight) {
       if (!flight.followup) flight.followup = flight.first.then(() => {

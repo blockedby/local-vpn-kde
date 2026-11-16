@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { compatible, compatibilityReasons, pairReasons, requestClasses } from "./request-policy";
+import { compatible, compatibilityReasons, pairReasons, queueable, requestClasses } from "./request-policy";
 import type { Action } from "./bridge";
 
 test("all action pairs follow the bridge gate and protect measurement publication", () => {
@@ -13,4 +13,8 @@ test("all action pairs follow the bridge gate and protect measurement publicatio
     expect(compatible(action, other)).toBe(compatible(other, action));
   }
   expect(Object.values(compatibilityReasons).every(Boolean)).toBe(true);
+  expect(requestClasses["servers/rename"]).toBe("read");
+  expect(compatible("servers/rename", "servers/ping")).toBe(true);
+  expect(compatible("servers/rename", "start")).toBe(false);
+  expect(queueable.has("servers/rename")).toBe(false);
 });

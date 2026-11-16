@@ -674,3 +674,31 @@ func TestBridgeNetworkReapplyRequiresNativeRuntimeAndNoValue(t *testing.T) {
 		})
 	}
 }
+
+func TestCatalogCountryWhitelist(t *testing.T) {
+	id := "srv_" + strings.Repeat("a", 27)
+	for _, value := range []string{"US", "us", "USA", "U1", "US\u001b"} {
+		raw, _ := json.Marshal(map[string]any{"schema": picker.BrowserSchema, "status": "ok", "server": map[string]any{"server_id": id, "display_name": "Example Server", "country": value}})
+		got, err := sanitizeCatalog(raw, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		row := got["server"].(map[string]any)
+		if (row["country"] == "US") != (value == "US") {
+			t.Fatalf("country %q passed whitelist: %#v", value, row)
+		}
+	}
+}
+
+func TestCatalogSanitizesEndpointLikeNames(t *testing.T) {
+	id := "srv_" + strings.Repeat("a", 27)
+	raw, _ := json.Marshal(map[string]any{"schema": picker.BrowserSchema, "status": "ok", "server": map[string]any{"server_id": id, "display_name": "secret.example:443", "original_name": "vless://secret@example.com"}})
+	got, err := sanitizeCatalog(raw, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := got["server"].(map[string]any)
+	if row["display_name"] != "Server" || row["original_name"] != "Server" {
+		t.Fatalf("unsafe names passed: %#v", row)
+	}
+}

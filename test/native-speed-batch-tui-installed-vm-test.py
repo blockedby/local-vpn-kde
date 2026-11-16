@@ -288,6 +288,7 @@ try:
         wait(lambda text: all(SCREEN[name] in text for name in ('tasks', 'running', 'queue_heading', 'ping_task', 'speed_task')), 'activity panel lists both passes')
         wait(lambda text: SCREEN['history'] in text and text.count('Завершено') >= 2 and SCREEN['ping_task'] in text and SCREEN['speed_task'] in text, 'both queued passes finished')
         key(KEY['escape'])
+        key(KEY['servers'])
         completed(errors=0)
         assert seen_speed, 'compiled UI never rendered the real speed stage'
         assert SCREEN['docker'] not in frame(), 'native batch displays Docker wording'

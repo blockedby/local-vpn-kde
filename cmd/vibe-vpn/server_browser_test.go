@@ -1390,7 +1390,7 @@ func assertSafeBrowserJSON(t *testing.T, body string) {
 		}
 		servers = append(servers, server)
 	}
-	allowedServer := map[string]bool{"availability": true, "ping_status": true, "download_mbps": true, "download_seconds": true, "downloaded_bytes": true, "server_id": true, "display_name": true, "transport": true, "security": true, "status": true, "latency_ms": true, "selected": true}
+	allowedServer := map[string]bool{"availability": true, "ping_status": true, "download_mbps": true, "download_seconds": true, "downloaded_bytes": true, "server_id": true, "display_name": true, "country": true, "transport": true, "security": true, "status": true, "latency_ms": true, "selected": true}
 	mandatoryServer := []string{"server_id", "display_name", "transport", "security", "status", "selected"}
 	for _, server := range servers {
 		for key := range server {
@@ -1407,6 +1407,9 @@ func assertSafeBrowserJSON(t *testing.T, body string) {
 		encoded, err := json.Marshal(server)
 		if err != nil || json.Unmarshal(encoded, &safe) != nil || safe.ServerID == "" || safe.DisplayName == "" || safe.Status == "" {
 			t.Fatalf("invalid server schema in %s", body)
+		}
+		if safe.Country != "" && (len(safe.Country) != 2 || safe.Country[0] < 'A' || safe.Country[0] > 'Z' || safe.Country[1] < 'A' || safe.Country[1] > 'Z') {
+			t.Fatalf("invalid country in %s", body)
 		}
 	}
 }
@@ -1645,5 +1648,49 @@ func TestBrowserSpeedAndBatchAllowSelectionWhileProbeRuns(t *testing.T) {
 				t.Fatal("speed reported obsolete selection")
 			}
 		})
+	}
+}
+
+func TestBrowserHostnameCountryPersistsAfterMeasurementAndRefresh(t *testing.T) {
+	dir, cfg, cat := browserFixture(t)
+	record := cat.Servers[0]
+	if record.Safe(false).Country != "" {
+		t.Fatal("hostname acquired country before measurement")
+	}
+	deps := browserDependencies{probe: func(context.Context, config.Config, picker.NodeResult) (nettest.Result, error) {
+		return nettest.Result{Country: "JP", Seconds: .1}, nil
+	}}
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	if err := runBrowserPing(cmd, &cliOptions{configPath: cfg}, record.ID, deps); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := loadBrowserCatalogLocked(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := stored.Find(record.ID)
+	if got.Safe(false).Country != "JP" {
+		t.Fatalf("country after measurement = %q", got.Safe(false).Country)
+	}
+	results := make([]picker.NodeResult, 0, len(stored.Servers))
+	for _, r := range stored.Servers {
+		fresh := r.Result
+		fresh.Country = ""
+		results = append(results, fresh)
+	}
+	refresh := browserDependencies{listOnly: true, load: func(context.Context, config.Config) ([]picker.NodeResult, error) { return results, nil }}
+	cmd = &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	if err := runBrowserTestAll(cmd, &cliOptions{configPath: cfg}, refresh); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = loadBrowserCatalogLocked(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ = stored.Find(record.ID)
+	if got.Safe(false).Country != "JP" {
+		t.Fatalf("country after refresh = %q", got.Safe(false).Country)
 	}
 }

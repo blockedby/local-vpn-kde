@@ -28,7 +28,7 @@ test("presentation: home speed recovery retries captured server after selection 
   b.fail=undefined;await app.perform("servers/select",rows[1]!.server_id);
   s.open("recovery");const retry=s.items().find((x:any)=>x.key==="r");retry.run();
   for(let i=0;i<50&&s.homeTesting;i++)await Bun.sleep(5);
-  s.open("home");await t.renderOnce();
+  s.open("servers");await t.renderOnce();
   expect(t.captureCharFrame()).toContain("Node 1");expect(t.captureCharFrame().split("\n").find((line:string)=>line.includes("Node 1") && line.includes("80.0"))).toBeDefined();
   expect(t.captureCharFrame().split("\n").find((line:string)=>line.includes("Node 2") && line.includes("●"))).toBeDefined();
  }finally{await app.close();}

@@ -15,6 +15,9 @@ export function updateCatalog(state: AppState, reply: Reply, action: Action) {
             ...(action === "servers/speed-batch" ? { status: row.status, download_mbps: row.download_mbps, download_seconds: row.download_seconds, downloaded_bytes: row.downloaded_bytes } : {}),
             ping_status: row.ping_status,
             latency_ms: row.latency_ms,
+            // A measurement is where a hostname server's country becomes known,
+            // or stops being known when its addresses no longer agree.
+            country: row.country,
             availability:
               state.batch?.target === state.target
                 ? row.availability
@@ -51,6 +54,7 @@ export function updateCatalog(state: AppState, reply: Reply, action: Action) {
         if (action === "servers/speed")
           state.servers[at] = {
             ...previous,
+            country: row.country,
             status: row.status,
             download_mbps: row.download_mbps,
             download_seconds: row.download_seconds,
@@ -59,6 +63,7 @@ export function updateCatalog(state: AppState, reply: Reply, action: Action) {
         else if (action === "servers/ping")
           state.servers[at] = {
             ...previous,
+            country: row.country,
             ping_status: row.ping_status,
             latency_ms: row.latency_ms,
           };
@@ -66,7 +71,7 @@ export function updateCatalog(state: AppState, reply: Reply, action: Action) {
           action === "servers/availability" &&
           state.batch?.target === state.target
         )
-          state.servers[at] = { ...previous, availability: row.availability };
+          state.servers[at] = { ...previous, country: row.country, availability: row.availability };
       }
     }
     if (!state.servers.some((s) => s.server_id === state.serverID))
@@ -129,6 +134,13 @@ export async function perform(
         ? new Map(state.servers.map(row => [row.server_id, row])) : undefined;
       const currentSelection = state.servers.find(row => row.selected)?.server_id;
       state.updateCatalog(reply, action);
+      if (reply.ok && action === "servers/rename") {
+        for (const target of [state.homeSpeedServer, state.selectTarget, state.fastestCandidate, state.retryTarget?.kind === "server" ? state.retryTarget : undefined]) {
+          if (!target) continue;
+          const server = state.servers.find(row => row.server_id === target.id);
+          if (server) target.name = server.display_name;
+        }
+      }
       if (reply.ok && ["servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch"].includes(action)) {
         const ids = new Set([...(reply.catalog?.servers ?? []).map(row => row.server_id), ...(reply.catalog?.server ? [reply.catalog.server.server_id] : [])]);
         for (const server of state.servers) if (ids.has(server.server_id)) state.recordMeasurement(server, action);
@@ -152,13 +164,15 @@ export async function perform(
         }
       }
       if (!reply.ok && reply.reason === "cancelled") state.recovery = undefined;
+      else if (!reply.ok && action === "servers/rename") state.recovery = undefined;
       else if (!reply.ok) state.recovery = { ...recoveryFor(action, reply.reason, state.status?.runtime), action, value,
         homeServerID: state.homeTesting ? state.homeSpeedServer?.id : undefined,
         batchRetry: state.batch ? { kind: state.batch.kind, ids: [...(state.batch.ids ?? [])], target: state.batch.target ?? state.target } : undefined,
       };
       if (!reply.ok && !insideBatch) {
         state.noticeIdentity = { action, reason: reply.reason, ok: false };
-        state.notice = nativeSubscriptionSetup
+        const renameFailures: Record<string, string> = { "invalid-name": "Недопустимое имя сервера.", "too-many-names": "Достигнут предел сохранённых имён серверов.", "server-names-unavailable": "Не удалось сохранить имена серверов." };
+        state.notice = action === "servers/rename" && renameFailures[reply.reason] ? renameFailures[reply.reason] : nativeSubscriptionSetup
           ? "Не удалось настроить native-пакет. Проверьте подтверждение администратора и повторите."
           : reply.reason === "autostart-unavailable" ? "Не удалось настроить автозапуск. Проверьте пользовательскую службу systemd." : state.recovery?.message ?? failure(reply.reason, reply.code, state.status?.runtime);
         state.noticeAttempt = reply.reason === "native-network-settings-changed" ? "" : [
@@ -197,6 +211,7 @@ export async function perform(
           "servers/list": "Список загружен.",
           "servers/refresh": "Каталог обновлён.",
           "servers/select": "Сервер выбран.",
+          "servers/rename": "Имя сервера сохранено.",
           subscription: nativeSubscriptionSetup
             ? "Native-пакет настроен; первый сервер выбран, это могло занять несколько минут.\nVPN не подключён — нажмите «Подключить VPN» отдельно. Автозапуск не изменён — настройте его отдельно при желании."
             : "Подписка сохранена. Обновите список серверов.",
