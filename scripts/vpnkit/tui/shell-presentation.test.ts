@@ -20,7 +20,7 @@ test("shell: table reserves notice space at 80x24, footer uses available shortcu
     expect(lines[0]).toContain("отключён"); expect(lines[1]).toContain("Серверы");
     expect(lines[2]).toContain("Ping мс");
     expect(lines.slice(3, -1).filter(line => /Node \d\d/.test(line))).toHaveLength(18);
-    expect(lines[23]).toContain("Enter выбрать"); expect(lines[23]).toContain("? помощь");
+    expect(lines[23]).toContain("Enter действия"); expect(lines[23]).toContain("Esc главная");
     expect(lines[23]).not.toContain("k отменить");
   } finally { await app.close(); }
 });
@@ -241,7 +241,7 @@ test("shell: mode survives a long server name and table columns have gutters", a
     t.resize(60, 16);
     app.tasks.set("measurement", { action: "servers/ping", measurement: true, started: 0, phase: "" });
     app.paint(); await t.renderOnce();
-    expect(t.captureCharFrame().split("\n").at(-2)).toContain("k отменить");
+    expect(t.captureCharFrame().split("\n").at(-2)).toContain("Esc главная");
     app.tasks.clear();
   } finally { await app.close(); }
 });

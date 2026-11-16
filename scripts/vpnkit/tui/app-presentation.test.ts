@@ -1032,7 +1032,7 @@ test("presentation: installed native reuses the server table, selection, checks 
     expect(frame).toContain("Amsterdam");
     expect(frame).toContain("p ping");
     expect(frame).not.toContain("пока не подключены");
-    t.mockInput.pressEnter(); await settle();
+    t.mockInput.pressEnter(); t.mockInput.pressEnter(); t.mockInput.pressKey("y"); await settle();
 
     await app.perform("servers/ping",rows[0]!.server_id);
 
@@ -1384,7 +1384,7 @@ test("presentation: home speed test skips download after failed ping and allows 
     t.resize(60, 16); await t.renderOnce();
     const narrow = t.captureCharFrame();
     expect(narrow).toContain("режим: строгий");
-    expect(narrow).toContain("k отменить");
+    expect(narrow).toContain("Enter действия");
     expect(narrow).not.toContain("Ping · выполняется");
     expect(narrow).toContain("Ping");
     t.mockInput.pressKey("d"); await t.renderOnce();

@@ -10,6 +10,15 @@ export class FooterView {
   update(state: AppState, editor: boolean) {
     if (state.helpOpen) { this.footer.content = "↑↓ прокрутка · Esc / ? закрыть"; return; }
     if (state.filterEditing) { this.footer.content = "Enter применить · Esc очистить"; return; }
+    if (state.serverMenu) { this.footer.content = "↑↓ действие · Enter выполнить · Esc закрыть"; return; }
+    if (state.screen === "servers" && state.ready() && !state.nativePreviewOnly() && state.servers.length) {
+      const base = "↑↓ сервер · Enter действия · / фильтр · Esc главная";
+      let result = base;
+      const actions = state.actions();
+      for (const [id, hint] of [["global:cancel", "k отменить"], ["servers:p", "p ping"], ["servers:t", "t скорость"], ["servers:sort", "o сортировка"], ["global:help", "? помощь"]] as const)
+        if (actions.some(action => action.id === id && action.available) && Bun.stringWidth(`${result} · ${hint}`) <= this.renderer.terminalWidth - 2) result += ` · ${hint}`;
+      this.footer.content = result; return;
+    }
     if (state.screen === "tasks") { this.footer.content = `↑↓ выбор${state.items()[state.selected]?.available ? " · Enter отменить" : ""} · Esc назад · ? помощь`; return; }
     const actions = state.groupedActions().flatMap(group => group.actions).filter(action => action.available);
     if (state.screen === "home") {

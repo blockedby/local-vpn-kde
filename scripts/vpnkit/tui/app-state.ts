@@ -227,8 +227,11 @@ export class AppState {
   error = false;
   selected = 0;
   serverMenu = false;
+  serverMenuIndex = 0;
+  serverMenuTarget?: { id: string; name: string };
+  selectTarget?: { id: string; name: string };
   confirmationSnapshot?: string;
-  confirmation: "disconnect" | "stop" | "subscription" | "fastest" = "disconnect";
+  confirmation: "disconnect" | "stop" | "subscription" | "fastest" | "select" = "disconnect";
   fastestCandidate?: { id: string; name: string; speed: number; measuredAt: number };
   pendingSubscription?: string;
   serverID?: string;
@@ -562,6 +565,7 @@ export class AppState {
       this.profileRemoval = profile && { id: profile.id, name: profile.name, kind: profile.kind };
     }
     this.serverMenu = false;
+    this.serverMenuTarget = undefined;
     this.navigationRevision++;
     if (screen === "subscription") {
       this.editorValue = this.draft;
@@ -621,6 +625,25 @@ export class AppState {
     this.fastestCandidate = { id: server.server_id, name: server.display_name, speed: server.download_mbps!, measuredAt: this.measurementTimes.get(server.server_id)! };
     this.confirmation = "fastest";
     this.open("confirm");
+  }
+  openServerMenu() {
+    const server = this.servers.find(s => s.server_id === this.serverID);
+    if (!server) return;
+    this.serverMenuTarget = { id: server.server_id, name: server.display_name };
+    this.serverMenuIndex = 0; this.serverMenu = true; this.paint();
+  }
+  closeServerMenu() {
+    const target = this.serverMenuTarget;
+    this.serverMenu = false; this.serverMenuTarget = undefined;
+    if (target && this.servers.some(s => s.server_id === target.id && s.display_name === target.name)) this.serverID = target.id;
+    this.syncServerViewport(); this.paint();
+  }
+  confirmServerSelection() {
+    const server = this.servers.find(s => s.server_id === this.serverID);
+    if (!server) { this.notify("Сервер изменился. Выберите сервер заново.", true); return; }
+    this.selectTarget = { id: server.server_id, name: server.display_name };
+    this.confirmationSnapshot = this.confirmationContext();
+    this.confirmation = "select"; this.open("confirm");
   }
   retryTargetValid() {
     const target = this.retryTarget;

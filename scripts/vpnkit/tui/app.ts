@@ -76,7 +76,7 @@ export class App extends AppState {
     this.detailsView.update(this, wide);
     this.tableView.update({ width: this.renderer.terminalWidth - 2 - (wide ? DETAILS_WIDTH : 0), visible: this.renderer.width >= 60 && this.renderer.height >= 16 && (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0, servers: this.visibleServers(), rowCount: this.rowCount(), serverID: this.serverID, batch: this.batch, frame: this.frame, liveSpeeds: this.liveSpeeds, sort: this.sort, sortDescending: this.sortDescending, filter: this.filter, filterEditing: this.filterEditing, shown: this.filteredServers().length, total: this.servers.length });
     this.headerView.update(this, this.demo);
-    if (this.screen === "details") this.overlayView.update(this);
+    if (this.screen === "details" || this.serverMenu) this.overlayView.update(this);
   }
   override paintProgress() { super.paintProgress(); this.tabView.update(this); this.headerView.update(this, this.demo); this.homeView.update(this, this.screen === "home" && this.renderer.width >= 60 && this.renderer.height >= 16); if (this.screen === "tasks") this.overlayView.update(this); }
   override paintPalette() { super.paintPalette(); this.overlayView.updatePalette(this); }

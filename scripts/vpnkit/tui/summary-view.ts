@@ -47,7 +47,9 @@ export class SummaryView {
       this.summary.content = `${stages[state.recovery?.stage ?? "unknown"]}\n${state.recovery?.message ?? "Проверьте состояние."}`;
     }
     if (state.screen === "confirm") {
-      if (state.confirmation === "fastest" && state.fastestCandidate) {
+      if (state.confirmation === "select" && state.selectTarget) {
+        this.summary.content = `Выбрать сервер ${safeText(state.selectTarget.name)}?\nПереключение может прервать текущие соединения.`;
+      } else if (state.confirmation === "fastest" && state.fastestCandidate) {
         const candidate = state.fastestCandidate;
         const age = Math.max(0, Math.floor((Date.now() - candidate.measuredAt) / 1000));
         this.summary.content = `${candidate.name} · ${candidate.speed.toFixed(1)} Мбит/с · ${age} с назад${state.filter ? " · среди показанных" : ""}\nПереключение прервёт текущие соединения. Выбрать сервер?`;

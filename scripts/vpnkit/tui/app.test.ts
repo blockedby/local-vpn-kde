@@ -345,6 +345,7 @@ test("server table is sorted by name, keeps columns aligned and exposes combined
     expect(app.sort).toBe("ping");
     key("down");
     key("return");
+    key("return"); key("y");
     await settle();
     expect(b.calls.at(-1)?.action).toBe("servers/select");
   } finally { await app.close(); }
@@ -830,6 +831,7 @@ test("any listed server can be selected without successful measurements", async 
       t.mockInput.pressKey("v");
       await settle();
       t.mockInput.pressEnter();
+      t.mockInput.pressEnter(); t.mockInput.pressKey("y");
       await settle();
       expect(b.calls.at(-1)).toEqual({ action: "servers/select", value: rows[0]!.server_id });
     } finally { await app.close(); }
@@ -1248,7 +1250,7 @@ test("installed native reuses the server table, selection, checks and mode contr
     key("1"); await settle();
     expect(app.servers.map(server => server.server_id)).toContain(rows[1]!.server_id);
     expect(app.nativeInstalled()).toBe(true);
-    key("return"); await settle();
+    key("return"); key("return"); key("y"); await settle();
     expect(b.calls.at(-1)?.action).toBe("servers/select");
     await app.perform("servers/ping",rows[0]!.server_id);
     expect(b.calls.at(-1)?.action).toBe("servers/ping");

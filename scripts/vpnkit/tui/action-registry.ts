@@ -3,7 +3,7 @@ import { compatible } from "./request-policy";
 import type { ActionDefinition, ActionScope } from "./menu-actions";
 
 /** Keys use OpenTUI names; modified keys use ctrl+ / shift+ prefixes. */
-export function actionRegistry(state: AppState): ActionDefinition[] {
+export function actionRegistry(state: AppState, rowActions = false): ActionDefinition[] {
   const editor = ["subscription", "target", "profile-name", "profile-source"].includes(state.screen);
   const actions: ActionDefinition[] = [];
   const add = (id: string, keys: string[], label: string, scope: ActionScope, run: () => void,
@@ -29,6 +29,19 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
     add("help:close", ["escape", "?"], "Закрыть помощь", "global", () => { state.helpOpen = false; state.paint(); }, undefined, "none", true);
     add("help:up", ["up", "pageup"], "Вверх", "global", () => { state.helpOffset = Math.max(0, state.helpOffset - 1); state.paint(); }, state.helpOffset === 0 ? "Начало списка." : undefined);
     add("help:down", ["down", "pagedown"], "Вниз", "global", () => { state.helpOffset++; state.paint(); });
+    return actions;
+  }
+  if (state.serverMenu && !rowActions) {
+    const entries = serverMenuActions(state);
+    const move = (index: number) => { state.serverMenuIndex = index; state.paint(); };
+    add("server-menu:close", ["escape"], "Закрыть меню", "menu", () => state.closeServerMenu(), undefined, "none", true);
+    add("global:help", ["?"], "Помощь", "global", () => { state.helpOffset = 0; state.helpOpen = true; state.paint(); }, undefined, "none", true);
+    for (const [key, next] of [["up", Math.max(0, state.serverMenuIndex - 1)], ["down", Math.min(entries.length - 1, state.serverMenuIndex + 1)], ["home", 0], ["end", entries.length - 1]] as const)
+      add(`server-menu:${key}`, [key], "Выбор действия", "menu", () => move(next), next === state.serverMenuIndex || next < 0 ? "Край списка." : undefined, "none", true);
+    const current = entries[state.serverMenuIndex];
+    add("server-menu:run", ["return"], "Выполнить действие", "menu", () => current?.run(), current?.unavailableReason ?? (!current ? "Нет выбранного действия." : undefined), "notice", true);
+    for (const entry of entries.filter(item => item.key !== "return")) actions.push(entry);
+    add("global:quit-control", ["ctrl+c"], "Выход", "global", () => void state.close(), undefined, "none", true);
     return actions;
   }
   if (!editor) add("global:help", ["?"], "Помощь", "global", () => { state.helpOffset = 0; state.helpOpen = true; state.paint(); }, undefined, "none", true);
@@ -73,6 +86,10 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
     }
     const items = state.items();
     const move = (delta: number) => { state.selected = (state.selected + items.length + delta) % Math.max(1, items.length); state.paint(); };
+    if (["confirm", "profile-remove", "retry-confirm", "cancel-confirm"].includes(state.screen)) {
+      for (const [key, delta] of [["left", -1], ["right", 1], ["tab", 1], ["shift+tab", -1]] as const)
+        add(`confirmation:${key}`, [key], "Выбор", "confirmation", () => move(delta), items.length <= 1 ? "Нет другого пункта." : undefined, "none", true);
+    }
     add("menu:previous", ["up"], "Выбор", "menu", () => move(-1), items.length <= 1 ? "Нет другого пункта." : undefined);
     add("menu:next", ["down"], "Выбор", "menu", () => move(1), items.length <= 1 ? "Нет другого пункта." : undefined);
     const current = items[state.selected];
@@ -141,7 +158,7 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
     }, state.servers.length ? undefined : "Список серверов пуст.");
     for (const [key, delta] of [["[", -1], ["]", 1]] as const) add(`servers:sort-${key}`, [key], "Столбец сортировки", "server-table", () => { const sorts = ["name", "ping", "speed", "availability"] as const; state.setSort(sorts[(sorts.indexOf(state.sort) + delta + sorts.length) % sorts.length]!); }, state.servers.length ? undefined : "Список серверов пуст.");
     add("servers:sort-reverse", ["\\"], "Обратить сортировку", "server-table", () => state.setSort(state.sort), state.servers.length ? undefined : "Список серверов пуст.");
-    if (state.servers.length && state.ready() && !state.nativePreviewOnly()) {
+    if (rowActions || state.servers.length && state.ready() && !state.nativePreviewOnly()) {
       for (const [name, delta] of [["up", -1], ["down", 1], ["pageup", -state.rowCount()], ["pagedown", state.rowCount()], ["home", -Infinity], ["end", Infinity]] as const) {
         const list = state.sortedServers(), at = Math.max(0, list.findIndex(s => s.server_id === state.serverID));
         const next = Math.max(0, Math.min(list.length - 1, at + delta));
@@ -149,11 +166,7 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
           state.serverID = list[next]?.server_id; if (state.filter) state.filterAnchor = state.serverID; state.syncServerViewport(); state.paint();
         }, list[next]?.server_id === state.serverID ? "Край списка." : undefined);
       }
-      add("servers:select", ["return"], "Выбрать сервер", "server-table", () => {
-        if (state.catalogStale) { state.notify("Подписка изменена. Обновите список серверов.", true); return; }
-        const server = state.servers.find(s => s.server_id === state.serverID);
-        if (server) void state.perform("servers/select", server.server_id);
-      }, state.catalogStale ? "Подписка изменена. Обновите список серверов." : !state.serverID ? "Нет выбранного сервера." : undefined, "notice");
+      add(rowActions ? "servers:select" : "servers:open-menu", ["return"], rowActions ? "Выбрать сервер" : "Действия сервера", "server-table", () => rowActions ? state.confirmServerSelection() : state.openServerMenu(), !state.serverID ? "Нет выбранного сервера." : rowActions && state.nativePreviewOnly() ? state.nativeUnavailable("servers/select") : rowActions && !state.ready() ? `Сначала запустите ${state.serviceObject()}.` : rowActions && state.catalogStale ? "Подписка изменена. Обновите список серверов." : undefined, "notice");
     }
   }
   // The list is ordered in the same precedence as the former dispatch path.
@@ -175,6 +188,25 @@ export function actionRegistry(state: AppState): ActionDefinition[] {
   });
 }
 
+/** Row entries retain the registry's handlers and availability, bound to the captured server. */
+export function serverMenuActions(state: AppState): ActionDefinition[] {
+  const target = state.serverMenuTarget ?? (state.serverID ? state.servers.find(s => s.server_id === state.serverID) && { id: state.serverID, name: state.servers.find(s => s.server_id === state.serverID)!.display_name } : undefined);
+  const previousID = state.serverID;
+  if (target) state.serverID = target.id;
+  const actions = actionRegistry(state, true);
+  state.serverID = previousID;
+  return ["servers:select", "servers:single-speed", "servers:details"].flatMap(id => {
+    const action = actions.find(item => item.id === id);
+    if (!action) return [];
+    const valid = !!target && state.servers.some(s => s.server_id === target.id && s.display_name === target.name);
+    const reason = !valid ? "Сервер изменился. Выберите сервер заново." : action.unavailableReason;
+    return [{ ...action, available: !reason, ...(reason ? { unavailableReason: reason, unavailableBehavior: "notice" as const } : {}), run: () => {
+      if (!target || !state.servers.some(s => s.server_id === target.id && s.display_name === target.name)) { state.notify("Сервер изменился. Выберите сервер заново.", true); return; }
+      state.closeServerMenu(); state.serverID = target.id; action.run();
+    } }];
+  });
+}
+
 export function matchesAction(action: ActionDefinition, key: AppKeyEvent): boolean {
   return action.keys.some(candidate => candidate === (key.ctrl ? `ctrl+${key.name.toLowerCase()}` : key.shift && key.name === "tab" ? "shift+tab" : (key.name === "T" || key.shift && key.name.toLowerCase() === "t") ? "shift+t" : key.shift && key.name.toLowerCase() === "x" ? "X" : key.shift && key.name === "/" ? "?" : key.name));
 }
@@ -183,7 +215,12 @@ export function matchesAction(action: ActionDefinition, key: AppKeyEvent): boole
 export function groupedActions(state: AppState) {
   const hint: Record<string, string> = { escape: "Esc", return: "Enter", tab: "Tab", "shift+tab": "Shift+Tab", "ctrl+c": "Ctrl+C", "ctrl+p": "Ctrl+P", up: "↑", down: "↓", pageup: "PgUp", pagedown: "PgDn", "shift+t": "T", home: "Home", end: "End", left: "←", right: "→" };
   const groups: { scope: ActionScope; actions: (ActionDefinition & { keyHints: string[] })[] }[] = [];
-  for (const action of actionRegistry(state)) {
+  const listed = actionRegistry(state);
+  if (state.serverMenu && !state.helpOpen) {
+    const select = serverMenuActions(state).find(action => action.id === "servers:select");
+    if (select) listed.push(select);
+  }
+  for (const action of listed) {
     let group = groups.find(group => group.scope === action.scope);
     if (!group) { group = { scope: action.scope, actions: [] }; groups.push(group); }
     group.actions.push({ ...action, keyHints: action.keys.map(key => hint[key] ?? key) });

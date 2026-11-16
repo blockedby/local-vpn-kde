@@ -82,6 +82,7 @@ export function menuItems(state: AppState): MenuItem[] {
           label: "Нет",
           run: () => {
             if (state.confirmation === "fastest") state.fastestCandidate = undefined;
+            if (state.confirmation === "select") state.selectTarget = undefined;
             if (state.confirmation === "subscription") {
               state.pendingSubscription = undefined;
               state.open("subscription");
@@ -92,6 +93,14 @@ export function menuItems(state: AppState): MenuItem[] {
           key: "y",
           label: "Да",
           run: () => {
+            if (state.confirmation === "select") {
+              const target = state.selectTarget; state.selectTarget = undefined;
+              const valid = target && state.ready() && !state.catalogStale && state.confirmationSnapshot === state.confirmationContext() && state.servers.some(server => server.server_id === target.id && server.display_name === target.name);
+              state.open(state.overlayBase, false);
+              if (valid && target) void state.perform("servers/select", target.id);
+              else state.notify("Сервер или состояние изменились. Выберите сервер заново.", true);
+              return;
+            }
             if (state.confirmation === "subscription") {
               const value = state.pendingSubscription;
               state.pendingSubscription = undefined;

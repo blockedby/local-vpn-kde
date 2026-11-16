@@ -4,7 +4,8 @@ import { SummaryView } from "./summary-view";
 import { MenuView } from "./menu-view";
 import { EditorView } from "./editor-view";
 import { palette as p } from "./model";
-import { cell } from "./formatting";
+import { cell, safeText, wrapText } from "./formatting";
+import { serverMenuActions } from "./action-registry";
 
 /** Absolute overlay host. Other modal views can use the same positioning pattern. */
 export class OverlayView {
@@ -18,9 +19,29 @@ export class OverlayView {
   private paletteBox: BoxRenderable;
   private paletteInput: InputRenderable;
   private paletteRows: TextRenderable[] = [];
+  private rowBackdrop: BoxRenderable;
+  private rowMenu: BoxRenderable;
+  private rowHeader: TextRenderable;
+  private rowEntries: TextRenderable[] = [];
   constructor(private renderer: CliRenderer, root: BoxRenderable) {
     this.dialog = new BoxRenderable(renderer, { position: "absolute", top: 2, left: 2, width: 54, height: 8, zIndex: 50, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, overflow: "hidden", flexDirection: "column", visible: false });
     root.add(this.dialog);
+    this.rowBackdrop = new BoxRenderable(renderer, { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", zIndex: 48, visible: false, onMouseDown: event => { if (event.button === 0) this.current?.closeServerMenu(); } });
+    root.add(this.rowBackdrop);
+    this.rowMenu = new BoxRenderable(renderer, { position: "absolute", top: 3, left: 2, width: 48, height: 7, zIndex: 49, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, overflow: "hidden", flexDirection: "column", visible: false });
+    this.rowMenu.onMouseDown = event => event.stopPropagation();
+    this.rowHeader = new TextRenderable(renderer, { content: "", height: 1, fg: p.muted, flexShrink: 0 }); this.rowMenu.add(this.rowHeader);
+    for (let i = 0; i < 3; i++) {
+      const row = new TextRenderable(renderer, { content: "", height: 1, flexShrink: 0, onMouseDown: event => {
+        if (event.button !== 0 || !this.current) return;
+        event.stopPropagation(); const state = this.current; state.serverMenuIndex = i;
+        const action = serverMenuActions(state)[i];
+        if (action?.available) action.run(); else if (action?.unavailableReason) state.notify(action.unavailableReason, true);
+        state.paint();
+      } });
+      this.rowMenu.add(row); this.rowEntries.push(row);
+    }
+    root.add(this.rowMenu);
     this.dialogSummary = new SummaryView(renderer, this.dialog);
     this.dialogMenu = new MenuView(renderer, this.dialog, index => {
       if (!this.current || this.current.helpOpen) return;
@@ -74,6 +95,30 @@ export class OverlayView {
   update(state: AppState) {
     this.current = state;
     this.updatePalette(state);
+    const rowVisible = state.serverMenu && !state.helpOpen && !state.paletteOpen && this.renderer.terminalWidth >= 60 && this.renderer.terminalHeight >= 16;
+    this.rowBackdrop.visible = rowVisible; this.rowMenu.visible = rowVisible;
+    if (rowVisible) {
+      const width = Math.min(50, this.renderer.terminalWidth - 4);
+      const entries = serverMenuActions(state);
+      const target = state.serverMenuTarget;
+      const server = state.servers.find(s => s.server_id === target?.id && s.display_name === target.name);
+      const title = `${safeText(target?.name ?? "Сервер")} · ${server?.latency_ms === undefined ? "—" : Math.round(server.latency_ms)} мс · ${server?.download_mbps === undefined ? "—" : server.download_mbps.toFixed(1)} Мбит/с`;
+      this.rowHeader.content = cell(` ${title}`, width - 2).trimEnd();
+      let height = 3;
+      this.rowEntries.forEach((row, i) => {
+        const action = entries[i]; row.visible = !!action; if (!action) return;
+        const hint = action.key === "shift+t" ? "T" : action.key === "return" ? "Enter" : action.key;
+        const label = `${i === state.serverMenuIndex ? "›" : " "} ${action.label}`;
+        const padding = Math.max(1, width - 4 - Bun.stringWidth(label) - Bun.stringWidth(hint));
+        const reason = action.unavailableReason ? wrapText(action.unavailableReason, width - 4).map(line => `  ${line}`) : [];
+        row.content = `${label}${" ".repeat(padding)}${hint}${reason.length ? `\n${reason.join("\n")}` : ""}`;
+        row.height = 1 + reason.length; height += 1 + reason.length;
+        row.fg = action.available ? i === state.serverMenuIndex ? p.accent : p.text : p.muted;
+      });
+      this.rowMenu.width = width; this.rowMenu.height = Math.min(height, this.renderer.terminalHeight - 3);
+      this.rowMenu.left = Math.max(1, this.renderer.terminalWidth - width - 3);
+      this.rowMenu.top = Math.min(3, this.renderer.terminalHeight - Number(this.rowMenu.height) - 1);
+    }
     const modal = isOverlay(state.screen) && this.renderer.terminalWidth >= 60 && this.renderer.terminalHeight >= 16;
     const editor = ["subscription", "target", "profile-name", "profile-source"].includes(state.screen);
     this.dialog.visible = modal;
