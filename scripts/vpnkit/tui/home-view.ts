@@ -1,6 +1,6 @@
 import { BoxRenderable, TextAttributes, TextRenderable, type CliRenderer } from "@opentui/core";
 import type { AppState } from "./app-state";
-import { cell, displayCheckAddress } from "./formatting";
+import { cell, displayCheckAddress, pluralRu } from "./formatting";
 import { connection, palette as p } from "./model";
 
 export class HomeView {
@@ -34,9 +34,9 @@ export class HomeView {
     const glyphs = ["▶", "≡", "•", "◇", "+", "*"];
     const data = [
       ["Подключение", lifecycleTask ? state.actionLabel(lifecycleTask.action) : connection(state.status).title, `Enter — ${lifecycle?.label ?? "—"}`],
-      ["Серверы", `${state.catalogLoaded && !state.catalogStale ? state.servers.length : "—"} серверов · выбран: ${selected?.display_name ?? "—"}`, `Лучший ping: ${best ? `${best.display_name} · ${best.latency_ms} мс` : "—"}`],
+      ["Серверы", `${state.catalogLoaded && !state.catalogStale ? `${state.servers.length} ${pluralRu(state.servers.length, ["сервер", "сервера", "серверов"])}` : "— серверов"} · выбран: ${selected?.display_name ?? "—"}`, `Лучший ping: ${best ? `${best.display_name} · ${best.latency_ms} мс` : "—"}`],
       ["Замеры", state.batch ? `Выполняется ${state.batch.done}/${state.batch.total}` : state.measurementAction ? "Выполняется замер" : "Замеров нет", `В очереди: ${state.queue.filter(q => q.kind === "batch" || q.kind === "home" || q.action.startsWith("servers/")).length}`],
-      ["Профили", `Профилей: ${state.profiles?.items.length ?? "—"}`, `Активен: ${profile?.name ?? "—"}`],
+      ["Профили", state.profiles ? `${state.profiles.items.length} ${pluralRu(state.profiles.items.length, ["профиль", "профиля", "профилей"])}` : "Профилей: —", `Активен: ${profile?.name ?? "—"}`],
       ["Диагностика", `Шлюз: ${health[gateway ?? ""] ?? "—"}`, `Сеть: ${state.status?.networkmanager_active === "yes" ? "активна" : state.status?.networkmanager_active === "no" ? "отключена" : "—"}`],
       ["Настройки", `Режим: ${mode} · автозапуск: ${state.autostart ? (state.autostart.connect ? "VPN" : state.autostart.gateway ? "шлюз" : "нет") : "—"}`, `Сайт: ${displayCheckAddress(state.target)}`],
     ];

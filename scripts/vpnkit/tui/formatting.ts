@@ -35,3 +35,10 @@ export function displayCheckAddress(value: string, width = 45): string {
     return cell(`${url.protocol}//${url.host}${url.pathname.length > 1 ? "/…" : "/"}`, width).trimEnd();
   } catch { return "недоступен"; }
 }
+
+/** Russian noun form for integer counts: one, few, many. */
+export function pluralRu(count: number, forms: readonly [string, string, string]): string {
+  const n = Math.abs(count) % 100;
+  const last = n % 10;
+  return forms[n >= 11 && n <= 14 ? 2 : last === 1 ? 0 : last >= 2 && last <= 4 ? 1 : 2];
+}
