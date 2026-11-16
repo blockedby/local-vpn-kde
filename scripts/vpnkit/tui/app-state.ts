@@ -13,7 +13,7 @@ import { testHomeSpeed, runBatch, cancelTask, cancel, retryCheck, reconnectBacke
 import { defineMenuActions, menuItems, type ActionDefinition } from "./menu-actions";
 
 export type Screen =
-  | "details" | "tasks" | "cancel-confirm" | "recovery" | "retry-confirm"
+  | "server-rename" | "details" | "tasks" | "cancel-confirm" | "recovery" | "retry-confirm"
  | "profiles" | "profile-name" | "profile-source" | "profile-remove"
   | "autostart"
   | "home" | "settings"
@@ -22,7 +22,7 @@ export type Screen =
   | "diagnostics"
   | "target"
   | "confirm";
-export const overlayScreens: readonly Screen[] = ["autostart", "details", "confirm", "cancel-confirm", "retry-confirm", "profile-remove", "tasks", "recovery", "subscription", "target", "profile-name", "profile-source"];
+export const overlayScreens: readonly Screen[] = ["server-rename", "autostart", "details", "confirm", "cancel-confirm", "retry-confirm", "profile-remove", "tasks", "recovery", "subscription", "target", "profile-name", "profile-source"];
 export const isOverlay = (screen: Screen) => overlayScreens.includes(screen);
 export type Batch = "ping" | "speed" | "availability";
 const phases: Record<string, string> = {
@@ -229,6 +229,7 @@ export class AppState {
   serverMenu = false;
   serverMenuIndex = 0;
   serverMenuTarget?: { id: string; name: string };
+  renameTarget?: { id: string; original: string };
   selectTarget?: { id: string; name: string };
   confirmationSnapshot?: string;
   confirmation: "disconnect" | "stop" | "subscription" | "fastest" | "select" = "disconnect";
@@ -379,7 +380,8 @@ export class AppState {
   onBeforeDispose() {}
   async onDispose() {}
   edit(value: string) {
-    const next = safeText(value);
+    const clean = safeText(value);
+    const next = this.screen === "server-rename" ? [...clean].slice(0, 60).join("") : clean;
     if (next === this.editorValue) return;
     this.editorValue = next;
     this.editorRevision++;
@@ -638,6 +640,30 @@ export class AppState {
     if (target && this.servers.some(s => s.server_id === target.id && s.display_name === target.name)) this.serverID = target.id;
     this.syncServerViewport(); this.paint();
   }
+  openServerRename() {
+    const server = this.servers.find(s => s.server_id === this.serverID);
+    if (!server) return;
+    this.renameTarget = { id: server.server_id, original: server.original_name ?? server.display_name };
+    this.open("server-rename", false);
+    this.editorValue = [...server.display_name].slice(0, 60).join("");
+    this.paint();
+  }
+  async saveServerRename() {
+    const target = this.renameTarget;
+    if (!target || !this.servers.some(s => s.server_id === target.id)) {
+      this.open(this.overlayBase, false);
+      this.notify("Сервер больше не найден. Переименование отменено.", true);
+      return;
+    }
+    if ([...this.tasks.values()].some(task => task.action === "servers/rename")) {
+      this.notify("Переименование уже выполняется. Дождитесь завершения.", true); return;
+    }
+    const revision = this.navigationRevision;
+    const reply = await this.perform("servers/rename", JSON.stringify({ id: target.id, name: this.editorValue }));
+    if (reply?.ok && this.screen === "server-rename" && this.navigationRevision === revision) {
+      this.serverID = target.id; this.open(this.overlayBase, false); this.syncServerViewport(); this.paint();
+    }
+  }
   confirmServerSelection() {
     const server = this.servers.find(s => s.server_id === this.serverID);
     if (!server) { this.notify("Сервер изменился. Выберите сервер заново.", true); return; }
@@ -680,7 +706,7 @@ export class AppState {
   }
   filteredServers() {
     const query = this.filter.trim().toLocaleLowerCase("ru");
-    return query ? this.servers.filter(server => server.display_name.toLocaleLowerCase("ru").includes(query)) : this.servers;
+    return query ? this.servers.filter(server => [server.display_name, server.original_name ?? "", server.country ?? ""].some(value => value.toLocaleLowerCase("ru").includes(query))) : this.servers;
   }
   editFilter(value: string) {
     this.filter = safeText(value);
@@ -705,7 +731,7 @@ export class AppState {
   }
   updateCatalog(reply: Reply, action: Action) { return updateCatalog(this, reply, action); }
   perform(action: Action, value?: string, insideBatch = false): Promise<Reply | undefined> {
-    if (requestClasses[action] !== "read") return perform(this, action, value, insideBatch);
+    if (action === "servers/rename" || requestClasses[action] !== "read") return perform(this, action, value, insideBatch);
     const flight = this.readFlights.get(action);
     if (flight) {
       if (!flight.followup) flight.followup = flight.first.then(() => {

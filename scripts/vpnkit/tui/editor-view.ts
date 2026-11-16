@@ -20,13 +20,14 @@ export class EditorView {
     parent.add(this.hint);
   }
   update(value: string, visible: boolean, closing: boolean, kind?: string) {
+    this.input.maxLength = kind === "server-rename" ? 60 : 16384;
     this.input.placeholder = kind === "profile-name" ? "Имя профиля" : "https://";
     if (this.input.value !== value) this.input.value = value;
     this.input.visible = visible;
     this.hint.visible = visible;
     if (visible && !closing) this.input.focus();
     else this.input.blur();
-    this.hint.content = "Enter сохранить · Esc назад · Ctrl+U очистить\nЗначение в журнал не попадает.";
+    this.hint.content = kind === "server-rename" ? "Пустая строка вернёт имя из подписки.\nДо 60 символов." : "Enter сохранить · Esc назад · Ctrl+U очистить\nЗначение в журнал не попадает.";
   }
   blur() { this.input.blur(); }
 }

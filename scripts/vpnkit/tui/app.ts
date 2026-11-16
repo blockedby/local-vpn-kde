@@ -90,7 +90,7 @@ export class App extends AppState {
     const modal = isOverlay(overlayScreen);
     if (modal) this.screen = this.overlayBase;
     this.homeView.update(this, !small && this.screen === "home");
-    const editor = !small && ["subscription", "target", "profile-name", "profile-source"].includes(this.screen);
+    const editor = !small && ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(this.screen);
     this.editorView.update(this.editorValue, editor && !this.helpOpen, this.closing);
     const items = small || this.screen === "home" || this.screen === "servers" && this.ready() && !this.nativePreviewOnly() && this.status?.subscription === "configured" ? [] : this.items();
     this.menuView.update(items, editor || small, this.selected, true, ["settings", "diagnostics", "profiles"].includes(this.screen));
@@ -98,7 +98,7 @@ export class App extends AppState {
     if (small || this.screen === "home") this.summaryView.hide();
     this.paintTable();
     this.screen = overlayScreen;
-    this.noticeView.update(this); this.footerView.update(this, modal && ["subscription", "target", "profile-name", "profile-source"].includes(overlayScreen)); this.overlayView.update(this);
+    this.noticeView.update(this); this.footerView.update(this, modal && ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(overlayScreen)); this.overlayView.update(this);
   }
   override onClosing() { this.editorView.blur(); }
   override onBeforeDispose() { this.renderer.keyInput.off("keypress", this.onKey); this.renderer.off("resize", this.onResize); }

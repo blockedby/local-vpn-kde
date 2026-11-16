@@ -47,7 +47,14 @@ export class ServerTableView {
     this.filterLine.add(this.filterCount); parent.add(this.filterLine);
     this.filterInput.on("input", () => editFilter(this.filterInput.value));
     this.header = new TextRenderable(renderer, { content: "", fg: p.accent, height: 1, flexShrink: 0 });
-    this.header.onMouseDown = event => { if (event.button !== 0) return; const x = event.x - this.header.x; const width = Math.max(10, this.header.width); const showStatus = width >= 78, showSite = width >= 65; const nameWidth = Math.max(10, width - (showStatus ? 48 : showSite ? 33 : 24)); sort(x < nameWidth + 5 ? "name" : x < nameWidth + 15 ? "ping" : x < nameWidth + 25 ? "speed" : "availability"); };
+    this.header.onMouseDown = event => {
+      if (event.button !== 0) return;
+      const x = event.x - this.header.x, width = Math.max(10, this.header.width);
+      const showCountry = width >= 60, showStatus = width >= 78, showSite = width >= 65;
+      const nameWidth = Math.max(10, width - (showStatus ? 48 : showSite ? 33 : 24) - (showCountry ? 4 : 0));
+      const countryStart = 3 + nameWidth, pingStart = countryStart + (showCountry ? 6 : 2);
+      sort(x < countryStart ? "name" : showCountry && x < pingStart ? "country" : x < pingStart + 10 ? "ping" : x < pingStart + 20 ? "speed" : "availability");
+    };
     parent.add(this.header);
     for (let i = 0; i < 100; i++) {
       const row = new TextRenderable(renderer, { content: "", fg: p.text, height: 1, flexShrink: 0 });
@@ -62,7 +69,8 @@ export class ServerTableView {
     const width = Math.max(10, state.width);
     const showStatus = width >= 78;
     const showSite = width >= 65;
-    const nameWidth = Math.max(10, width - (showStatus ? 48 : showSite ? 33 : 24));
+    const showCountry = width >= 60;
+    const nameWidth = Math.max(10, width - (showStatus ? 48 : showSite ? 33 : 24) - (showCountry ? 4 : 0));
     this.filterLine.visible = state.visible && (!!state.filter || state.filterEditing);
     if (this.filterInput.value !== state.filter) this.filterInput.value = state.filter;
     this.filterCount.content = ` ${state.shown}/${state.total}`;
@@ -70,8 +78,8 @@ export class ServerTableView {
     this.header.visible = state.visible;
     const right = (value: string, columns: number) => cell(value, columns).trimEnd().padStart(columns);
     const arrow = state.sortDescending ? "↓" : "↑";
-    const nameLabel = `Сервер${state.sort === "name" ? ` · имя ${arrow}` : state.sort === "availability" && !showSite ? ` · сайт ${arrow}` : ""}`;
-    this.header.content = `   ${cell(nameLabel, nameWidth)}  ${right(`Ping мс${state.sort === "ping" ? arrow : ""}`, 8)}  ${right(`Мбит/с${state.sort === "speed" ? arrow : ""}`, 8)}${showSite ? `  ${cell(`Сайт${state.sort === "availability" ? ` ${arrow}` : ""}`, 7)}` : ""}${showStatus ? "  Статус" : ""}`;
+    const nameLabel = `Сервер${state.sort === "name" ? ` · имя ${arrow}` : state.sort === "availability" && !showSite ? ` · сайт ${arrow}` : state.sort === "country" && !showCountry ? ` · страна ${arrow}` : ""}`;
+    this.header.content = `   ${cell(nameLabel, nameWidth)}${showCountry ? `Страна${state.sort === "country" ? arrow : ""}` : "  "}${right(`Ping мс${state.sort === "ping" ? arrow : ""}`, showCountry && state.sort === "country" ? 7 : 8)}  ${right(`Мбит/с${state.sort === "speed" ? arrow : ""}`, 8)}${showSite ? `  ${cell(`Сайт${state.sort === "availability" ? ` ${arrow}` : ""}`, 7)}` : ""}${showStatus ? "  Статус" : ""}`;
     this.rows.forEach((row, i) => {
       const s = state.servers[i];
       row.visible = state.visible && i < state.rowCount && !!s;
@@ -86,7 +94,7 @@ export class ServerTableView {
         : s.status === "failed" ? "ошибка" : (s.download_mbps?.toFixed(1) ?? "—");
       const site = queued ? "—" : checking("availability") && batch?.pinged.has(s.server_id) && s.ping_status === "ready" && !batch?.completed.has(s.server_id)
         ? frames[frame % 10] : s.availability === "ready" ? "да" : s.availability === "failed" ? "нет" : "—";
-      row.content = `${s.server_id === state.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)}  ${right(ping, 8)}  ${right(speed, 8)}${showSite ? `  ${cell(site, 7)}` : ""}${showStatus ? `  ${queued ? "в очереди" : active ? ({ start: "подготовка", ping: "сайт / ждёт", speed: "замер", complete: "готов" }[batch!.stages.get(s.server_id) ?? "start"]) : s.ping_status === "failed" || s.availability === "failed" || s.status === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не проверен"}` : ""}`;
+      row.content = `${s.server_id === state.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)}${showCountry ? `  ${cell(s.country ?? "—", 2)}  ` : "  "}${right(ping, 8)}  ${right(speed, 8)}${showSite ? `  ${cell(site, 7)}` : ""}${showStatus ? `  ${queued ? "в очереди" : active ? ({ start: "подготовка", ping: "сайт / ждёт", speed: "замер", complete: "готов" }[batch!.stages.get(s.server_id) ?? "start"]) : s.ping_status === "failed" || s.availability === "failed" || s.status === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не проверен"}` : ""}`;
       row.fg = s.server_id === state.serverID ? p.accent : s.selected ? p.green : p.text;
       row.attributes = s.server_id === state.serverID ? TextAttributes.BOLD : 0;
     });

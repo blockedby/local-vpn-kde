@@ -9,6 +9,7 @@ export class FooterView {
   }
   update(state: AppState, editor: boolean) {
     if (state.helpOpen) { this.footer.content = "↑↓ прокрутка · Esc / ? закрыть"; return; }
+    if (state.screen === "server-rename") { this.footer.content = "Enter сохранить · Esc отмена"; return; }
     if (state.filterEditing) { this.footer.content = "Enter применить · Esc очистить"; return; }
     if (state.serverMenu) { this.footer.content = "↑↓ действие · Enter выполнить · Esc закрыть"; return; }
     if (state.screen === "servers" && state.ready() && !state.nativePreviewOnly() && state.servers.length) {

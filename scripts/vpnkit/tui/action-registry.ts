@@ -6,7 +6,7 @@ export const HOME_CONNECT_KEY = "s";
 
 /** Keys use OpenTUI names; modified keys use ctrl+ / shift+ prefixes. */
 export function actionRegistry(state: AppState, rowActions = false): ActionDefinition[] {
-  const editor = ["subscription", "target", "profile-name", "profile-source"].includes(state.screen);
+  const editor = ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(state.screen);
   const actions: ActionDefinition[] = [];
   const add = (id: string, keys: string[], label: string, scope: ActionScope, run: () => void,
     reason?: string, unavailableBehavior: "notice" | "none" = "none", preventDefault = false) => {
@@ -49,6 +49,7 @@ export function actionRegistry(state: AppState, rowActions = false): ActionDefin
   if (!editor) add("global:help", ["?"], "Помощь", "global", () => { state.helpOffset = 0; state.helpOpen = true; state.paint(); }, undefined, "none", true);
   add("global:back", ["escape"], state.screen === "servers" && state.filter ? "Очистить фильтр" : "Назад", editor ? "editor" : "global", () => { if (state.screen === "home") return; if (state.screen === "servers" && state.filter) { state.editFilter(""); if (state.filterAnchor && state.servers.some(s => s.server_id === state.filterAnchor)) state.serverID = state.filterAnchor; state.filterAnchor = undefined; state.syncServerViewport(); state.paint(); return; } state.open(
     state.screen.startsWith("profile-") ? "profiles"
+      : state.screen === "server-rename" ? state.overlayBase
       : state.screen === "target" ? state.tab
       : state.screen === "confirm" && state.confirmation === "subscription" ? "subscription"
       : state.screen === "cancel-confirm" ? "tasks"
@@ -58,6 +59,7 @@ export function actionRegistry(state: AppState, rowActions = false): ActionDefin
   add("global:quit-control", ["ctrl+c"], "Выход", "global", () => void state.close(), state.closing || state.disposed ? "Закрываем приложение." : undefined, "none", true);
   if (editor) {
     add("editor:submit", ["return"], "Сохранить", "editor", () => {
+      if (state.screen === "server-rename") { void state.saveServerRename(); return; }
       if (state.screen === "profile-name") {
         const value = state.editorValue.trim();
         if (!value || [...value].length > 60) { state.notify("Введите имя профиля: до 60 символов.", true); return; }
@@ -147,6 +149,7 @@ export function actionRegistry(state: AppState, rowActions = false): ActionDefin
     add("servers:filter", ["/"], "Фильтр серверов", "server-table", () => { state.filterEditing = true; state.filterAnchor = state.serverID; state.paint(); }, state.ready() && state.servers.length ? undefined : "Список серверов недоступен.", "none", true);
     add("servers:fastest", ["b"], "Подключить самый быстрый", "server-table", () => state.confirmFastest());
     add("servers:details", ["l"], "Подробности сервера", "server-table", () => state.open("details"), state.serverID ? undefined : "Нет выбранного сервера.");
+    if (rowActions) add("servers:rename", ["n"], "Переименовать", "server-table", () => state.openServerRename(), state.serverID ? undefined : "Нет выбранного сервера.", "notice", true);
     const ping = items.find(item => item.key === "p");
     add(ping?.id ?? "servers:ping-alias", ["p"], state.filter ? `Ping показанных (${state.filteredServers().length}) + сайт` : "Ping всех + сайт", "server-table", () => void state.runBatch("ping"),
       state.nativePreviewOnly() ? state.nativeUnavailable("servers/check-batch") : !state.ready() ? `Сначала запустите ${state.serviceObject()}.`
@@ -155,10 +158,10 @@ export function actionRegistry(state: AppState, rowActions = false): ActionDefin
     if (ping) actions[actions.length - 1]!.preventDefaultKeys = ["p"];
     add("servers:single-speed", ["shift+t"], "Скорость сервера", "server-table", () => { if (!state.serverID) state.notify("Нет выбранного сервера.", true); else void state.testHomeSpeed(state.serverID); }, !state.serverID ? "Нет выбранного сервера." : state.nativePreviewOnly() ? state.nativeUnavailable("servers/speed") : !state.ready() ? `Сначала запустите ${state.serviceObject()}.` : state.catalogStale ? "Подписка изменена. Обновите список серверов." : undefined, "notice");
     add("servers:sort", ["o"], "Сортировка", "server-table", () => {
-      const sorts = ["name", "ping", "speed", "availability"] as const;
+      const sorts = ["name", "ping", "speed", "availability", "country"] as const;
       const next = sorts[(sorts.indexOf(state.sort) + 1) % sorts.length]!; state.setSort(next);
     }, state.servers.length ? undefined : "Список серверов пуст.");
-    for (const [key, delta] of [["[", -1], ["]", 1]] as const) add(`servers:sort-${key}`, [key], "Столбец сортировки", "server-table", () => { const sorts = ["name", "ping", "speed", "availability"] as const; state.setSort(sorts[(sorts.indexOf(state.sort) + delta + sorts.length) % sorts.length]!); }, state.servers.length ? undefined : "Список серверов пуст.");
+    for (const [key, delta] of [["[", -1], ["]", 1]] as const) add(`servers:sort-${key}`, [key], "Столбец сортировки", "server-table", () => { const sorts = ["name", "ping", "speed", "availability", "country"] as const; state.setSort(sorts[(sorts.indexOf(state.sort) + delta + sorts.length) % sorts.length]!); }, state.servers.length ? undefined : "Список серверов пуст.");
     add("servers:sort-reverse", ["\\"], "Обратить сортировку", "server-table", () => state.setSort(state.sort), state.servers.length ? undefined : "Список серверов пуст.");
     if (rowActions || state.servers.length && state.ready() && !state.nativePreviewOnly()) {
       for (const [name, delta] of [["up", -1], ["down", 1], ["pageup", -state.rowCount()], ["pagedown", state.rowCount()], ["home", -Infinity], ["end", Infinity]] as const) {
@@ -201,7 +204,7 @@ export function serverMenuActions(state: AppState): ActionDefinition[] {
   const singlePing = ping && { ...ping, id: "servers:single-check", key: "", keys: [], label: "Ping и сайт",
     unavailableReason: state.catalogStale ? "Подписка изменена. Обновите список серверов." : ping.unavailableReason,
     run: () => { if (target) void state.runBatch("ping", { ids: [target.id], target: state.target }); } };
-  return ["servers:select", "servers:single-check", "servers:single-speed", "servers:details"].flatMap(id => {
+  return ["servers:select", "servers:single-check", "servers:single-speed", "servers:details", "servers:rename"].flatMap(id => {
     const action = id === "servers:single-check" ? singlePing : actions.find(item => item.id === id);
     if (!action) return [];
     const valid = !!target && state.servers.some(s => s.server_id === target.id && s.display_name === target.name);

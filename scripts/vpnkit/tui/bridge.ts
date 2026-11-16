@@ -23,7 +23,8 @@ export type Action =
   | "servers/ping"
   | "servers/speed"
   | "servers/availability"
-  | "servers/select";
+  | "servers/select"
+  | "servers/rename";
 export interface Status {
   runtime?: "docker" | "native";
   installed?: boolean;
@@ -40,6 +41,8 @@ export interface Server {
  profile_id?: string;
   server_id: string;
   display_name: string;
+  original_name?: string;
+  country?: string;
   selected: boolean;
   status: string;
   ping_status?: string;
@@ -290,6 +293,7 @@ export class DemoBackend implements Backend {
   ].map((display_name, i) => ({
     server_id: `srv_${String(i).padStart(27, "0")}`,
     display_name,
+    country: ["FI", "NL", "DE", "JP", "US", "RU"][i],
     selected: false,
     status: "untested",
   }));
@@ -345,6 +349,17 @@ export class DemoBackend implements Backend {
       if (action === "autostart/set") this.autostart = JSON.parse(value!);
     if (action === "autostart/read" || action === "autostart/set") reply.autostart = { ...this.autostart };
     if (action === "subscription/read") reply.value = this.subscription;
+      if (action === "servers/rename") {
+        const { id, name } = JSON.parse(value ?? "{}");
+        const row = this.servers.find(s => s.server_id === id);
+        if (!row || typeof name !== "string") { reply.ok = false; reply.reason = "invalid-request"; }
+        else {
+          const original = row.original_name ?? row.display_name;
+          row.display_name = name || original;
+          if (name) row.original_name = original; else delete row.original_name;
+          reply.catalog = { status: "ok", servers: structuredClone(this.servers) };
+        }
+      }
       if (action === "servers/list" || action === "servers/refresh")
         reply.catalog = { status: "ok", servers: structuredClone(this.servers) };
       if (action === "servers/check-batch" || action === "servers/speed-batch") {

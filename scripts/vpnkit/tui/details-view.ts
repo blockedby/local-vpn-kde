@@ -28,7 +28,7 @@ export function detailsLines(state: AppState): string[] {
     const ago = age < 60 ? `${age} с` : age < 3600 ? `${Math.floor(age / 60)} мин` : `${Math.floor(age / 3600)} ч`;
     return `${ago}: ${entry.ping === undefined ? "—" : `${entry.ping}мс`} · ${entry.speed === undefined ? "—" : `${entry.speed.toFixed(1)}М`} · ${{ ready: "да", failed: "нет" }[entry.site] ?? "—"}`;
   });
-  return [server.display_name, `Профиль: ${profile ?? "неизвестен"}`, `Выбран для VPN: ${server.selected ? "да" : "нет"}`, `Ping: ${server.ping_status === "failed" ? "ошибка" : server.latency_ms === undefined ? "нет данных" : `${server.latency_ms} мс`}`, `Скорость: ${speed}`, `Сайт: ${site}`, ...(server.availability === "ready" || server.availability === "failed" ? [`Адрес проверки: ${displayCheckAddress(state.target, 18)}`] : []), `Состояние: ${status}`, ...(recent.length ? ["Замеры этой сессии:", ...recent] : [])];
+  return [server.display_name, `Страна: ${server.country ?? "неизвестна"}`, ...(server.original_name !== undefined ? [`Имя в подписке: ${server.original_name}`] : []), `Профиль: ${profile ?? "неизвестен"}`, `Выбран для VPN: ${server.selected ? "да" : "нет"}`, `Ping: ${server.ping_status === "failed" ? "ошибка" : server.latency_ms === undefined ? "нет данных" : `${server.latency_ms} мс`}`, `Скорость: ${speed}`, `Сайт: ${site}`, ...(server.availability === "ready" || server.availability === "failed" ? [`Адрес проверки: ${displayCheckAddress(state.target, 18)}`] : []), `Состояние: ${status}`, ...(recent.length ? ["Замеры этой сессии:", ...recent] : [])];
 }
 
 export class DetailsView {

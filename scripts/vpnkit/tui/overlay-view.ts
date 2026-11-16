@@ -31,7 +31,7 @@ export class OverlayView {
     this.rowMenu = new BoxRenderable(renderer, { position: "absolute", top: 3, left: 2, width: 48, height: 7, zIndex: 49, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, overflow: "hidden", flexDirection: "column", visible: false });
     this.rowMenu.onMouseDown = event => event.stopPropagation();
     this.rowHeader = new TextRenderable(renderer, { content: "", height: 1, fg: p.muted, flexShrink: 0 }); this.rowMenu.add(this.rowHeader);
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 5; i++) {
       const row = new TextRenderable(renderer, { content: "", height: 1, flexShrink: 0, onMouseDown: event => {
         if (event.button !== 0 || !this.current) return;
         event.stopPropagation(); const state = this.current; state.serverMenuIndex = i;
@@ -110,7 +110,7 @@ export class OverlayView {
         const hint = action.key === "shift+t" ? "T" : action.key === "return" ? "Enter" : action.key;
         const label = `${i === state.serverMenuIndex ? "›" : " "} ${action.label}`;
         const padding = Math.max(1, width - 4 - Bun.stringWidth(label) - Bun.stringWidth(hint));
-        const reason = action.unavailableReason ? wrapText(action.unavailableReason, width - 4).map(line => `  ${line}`) : [];
+        const reason = action.unavailableReason && i === state.serverMenuIndex ? wrapText(action.unavailableReason, width - 4).map(line => `  ${line}`) : [];
         row.content = `${label}${" ".repeat(padding)}${hint}${reason.length ? `\n${reason.join("\n")}` : ""}`;
         row.height = 1 + reason.length; height += 1 + reason.length;
         row.fg = action.available ? i === state.serverMenuIndex ? p.accent : p.text : p.muted;
@@ -120,7 +120,7 @@ export class OverlayView {
       this.rowMenu.top = Math.min(3, this.renderer.terminalHeight - Number(this.rowMenu.height) - 1);
     }
     const modal = isOverlay(state.screen) && this.renderer.terminalWidth >= 60 && this.renderer.terminalHeight >= 16;
-    const editor = ["subscription", "target", "profile-name", "profile-source"].includes(state.screen);
+    const editor = ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(state.screen);
     this.dialog.visible = modal;
     this.dialogEditor.update(state.editorValue, modal && editor && !state.helpOpen, state.closing, state.screen);
     if (modal) {
@@ -149,7 +149,7 @@ export class OverlayView {
       this.dialog.width = width; this.dialog.height = height;
       this.dialog.left = Math.floor((this.renderer.terminalWidth - width) / 2);
       this.dialog.top = Math.floor((this.renderer.terminalHeight - height) / 2);
-      this.dialog.title = ["confirm", "profile-remove", "cancel-confirm", "retry-confirm"].includes(state.screen) ? " Подтверждение " : state.screen === "autostart" ? " Автозапуск " : state.screen === "details" ? " Сервер " : state.screen === "tasks" ? " Задачи " : state.screen === "recovery" ? " Восстановление " : " Редактор ";
+      this.dialog.title = state.screen === "server-rename" ? ` ${safeText(state.renameTarget?.original ?? "Сервер")} ` : ["confirm", "profile-remove", "cancel-confirm", "retry-confirm"].includes(state.screen) ? " Подтверждение " : state.screen === "autostart" ? " Автозапуск " : state.screen === "details" ? " Сервер " : state.screen === "tasks" ? " Задачи " : state.screen === "recovery" ? " Восстановление " : " Редактор ";
       const availableRows = Math.max(1, height - 2 - summaryHeight);
       const selected = state.screen === "tasks" ? Math.max(0, this.taskRows.indexOf(state.selected)) : state.selected;
       this.listOffset = Math.max(0, Math.min(Math.max(0, displayItems.length - availableRows), selected - availableRows + 1));

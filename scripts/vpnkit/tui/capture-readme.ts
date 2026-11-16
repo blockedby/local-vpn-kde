@@ -11,7 +11,7 @@ await mkdir(output, { recursive: true });
 const status: Status = { runtime:"native", installed:true, vpn_state:"active", gateway_state:"healthy", subscription:"configured", routing_mode:"smart", networkmanager_configured:"yes", networkmanager_active:"yes", diagnostics:"ok" };
 const servers: Server[] = [
   ["Demo-01", 28, 84.6], ["Demo-02", 35, 72.3], ["Demo-03", 42, 61.8], ["Demo-04", 186, 39.4],
-].map(([name, latency, speed], i) => ({ profile_id:"demo-subscription", server_id:`srv_${String(i+1).repeat(27)}`, display_name:String(name), selected:i===0, status:"ready", ping_status:"ready", availability:"ready", latency_ms:Number(latency), download_mbps:Number(speed), download_seconds:3 }));
+].map(([name, latency, speed], i) => ({ profile_id:"demo-subscription", server_id:`srv_${String(i+1).repeat(27)}`, display_name:String(name), country:["NL", "DE", "FI", "JP"][i], selected:i===0, status:"ready", ping_status:"ready", availability:"ready", latency_ms:Number(latency), download_mbps:Number(speed), download_seconds:3 }));
 const profiles: NonNullable<Reply["profiles"]> = { active:"demo-subscription", items:[
   {id:"demo-subscription",name:"Моя подписка",kind:"subscription",count:4,stale:false},
   {id:"demo-vps",name:"Мой VPS · Hysteria2",kind:"server",count:1,stale:false},

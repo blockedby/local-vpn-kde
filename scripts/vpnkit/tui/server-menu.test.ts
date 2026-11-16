@@ -15,8 +15,8 @@ test("row menu navigates with clamping, Home/End and escape restores its server"
   const { state, key } = fixture();
   try {
     key("return"); expect(state.serverMenu).toBe(true); expect(state.serverMenuIndex).toBe(0);
-    expect(serverMenuActions(state).map(a => [a.id, a.key])).toEqual([["servers:select", "return"], ["servers:single-check", ""], ["servers:single-speed", "shift+t"], ["servers:details", "l"]]);
-    key("up"); expect(state.serverMenuIndex).toBe(0); key("end"); key("down"); expect(state.serverMenuIndex).toBe(3);
+    expect(serverMenuActions(state).map(a => [a.id, a.key])).toEqual([["servers:select", "return"], ["servers:single-check", ""], ["servers:single-speed", "shift+t"], ["servers:details", "l"], ["servers:rename", "n"]]);
+    key("up"); expect(state.serverMenuIndex).toBe(0); key("end"); key("down"); expect(state.serverMenuIndex).toBe(4);
     key("home"); key("down"); expect(state.serverMenuIndex).toBe(1);
     state.serverID = rows[1]!.server_id; key("escape"); expect(state.serverMenu).toBe(false); expect(state.serverID).toBe(rows[0]!.server_id);
   } finally { await state.close(); }
@@ -35,7 +35,7 @@ test("menu actions use the existing handlers and captured target, including queu
   }
   for (const viaMenu of [false, true]) {
     const { state, key } = fixture();
-    try { if (viaMenu) { key("return"); key("end"); key("return"); } else key("l"); expect(state.screen).toBe("details"); expect(state.serverID).toBe(rows[0]!.server_id); } finally { await state.close(); }
+    try { if (viaMenu) { key("return"); key("end"); key("up"); key("return"); } else key("l"); expect(state.screen).toBe("details"); expect(state.serverID).toBe(rows[0]!.server_id); } finally { await state.close(); }
   }
   const { state, key } = fixture();
   try { state.tasks.set("busy", { action: "start", measurement: false, started: 0, phase: "" }); key("return"); key("T"); expect(state.queue.map(q => [q.action, q.value])).toEqual([["servers/speed", rows[0]!.server_id]]); } finally { state.tasks.clear(); await state.close(); }

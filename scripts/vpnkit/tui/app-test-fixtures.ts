@@ -12,12 +12,14 @@ export const rows: Server[] = [
   {
     server_id: `srv_${"a".repeat(27)}`,
     display_name: "Tokyo 東京",
+    country: "JP",
     status: "untested",
     selected: false,
   },
   {
     server_id: `srv_${"b".repeat(27)}`,
     display_name: "Amsterdam",
+    country: "NL",
     status: "ready",
     selected: false,
     download_mbps: 40,
@@ -32,7 +34,7 @@ export const reply = (status = initial): Reply => ({
 export class FakeBackend implements Backend {
   calls: { action: Action; value?: string }[] = [];
   status = { ...initial };
-  rows = rows;
+  rows = structuredClone(rows);
   hold?: { action: Action; promise: Promise<Reply> };
   cancelled = 0;
   onProgress?: (phase: string) => void;
@@ -44,6 +46,17 @@ export class FakeBackend implements Backend {
     const r = reply(this.status);
     if (action === "subscription/read")
       r.value = "https://example.invalid/saved";
+    if (action === "servers/rename") {
+      const { id, name } = JSON.parse(value ?? "{}");
+      const row = this.rows.find(s => s.server_id === id);
+      if (!row || typeof name !== "string") { r.ok = false; r.reason = "invalid-request"; }
+      else {
+        const original = row.original_name ?? row.display_name;
+        row.display_name = name || original;
+        if (name) row.original_name = original; else delete row.original_name;
+        r.catalog = { status: "ok", servers: structuredClone(this.rows) };
+      }
+    }
     if (action === "servers/list" || action === "servers/refresh")
       r.catalog = { status: "ok", servers: structuredClone(this.rows) };
     if (action === "servers/check-batch" || action === "servers/speed-batch") {
