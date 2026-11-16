@@ -82,7 +82,7 @@ The interface opens on a home screen with Connection («Подключение»
 
 1. Press `c` and add the first subscription or an individual server link. Once installed native mode is configured, `c` opens Profiles («Профили»).
 2. If the service is stopped, start it using the **Connection** tile or `s`. Open **Servers** (`v`, «Серверы»); refresh the list if needed (`r`).
-3. Choose a row with the arrows and press `Enter`. The menu can check ping and site, test speed or show details. Choose **Select server** («Выбрать сервер») and confirm: No («Нет») is selected by default, and Left/Right move between the buttons.
+3. Choose a row with the arrows and press `Enter`. The menu offers Select server («Выбрать сервер»), Ping and site («Ping и сайт»), Server speed («Скорость сервера»), Server details («Подробности сервера») and Rename («Переименовать»). Choose **Select server** and confirm: No («Нет») is selected by default, and Left/Right move between the buttons.
 4. Return home and choose **Connection** or press `s` to connect the VPN.
 
 **“Service ready” does not mean “VPN connected.”** The service can run checks while the system VPN connection remains off.
@@ -99,10 +99,10 @@ The interface opens on a home screen with Connection («Подключение»
 | `d` | Diagnostics |
 | `i` | Settings |
 | `Tab` / `Shift+Tab` | Next / previous section among the four listed above |
-| `/` | Filter names; `Enter` keeps it, `Esc` clears it |
+| `/` | Filter displayed and original names and country code; `Enter` keeps it, `Esc` clears it |
 | `p` / `t` | Ping and site / speed and site for shown servers |
 | `T` / `b` | Test the speed of the row under the cursor / offer the fastest measured shown server for confirmation |
-| `o` / `[` / `]` / `\` | Cycle sort / choose column / reverse direction |
+| `o` / `[` / `]` / `\` | Cycle sort (name, ping, speed, site, country) / choose column / reverse direction |
 | `l` | Details for the row under the cursor |
 | `:` / `Ctrl+P` | Search commands |
 | `j` / `k` | Activity / cancel operation |
@@ -111,6 +111,12 @@ The interface opens on a home screen with Connection («Подключение»
 | `?` / `q` | Help / exit the interface |
 
 The status line names the selected server and the footer shows available keys. `a` opens autostart; it does not run ping. Checks can overlap or wait in a queue; `j` shows running, queued and finished operations. Available actions and shortcuts depend on the section and service state.
+
+The server table shows name, two-letter country code, ping, speed, website access and status. The Country («Страна») column is hidden when the table is narrower than 60 characters. You can also choose a sort by clicking a column header.
+
+To rename a server, press `Enter` on its row and choose Rename («Переименовать»). In the editor, `Enter` saves, `Esc` cancels, and an empty line restores the subscription name. The editor accepts up to 60 characters; the application normalizes the name, stores at most 48 characters and requires at least two words. You can save up to 500 renamed servers. The local state file `server-names.json` holds server IDs and the chosen names; they survive subscription refresh and restart and are not removed when a profile is deleted. Details show the renamed server's original name.
+
+Country lookup is offline, using the embedded [server-country](https://github.com/sapics/ip-location-db) dataset (public domain, PDDL 1.0); no server address is sent to a country lookup service. A known IP's code is available immediately; for a hostname it may appear after a successful ping, check or speed measurement. TCP ping uses the connected address; a proxy lookup with ambiguous or unknown addresses supplies no new code, and a previously determined code may remain. The embedded database is a snapshot, so a code can become outdated.
 
 Autostart settings apply at the next KDE login. You can start only the gateway or also connect the VPN. Disabling autostart leaves the current connection running; the TUI does not open automatically at login. Docker may also restart an already-running gateway through its container restart policy.
 
