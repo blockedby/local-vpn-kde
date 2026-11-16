@@ -1,12 +1,12 @@
 import { BoxRenderable, TextAttributes, TextRenderable, type CliRenderer } from "@opentui/core";
 import type { AppState } from "./app-state";
-import { HOME_CONNECT_KEY } from "./action-registry";
 import { cell, displayCheckAddress, pluralRu } from "./formatting";
 import { connection, palette as p } from "./model";
 
 export class HomeView {
   private root: BoxRenderable;
   private rows: BoxRenderable[] = [];
+  private columns = 0;
   private tiles: { box: BoxRenderable; title: TextRenderable; lines: TextRenderable[] }[] = [];
   constructor(private renderer: CliRenderer, parent: BoxRenderable, activate: (index: number) => void) {
     this.root = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, minHeight: 0 }); parent.add(this.root);
@@ -31,7 +31,9 @@ export class HomeView {
     const actions = state.actions();
     const lifecycle = actions.find(a => ["home:connect", "home:start-service", "home:x"].includes(a.id));
     const lifecycleTask = [...state.tasks.values()].find(task => ["backend/start", "start", "disconnect", "stop"].includes(task.action));
-    const titleActions = [actions.find(a => ["home:connect", "home:start-service"].includes(a.id)), ...["global:servers", "global:tasks", "global:subscription", "global:diagnostics", "global:settings"].map(id => actions.find(a => a.id === id))];
+    // A tile shows a letter only when that key does what Enter on the tile does.
+    const opensProfiles = state.nativeInstalled() && state.status?.subscription === "configured";
+    const titleActions = [lifecycle, ...["global:servers", "global:tasks", opensProfiles ? "global:subscription" : "", "global:diagnostics", "global:settings"].map(id => actions.find(a => a.id === id))];
     const glyphs = ["▶", "≡", "•", "◇", "+", "*"];
     const data = [
       ["Подключение", lifecycleTask ? state.actionLabel(lifecycleTask.action) : connection(state.status).title, `Enter — ${lifecycle?.label ?? "—"}`],
@@ -39,7 +41,7 @@ export class HomeView {
       ["Замеры", state.batch ? `Выполняется ${state.batch.done}/${state.batch.total}` : state.measurementAction ? "Выполняется замер" : "Замеров нет", `В очереди: ${state.queue.filter(q => q.kind === "batch" || q.kind === "home" || q.action.startsWith("servers/")).length}`],
       ["Профили", state.profiles ? `${state.profiles.items.length} ${pluralRu(state.profiles.items.length, ["профиль", "профиля", "профилей"])}` : "Профилей: —", `Активен: ${profile?.name ?? "—"}`],
       ["Диагностика", `Шлюз: ${health[gateway ?? ""] ?? "—"}`, `Сеть: ${state.status?.networkmanager_active === "yes" ? "активна" : state.status?.networkmanager_active === "no" ? "отключена" : "—"}`],
-      ["Настройки", `Режим: ${mode} · автозапуск: ${state.autostart ? (state.autostart.connect ? "VPN" : state.autostart.gateway ? "шлюз" : "нет") : "—"}`, `Сайт: ${displayCheckAddress(state.target)}`],
+      ["Настройки", `Режим: ${mode} · автозапуск: ${state.autostart ? (state.autostart.connect ? "VPN" : state.autostart.gateway ? "шлюз" : "нет") : "—"}`, `Сайт: ${state.target ? displayCheckAddress(state.target) : "не задан"}`],
     ];
     const width = Math.floor((this.renderer.width - 2) / cols) - 2;
     // Preserve the redacted address and complete status when extra rows are available.
@@ -61,12 +63,17 @@ export class HomeView {
     const settingsLines = compact ? [data[5]![1]!] : [...wrap(data[5]![1]!), ...wrap(data[5]![2]!)];
     const extra = compact ? 0 : Math.min(2, Math.max(0, this.renderer.height - (6 / cols * 5) - 2), Math.max(0, settingsLines.length - 2));
     this.rows.forEach((row, i) => { row.visible = i < 6 / cols; row.height = compact ? 4 : 5 + (i === Math.floor(5 / cols) ? extra : 0); });
+    // Rebuild every row when the column count changes: appending only the moved
+    // tiles would leave them after the ones that stayed, out of navigation order.
+    if (cols !== this.columns) {
+      this.columns = cols;
+      for (const tile of this.tiles) tile.box.parent?.remove(tile.box);
+      this.tiles.forEach((tile, i) => this.rows[Math.floor(i / cols)]!.add(tile.box));
+    }
     this.tiles.forEach((tile, i) => {
-      const row = this.rows[Math.floor(i / cols)]!;
-      if (tile.box.parent !== row) { tile.box.parent?.remove(tile.box); row.add(tile.box); }
       tile.box.height = compact ? 4 : 5 + (Math.floor(i / cols) === Math.floor(5 / cols) ? extra : 0); tile.box.borderColor = i === state.homeIndex ? p.accent : p.edge;
       const title = `${i === state.homeIndex ? "›" : " "} ${glyphs[i]} ${data[i]![0]!}`;
-      const shortcut = titleActions[i]?.keys[0] ?? (i === 0 ? HOME_CONNECT_KEY : undefined);
+      const shortcut = titleActions[i]?.keys[0];
       tile.title.content = shortcut && Bun.stringWidth(title) + 1 + Bun.stringWidth(shortcut) <= width
         ? title + " ".repeat(width - Bun.stringWidth(title) - Bun.stringWidth(shortcut)) + shortcut
         : cell(title, width).trimEnd();
