@@ -13,7 +13,12 @@ for (const [width, height] of [[100,35],[60,16]] as const) test(`home tiles fit 
     app.autostart = { gateway: true, connect: true }; app.paint(); await t.renderOnce();
     const frame = t.captureCharFrame();
     for (const title of ["Подключение", "Серверы", "Замеры", "Профили", "Диагностика", "Настройки"]) expect(frame.split(title)).toHaveLength(2);
-    expect(frame).toContain("› Подключение");
+    expect(frame).toContain("› ▶ Подключение");
+    for (const glyph of ["▶", "≡", "•", "◇", "+", "*"]) expect(Bun.stringWidth(glyph)).toBe(1);
+    for (const [title, key] of [["Подключение", "s"], ["Серверы", "v"], ["Замеры", "j"], ["Профили", "c"], ["Диагностика", "d"], ["Настройки", "i"]]) {
+      const line = frame.split("\n").find(line => line.includes(title))!;
+      expect(line.slice(line.indexOf(title)).split("│")[0]).toMatch(new RegExp(`${title} +${key} *$`));
+    }
     expect(frame).toContain("←↑↓→ выбор"); expect(frame).toContain("Enter открыть"); expect(frame).toContain("? все клавиши"); expect(frame).toContain("q выход");
     expect(frame).not.toContain("private-token"); expect(frame).not.toContain("secret=hidden"); expect(frame).not.toContain("fragment");
     if (height >= 20) { expect(frame).toContain("Сайт: https://example.invalid"); expect(frame).toContain("Лучший ping:"); }

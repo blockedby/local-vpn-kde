@@ -27,8 +27,11 @@ export class HomeView {
     const gateway = state.status?.gateway_state ?? state.status?.vpn_state;
     const health: Record<string, string> = { healthy: "готов", unhealthy: "ошибка", absent: "не запущен", inactive: "не запущен", stopped: "остановлен", starting: "запускается", running: "проверяется" };
     const mode = state.status?.routing_mode === "smart" ? "умный" : state.status?.routing_mode === "strict" ? "строгий" : "—";
-    const lifecycle = state.actions().find(a => ["home:connect", "home:start-service", "home:x"].includes(a.id));
+    const actions = state.actions();
+    const lifecycle = actions.find(a => ["home:connect", "home:start-service", "home:x"].includes(a.id));
     const lifecycleTask = [...state.tasks.values()].find(task => ["backend/start", "start", "disconnect", "stop"].includes(task.action));
+    const titleActions = [actions.find(a => ["home:connect", "home:start-service"].includes(a.id)), ...["global:servers", "global:tasks", "global:subscription", "global:diagnostics", "global:settings"].map(id => actions.find(a => a.id === id))];
+    const glyphs = ["▶", "≡", "•", "◇", "+", "*"];
     const data = [
       ["Подключение", lifecycleTask ? state.actionLabel(lifecycleTask.action) : connection(state.status).title, `Enter — ${lifecycle?.label ?? "—"}`],
       ["Серверы", `${state.catalogLoaded && !state.catalogStale ? state.servers.length : "—"} серверов · выбран: ${selected?.display_name ?? "—"}`, `Лучший ping: ${best ? `${best.display_name} · ${best.latency_ms} мс` : "—"}`],
@@ -43,7 +46,12 @@ export class HomeView {
       const row = this.rows[Math.floor(i / cols)]!;
       if (tile.box.parent !== row) { tile.box.parent?.remove(tile.box); row.add(tile.box); }
       tile.box.height = compact ? 4 : 5; tile.box.borderColor = i === state.homeIndex ? p.accent : p.edge;
-      tile.title.content = cell(`${i === state.homeIndex ? "› " : "  "}${data[i]![0]!}`, width).trimEnd(); tile.title.fg = i === state.homeIndex ? p.accent : p.text;
+      const title = `${i === state.homeIndex ? "›" : " "} ${glyphs[i]} ${data[i]![0]!}`;
+      const shortcut = titleActions[i]?.keys[0];
+      tile.title.content = shortcut && Bun.stringWidth(title) + 1 + Bun.stringWidth(shortcut) <= width
+        ? title + " ".repeat(width - Bun.stringWidth(title) - Bun.stringWidth(shortcut)) + shortcut
+        : cell(title, width).trimEnd();
+      tile.title.fg = i === state.homeIndex ? p.accent : p.text;
       tile.lines.forEach((line, n) => { line.visible = n === 0 || !compact; line.content = cell(data[i]![n + 1]!, width).trimEnd(); });
     });
   }
