@@ -43,7 +43,7 @@ export class HomeView {
       const row = this.rows[Math.floor(i / cols)]!;
       if (tile.box.parent !== row) { tile.box.parent?.remove(tile.box); row.add(tile.box); }
       tile.box.height = compact ? 4 : 5; tile.box.borderColor = i === state.homeIndex ? p.accent : p.edge;
-      tile.title.content = cell(data[i]![0]!, width).trimEnd(); tile.title.fg = i === state.homeIndex ? p.accent : p.text;
+      tile.title.content = cell(`${i === state.homeIndex ? "› " : "  "}${data[i]![0]!}`, width).trimEnd(); tile.title.fg = i === state.homeIndex ? p.accent : p.text;
       tile.lines.forEach((line, n) => { line.visible = n === 0 || !compact; line.content = cell(data[i]![n + 1]!, width).trimEnd(); });
     });
   }
