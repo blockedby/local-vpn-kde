@@ -136,6 +136,13 @@ func TestServerNamesCapAndCorruptStore(t *testing.T) {
 	for i := 0; i < maxServerNames; i++ {
 		b.serverNames[fmt.Sprintf("srv_%027d", i)] = "Stored Name"
 	}
+	data, err := json.Marshal(serverNamesData{Schema: 1, Names: b.serverNames})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(b.options.Base, serverNamesFile), data, 0600); err != nil {
+		t.Fatal(err)
+	}
 	if got := namesRequest(t, b, "servers/rename", map[string]any{"id": id, "name": "New Name"})["reason"]; got != "too-many-names" {
 		t.Fatal(got)
 	}
@@ -156,6 +163,22 @@ func TestServerNamesCapAndCorruptStore(t *testing.T) {
 		}
 		if got := namesRequest(t, fresh, "servers/rename", map[string]any{"id": id, "name": "Valid Name"})["reason"]; got != "ok" {
 			t.Fatal(got)
+		}
+	}
+}
+
+func TestServerNamesAcrossBridgeInstances(t *testing.T) {
+	b, id, other := namesFixture(t)
+	second, err := NewBridge(b.options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	namesRequest(t, b, "servers/rename", map[string]any{"id": id, "name": "First Name"})
+	namesRequest(t, second, "servers/rename", map[string]any{"id": other, "name": "Second Name"})
+	for _, bridge := range []*Bridge{b, second} {
+		rows := namesRequest(t, bridge, "servers/list", "")["catalog"].(map[string]any)["servers"].([]any)
+		if rows[0].(map[string]any)["display_name"] != "First Name" || rows[1].(map[string]any)["display_name"] != "Second Name" {
+			t.Fatalf("lost or stale names: %#v", rows)
 		}
 	}
 }
