@@ -85,7 +85,7 @@ export function menuItems(state: AppState): MenuItem[] {
             if (state.confirmation === "subscription") {
               state.pendingSubscription = undefined;
               state.open("subscription");
-            } else state.open(state.tab, false);
+            } else state.open(state.overlayBase, false);
           },
         },
         {
@@ -112,7 +112,7 @@ export function menuItems(state: AppState): MenuItem[] {
             }
             const action = state.confirmation;
             const valid = state.confirmationSnapshot === state.confirmationContext();
-            state.open(state.tab, false);
+            state.open(state.overlayBase, false);
             if (valid) void state.perform(action);
             else state.notify("Состояние изменилось. Подтвердите действие заново.", true);
           },

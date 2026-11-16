@@ -5,6 +5,7 @@ import { observeRendererClose } from "./renderer-lifecycle";
 import { ServerTableView } from "./server-table-view";
 import { DetailsView, DETAILS_THRESHOLD, DETAILS_WIDTH } from "./details-view";
 import { MenuView } from "./menu-view";
+import { HomeView } from "./home-view";
 import { HeaderView } from "./header-view";
 import { TabView } from "./tab-view";
 import { OverlayView } from "./overlay-view";
@@ -23,6 +24,7 @@ export class App extends AppState {
   private content: BoxRenderable;
   private tooSmall: TextRenderable;
   private summaryView: SummaryView;
+  private homeView: HomeView;
   private menuView: MenuView;
   private tableView: ServerTableView;
   private detailsView: DetailsView;
@@ -40,6 +42,7 @@ export class App extends AppState {
     this.tabView = new TabView(renderer, this.root, tab => { if (!isOverlay(this.screen) && !this.helpOpen && !this.paletteOpen && !this.filterEditing) this.open(tab); });
     this.content = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, minHeight: 0, overflow: "hidden" }); this.root.add(this.content);
     this.tooSmall = new TextRenderable(renderer, { content: "Увеличьте терминал минимум до 60 × 16.", height: 1, fg: p.amber, visible: false }); this.content.add(this.tooSmall);
+    this.homeView = new HomeView(renderer, this.content, index => { if (this.screen !== "home" || this.helpOpen || this.paletteOpen) return; this.homeIndex = index; this.activateHome(); });
     this.summaryView = new SummaryView(renderer, this.content);
     this.menuView = new MenuView(renderer, this.content, index => {
       if (isOverlay(this.screen) || this.helpOpen || this.paletteOpen) return;
@@ -75,7 +78,7 @@ export class App extends AppState {
     this.headerView.update(this, this.demo);
     if (this.screen === "details") this.overlayView.update(this);
   }
-  override paintProgress() { super.paintProgress(); this.tabView.update(this); this.headerView.update(this, this.demo); if (this.screen === "tasks") this.overlayView.update(this); }
+  override paintProgress() { super.paintProgress(); this.tabView.update(this); this.headerView.update(this, this.demo); this.homeView.update(this, this.screen === "home" && this.renderer.width >= 60 && this.renderer.height >= 16); if (this.screen === "tasks") this.overlayView.update(this); }
   override paintPalette() { super.paintPalette(); this.overlayView.updatePalette(this); }
   override paint() {
     if (this.disposed) return;
@@ -85,13 +88,14 @@ export class App extends AppState {
     this.tooSmall.visible = small;
     const overlayScreen = this.screen;
     const modal = isOverlay(overlayScreen);
-    if (modal) this.screen = this.tab;
+    if (modal) this.screen = this.overlayBase;
+    this.homeView.update(this, !small && this.screen === "home");
     const editor = !small && ["subscription", "target", "profile-name", "profile-source"].includes(this.screen);
     this.editorView.update(this.editorValue, editor && !this.helpOpen, this.closing);
-    const items = small || this.screen === "servers" && this.ready() && !this.nativePreviewOnly() && this.status?.subscription === "configured" ? [] : this.items();
+    const items = small || this.screen === "home" || this.screen === "servers" && this.ready() && !this.nativePreviewOnly() && this.status?.subscription === "configured" ? [] : this.items();
     this.menuView.update(items, editor || small, this.selected, true, ["settings", "diagnostics", "profiles"].includes(this.screen));
     this.summaryView.update(this);
-    if (small) this.summaryView.hide();
+    if (small || this.screen === "home") this.summaryView.hide();
     this.paintTable();
     this.screen = overlayScreen;
     this.noticeView.update(this); this.footerView.update(this, modal && ["subscription", "target", "profile-name", "profile-source"].includes(overlayScreen)); this.overlayView.update(this);

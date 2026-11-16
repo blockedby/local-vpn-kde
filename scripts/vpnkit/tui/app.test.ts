@@ -154,7 +154,7 @@ test("checkout native and native status without installed=true keep subscription
       state.onKey({ name: "c", preventDefault() {} });
       await settle();
       expect(state.subscriptionAvailable()).toBe(false);
-      expect(state.screen).toBe("servers");
+      expect(state.screen).toBe("home");
       expect(state.error).toBe(true);
       expect(b.calls.map(call => call.action)).toEqual(["status"]);
     } finally { await state.close(); }
@@ -245,7 +245,7 @@ test("navigation and diagnostics Back are immediate during a held mutation", asy
     key("escape");
     await Bun.sleep(60);
     expect(performance.now() - before).toBeLessThan(150);
-    expect(app.screen).toBe("servers");
+    expect(app.screen).toBe("home");
     key("c");
     expect(app.screen).toBe("subscription");
     finish(reply());
@@ -272,7 +272,7 @@ test("completed diagnostics never reopen a screen the user left", async () => {
     await Bun.sleep(60);
     finish(reply());
     await task;
-    expect(app.screen).toBe("servers");
+    expect(app.screen).toBe("home");
   } finally {
     finish(reply());
     await settle();
@@ -319,7 +319,7 @@ test("failed subscription save retains input and Back works while saving", async
     await settle();
     key("escape");
     await Bun.sleep(60);
-    expect(app.screen).toBe("servers");
+    expect(app.screen).toBe("home");
     finish({ ...reply(), ok: false, reason: "invalid-request" });
     await settle();
     key("c");
@@ -972,7 +972,7 @@ test("home speed test skips download after failed ping and allows navigation", a
     finish({ ...reply(), ok: false, reason: "failed" }); await settle();
     expect(b.calls.some(c => c.action === "servers/speed")).toBe(false);
     key("escape");
-    expect(app.screen).toBe("servers");
+    expect(app.screen).toBe("home");
     expect(app.homeSpeed).toBeUndefined();
     expect(app.homeTesting).toBe(false);
     expect(app.error).toBe(true);
@@ -1375,7 +1375,7 @@ test("installed native separates service startup, connection, disconnect and shu
     key("s"); await settle();
     expect(app.status?.networkmanager_active).toBe("no");
     expect(app.status?.gateway_state).toBe("healthy");
-    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start", "servers/list"]);
+    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start"]);
     key("s"); await settle();
     expect(app.status?.networkmanager_active).toBe("yes");
     key("x"); await settle();
@@ -1391,7 +1391,7 @@ test("installed native separates service startup, connection, disconnect and shu
     key("y"); await settle();
     expect(app.status?.gateway_state).toBe("stopped");
     expect(app.noticeIdentity).toEqual({action:"stop",reason:"ok",ok:true});
-    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start", "servers/list", "start", "disconnect", "stop"]);
+    expect(b.calls.map(call => call.action)).toEqual(["status", "backend/start", "start", "disconnect", "stop"]);
   } finally { await app.close(); }
 });
 

@@ -8,7 +8,7 @@ async function fixture(width: number, height: number) {
   const backend = new FakeBackend();
   backend.rows = Array.from({ length: 25 }, (_, i) => ({ ...rows[0]!, server_id: `srv_${String(i).padStart(27, "0")}`, display_name: `Node ${String(i).padStart(2, "0")}`, selected: i === 0 }));
   const app = new App(terminal.renderer, backend);
-  await app.perform("status"); await app.perform("servers/list");
+  await app.perform("status"); app.open("servers", false); await app.perform("servers/list");
   app.notice = ""; app.paint(); await terminal.renderOnce();
   return { terminal, backend, app };
 }
@@ -91,7 +91,7 @@ test("shell: an empty catalog explains how to refresh", async () => {
   const b = new FakeBackend(); b.rows = [];
   const app = new App(t.renderer, b);
   try {
-    await app.perform("status"); await app.perform("servers/list"); await t.renderOnce();
+    await app.perform("status"); app.open("servers", false); await app.perform("servers/list"); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Список серверов пуст");
     expect(t.captureCharFrame()).toContain("[r]");
   } finally { await app.close(); }
@@ -119,13 +119,13 @@ test("shell: confirmation keeps its originating tab and footer follows context",
     expect(t.captureCharFrame().split("\n").at(-2)).toContain("x отключить");
     app.onKey({ name: "x", preventDefault() {} }); await t.renderOnce();
     let frame = t.captureCharFrame();
-    expect(frame.split("\n")[1]).toContain("[Настройки]");
+    expect(frame.split("\n")[1]).toContain("‹ Главная › Настройки");
     expect(frame).toContain("Подтверждение");
     app.onKey({ name: "n", preventDefault() {} }); await t.renderOnce();
     expect(app.screen).toBe("settings");
     app.open("target"); await t.renderOnce();
     frame = t.captureCharFrame();
-    expect(frame.split("\n")[1]).toContain("[Настройки]");
+    expect(frame.split("\n")[1]).toContain("‹ Главная › Настройки");
     expect(frame.split("\n").at(-2)).not.toContain("? помощь");
     const before = app.editorValue;
     t.mockInput.pressKey("?"); await t.renderOnce();

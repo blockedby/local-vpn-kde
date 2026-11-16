@@ -1,0 +1,50 @@
+import { BoxRenderable, TextAttributes, TextRenderable, type CliRenderer } from "@opentui/core";
+import type { AppState } from "./app-state";
+import { cell, displayCheckAddress } from "./formatting";
+import { connection, palette as p } from "./model";
+
+export class HomeView {
+  private root: BoxRenderable;
+  private rows: BoxRenderable[] = [];
+  private tiles: { box: BoxRenderable; title: TextRenderable; lines: TextRenderable[] }[] = [];
+  constructor(private renderer: CliRenderer, parent: BoxRenderable, activate: (index: number) => void) {
+    this.root = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, minHeight: 0 }); parent.add(this.root);
+    for (let i = 0; i < 3; i++) { const row = new BoxRenderable(renderer, { flexDirection: "row", flexShrink: 0 }); this.root.add(row); this.rows.push(row); }
+    for (let i = 0; i < 6; i++) {
+      const box = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, flexBasis: 0, minWidth: 0, border: true, borderStyle: "rounded", onMouseDown: e => { if (e.button === 0) activate(i); } });
+      const title = new TextRenderable(renderer, { height: 1, fg: p.text, attributes: TextAttributes.BOLD }); box.add(title);
+      const lines = [0, 1].map(() => { const line = new TextRenderable(renderer, { height: 1, fg: p.muted }); box.add(line); return line; });
+      this.tiles.push({ box, title, lines });
+    }
+  }
+  update(state: AppState, visible: boolean) {
+    this.root.visible = visible;
+    if (!visible) return;
+    const cols = this.renderer.width >= 90 ? 3 : 2, compact = this.renderer.height < 20;
+    const selected = state.catalogLoaded && !state.catalogStale ? state.servers.find(s => s.selected) : undefined;
+    const best = state.catalogLoaded && !state.catalogStale ? state.servers.filter(s => s.ping_status === "ready" && s.latency_ms !== undefined && Number.isFinite(s.latency_ms)).sort((a, b) => a.latency_ms! - b.latency_ms!)[0] : undefined;
+    const profile = state.profiles?.items.find(item => item.id === state.profiles?.active);
+    const gateway = state.status?.gateway_state ?? state.status?.vpn_state;
+    const health: Record<string, string> = { healthy: "готов", unhealthy: "ошибка", absent: "не запущен", inactive: "не запущен", stopped: "остановлен", starting: "запускается", running: "проверяется" };
+    const mode = state.status?.routing_mode === "smart" ? "умный" : state.status?.routing_mode === "strict" ? "строгий" : "—";
+    const lifecycle = state.actions().find(a => ["home:connect", "home:start-service", "home:x"].includes(a.id));
+    const lifecycleTask = [...state.tasks.values()].find(task => ["backend/start", "start", "disconnect", "stop"].includes(task.action));
+    const data = [
+      ["Подключение", lifecycleTask ? state.actionLabel(lifecycleTask.action) : connection(state.status).title, `Enter — ${lifecycle?.label ?? "—"}`],
+      ["Серверы", `${state.catalogLoaded && !state.catalogStale ? state.servers.length : "—"} серверов · выбран: ${selected?.display_name ?? "—"}`, `Лучший ping: ${best ? `${best.display_name} · ${best.latency_ms} мс` : "—"}`],
+      ["Замеры", state.batch ? `Выполняется ${state.batch.done}/${state.batch.total}` : state.measurementAction ? "Выполняется замер" : "Замеров нет", `В очереди: ${state.queue.filter(q => q.kind === "batch" || q.kind === "home" || q.action.startsWith("servers/")).length}`],
+      ["Профили", `Профилей: ${state.profiles?.items.length ?? "—"}`, `Активен: ${profile?.name ?? "—"}`],
+      ["Диагностика", `Шлюз: ${health[gateway ?? ""] ?? "—"}`, `Сеть: ${state.status?.networkmanager_active === "yes" ? "активна" : state.status?.networkmanager_active === "no" ? "отключена" : "—"}`],
+      ["Настройки", `Режим: ${mode} · автозапуск: ${state.autostart ? (state.autostart.connect ? "VPN" : state.autostart.gateway ? "шлюз" : "нет") : "—"}`, `Сайт: ${displayCheckAddress(state.target)}`],
+    ];
+    const width = Math.floor((this.renderer.width - 2) / cols) - 2;
+    this.rows.forEach((row, i) => { row.visible = i < 6 / cols; row.height = compact ? 4 : 5; });
+    this.tiles.forEach((tile, i) => {
+      const row = this.rows[Math.floor(i / cols)]!;
+      if (tile.box.parent !== row) { tile.box.parent?.remove(tile.box); row.add(tile.box); }
+      tile.box.height = compact ? 4 : 5; tile.box.borderColor = i === state.homeIndex ? p.accent : p.edge;
+      tile.title.content = cell(data[i]![0]!, width).trimEnd(); tile.title.fg = i === state.homeIndex ? p.accent : p.text;
+      tile.lines.forEach((line, n) => { line.visible = n === 0 || !compact; line.content = cell(data[i]![n + 1]!, width).trimEnd(); });
+    });
+  }
+}

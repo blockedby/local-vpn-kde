@@ -66,7 +66,9 @@ export class AppState {
   status?: Status;
   autostart?: AutostartOptions;
   serviceState?: AutostartServiceState;
-  screen: Screen = "servers";
+  screen: Screen = "home";
+  homeIndex = 0;
+  overlayBase: "home" | AppState["tab"] = "home";
   tab: "servers" | "profiles" | "diagnostics" | "settings" = "servers";
   helpOpen = false;
   helpOffset = 0;
@@ -527,12 +529,14 @@ export class AppState {
     this.paint();
   }
   open(screen: Screen, load = true, loadScreen = true) {
-    if (screen === "home") screen = "servers";
     if (this.closing) return;
     if (screen === "subscription" && !this.subscriptionAvailable()) {
       this.notify(this.nativeUnavailable("subscription"), true);
       return;
     }
+    if (isOverlay(screen) && !isOverlay(this.screen)) this.overlayBase = this.screen === "home" ? "home" : this.tab;
+    const tile = ["", "servers", "tasks", "profiles", "diagnostics", "settings"].indexOf(screen);
+    if (tile > 0) this.homeIndex = tile;
     if (this.screen === "subscription") this.draft = this.editorValue;
     this.filterEditing = false;
     this.screen = screen;
@@ -575,6 +579,24 @@ export class AppState {
     // Diagnostics immediately displays the cached evidence. Refresh is explicit.
   }
 
+  moveHome(key: string) {
+    const columns = this.viewport().width >= 90 ? 3 : 2;
+    const row = Math.floor(this.homeIndex / columns), col = this.homeIndex % columns;
+    if (key === "home") this.homeIndex = 0;
+    else if (key === "end") this.homeIndex = 5;
+    else if (key === "left" && col > 0) this.homeIndex--;
+    else if (key === "right" && col < columns - 1 && this.homeIndex < 5) this.homeIndex++;
+    else if (key === "up" && row > 0) this.homeIndex -= columns;
+    else if (key === "down" && this.homeIndex + columns < 6) this.homeIndex += columns;
+    this.paint();
+  }
+  activateHome() {
+    const target = [undefined, "servers", "tasks", "profiles", "diagnostics", "settings"] as const;
+    if (this.homeIndex) { this.open(target[this.homeIndex]!); return; }
+    const action = this.actions().find(item => ["home:connect", "home:start-service", "home:x"].includes(item.id));
+    if (action?.available) action.run();
+    else if (action?.unavailableBehavior === "notice" && action.unavailableReason) this.notify(action.unavailableReason, true);
+  }
   /** Reads the cached catalog when the server table is showing an unloaded one. A cached read only. */
   loadCatalogIfShown() {
     if (

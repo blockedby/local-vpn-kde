@@ -7,7 +7,7 @@ test("filter and palette accept text without dispatching shortcuts", async () =>
   const terminal = await createTestRenderer({ width: 80, height: 24 });
   const backend = new FakeBackend(); const app = new App(terminal.renderer, backend);
   try {
-    await app.perform("status"); await app.perform("servers/list");
+    await app.perform("status"); app.open("servers", false); await app.perform("servers/list");
     terminal.mockInput.pressKey("/"); terminal.mockInput.pressKey("t"); terminal.mockInput.pressKey("o"); await terminal.renderOnce();
     expect(app.filter).toBe("to"); expect(app.filterEditing).toBe(true); expect(backend.calls.some(call => call.action === "servers/speed-batch")).toBe(false);
     expect(terminal.captureCharFrame()).toContain("1/2");
@@ -24,7 +24,7 @@ test("clicking a table column selects and then reverses its sort", async () => {
   const terminal = await createTestRenderer({ width: 80, height: 24 });
   const app = new App(terminal.renderer, new FakeBackend());
   try {
-    await app.perform("status"); await app.perform("servers/list"); await terminal.renderOnce();
+    await app.perform("status"); app.open("servers", false); await app.perform("servers/list"); await terminal.renderOnce();
     await terminal.mockMouse.click(42, 2); await terminal.renderOnce();
     expect(app.sort).toBe("ping"); expect(app.sortDescending).toBe(false); expect(terminal.captureCharFrame()).toContain("Ping мс↑");
     await terminal.mockMouse.click(42, 2); await terminal.renderOnce();
