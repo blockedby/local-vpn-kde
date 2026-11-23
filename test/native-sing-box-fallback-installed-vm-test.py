@@ -135,16 +135,25 @@ try:
 
     install_stub(SYSTEM)
     since = restart_gateway()
-    wait_journal(since, "native_runtime_stage_failure=sing-box-unavailable")
+    wait_journal(since, "native_gateway_start_failure=sing-box-unavailable")
     print(json.dumps({"case": "no_usable_sing_box_reports_clear_failure", "result": "passed"}), flush=True)
 finally:
+    cleanup_errors = []
     for path, saved in backup.items():
-        sudo("install", "-m755", "-o", "root", "-g", "root", saved, path)
-        sudo("rm", "-f", "--", saved)
-    since = restart_gateway()
-    wait_journal(since, "native_sing_box_selected=")
-    bridge.run("start")
-    connected(bridge)
+        try:
+            sudo("install", "-m755", "-o", "root", "-g", "root", saved, path)
+            sudo("rm", "-f", "--", saved)
+        except subprocess.CalledProcessError:
+            cleanup_errors.append("restore " + ("bundled" if path == BUNDLED else "system"))
+    try:
+        since = restart_gateway()
+        wait_journal(since, "native_sing_box_selected=")
+        bridge.run("start")
+        connected(bridge)
+    except Exception as error:  # report every cleanup failure, never private output
+        cleanup_errors.append("reconnect: " + type(error).__name__)
     bridge.close()
+    if cleanup_errors:
+        raise AssertionError("cleanup failed: " + ", ".join(cleanup_errors))
 selected = [line for line in journal_since(since).splitlines() if line.startswith("native_sing_box_selected=")][-1]
 print(json.dumps({"installed_native_sing_box_fallback": "passed", "restored_selection": selected.split()[0]}))
