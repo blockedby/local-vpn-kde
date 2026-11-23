@@ -71,6 +71,9 @@ func NativeGatewayFailureMessage(err error) string {
 	case "rule-init-failed":
 		message = "rule-set initialization failed"
 	}
+	if stage == "sing-box" && reason == "unavailable" {
+		message = "sing-box engine cannot run (missing library or incompatible binary)"
+	}
 	return fmt.Sprintf("native_gateway_start_failure=%s-%s: %s", stage, reason, message)
 }
 

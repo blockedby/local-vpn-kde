@@ -134,6 +134,9 @@ func (c ContainerConfig) serveGateway(parent context.Context, output io.Writer, 
 	if result.Reason != "ok" {
 		return gatewayFailure("config-sync", result.Reason, nil)
 	}
+	if _, err := runtimeCommand(ctx, c.Binary, "version"); err != nil {
+		return gatewayFailure("sing-box", "unavailable", err)
+	}
 	if _, err := runtimeCommand(ctx, c.Binary, "check", "-c", c.Runtime); err != nil {
 		return gatewayFailure("config-check", "failed", err)
 	}

@@ -278,6 +278,7 @@ func TestNativeAutostartRetryIsBoundedAndSkipsPermanentFailures(t *testing.T) {
 	}{
 		{"sing-box-rule-init-dns-timeout", 3},
 		{"sing-box-rule-init-failed", 1},
+		{"sing-box-unavailable", 1},
 		{"config-check-failed", 1},
 	} {
 		a := configuredNativeAutostart(t, false)
