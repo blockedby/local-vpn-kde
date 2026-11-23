@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -17,6 +18,35 @@ import (
 	"testing"
 	"time"
 )
+
+func TestServeGatewayEngineAndConfigCheckFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, versionExit, stage, reason, commands string
+	}{
+		{"unavailable", "1", "sing-box", "unavailable", "version\n"},
+		{"invalid config", "0", "config-check", "failed", "version\ncheck -c runtime-config\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			logPath := filepath.Join(dir, "commands")
+			binary := filepath.Join(dir, "sing-box")
+			script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %q\nif [ \"$1\" = version ]; then exit %s; fi\nexit 1\n", logPath, tc.versionExit)
+			if err := os.WriteFile(binary, []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			c := ContainerConfig{Binary: binary, Runtime: "runtime-config"}
+			err := c.serveGateway(context.Background(), io.Discard, gatewayRuntimeOptions{helper: "/bin/true", environment: os.Environ})
+			var failure *gatewayStartupError
+			if !errors.As(err, &failure) || failure.stage != tc.stage || failure.reason != tc.reason || failure.cause == nil {
+				t.Fatalf("failure = %#v, error = %v", failure, err)
+			}
+			commands, err := os.ReadFile(logPath)
+			if err != nil || string(commands) != tc.commands {
+				t.Fatalf("commands = %q, error = %v; want %q", commands, err, tc.commands)
+			}
+		})
+	}
+}
 
 func fixtureDNSReply(query []byte) []byte {
 	// Fixed A-record fixture. Preserve the question and answer it with

@@ -412,7 +412,7 @@ func tempBenchmarkBackend(c config.Config, n vless.Node, countryLog ...bool) (be
 	if err != nil {
 		return benchmarkBackend{}, err
 	}
-	return benchmarkBackend{bin: c.SingBoxBin, args: []string{"run", "-c", path}, configPath: path}, nil
+	return benchmarkBackend{bin: effectiveSingBoxBin(c.SingBoxBin), args: []string{"run", "-c", path}, configPath: path}, nil
 }
 
 func writeTempBenchmarkConfig(pattern string, b []byte) (string, error) {
@@ -1102,7 +1102,7 @@ func singboxRestartConfig(c config.Config) singbox.RestartConfig {
 		ProbeAddress:      c.ProductionSocks,
 		HealthTimeout:     runtimeHealthTimeout(c),
 		AckTimeout:        c.SingBoxRestartAckTimeout.Duration,
-		SingBoxBin:        c.SingBoxBin,
+		SingBoxBin:        effectiveSingBoxBin(c.SingBoxBin),
 	}
 }
 

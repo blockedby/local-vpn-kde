@@ -49,3 +49,14 @@ func TestGatewayJournalReasonAcceptsOnlyExactSafeMessages(t *testing.T) {
 		}
 	}
 }
+
+func TestGatewayUnavailableMessageAndJournalRoundTrip(t *testing.T) {
+	message := NativeGatewayFailureMessage(gatewayFailure("sing-box", "unavailable", errors.New("private library detail")))
+	want := "native_gateway_start_failure=sing-box-unavailable: sing-box engine cannot run (missing library or incompatible binary)"
+	if message != want {
+		t.Fatalf("message = %q, want %q", message, want)
+	}
+	if got := gatewayJournalReason([]byte(message + "\n")); got != "sing-box-unavailable" {
+		t.Fatalf("journal reason = %q", got)
+	}
+}

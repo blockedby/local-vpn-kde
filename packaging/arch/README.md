@@ -31,8 +31,10 @@ performed by the preparation command.
 
 - Builds `local-vpn-kde.bin`, `vibe-vpn`, and the server-operation supervisor
   into `/usr/libexec/local-vpn-kde`.
-- Uses `/usr/bin/sing-box` through a fixed libexec symlink; Docker and the
-  legacy `run.sh`/Docker setup entrypoint are not installed.
+- Bundles sing-box and also depends on the system sing-box. At start the gateway
+  uses the newest working copy within 1.13–1.14, so a system library update
+  cannot leave the VPN without a working engine. Docker and the legacy
+  `run.sh`/Docker setup entrypoint are not installed.
 - Bundles the OpenTUI TypeScript, frozen lockfile, and Bun production
   `node_modules` under `/usr/share/local-vpn-kde`.
 - Generates root system units at build time from
@@ -69,7 +71,7 @@ runtime dependency was not proven for `aarch64`.
 4. Upstream currently has no repository license file or publishable license
    metadata. The local template records `custom:unlicensed`; licensing must be
    resolved before any public redistribution or AUR publication.
-5. The package accepts `sing-box>=1.13` and `sing-box<1.15`. Synthetic full-VPN
+5. The package build requires `sing-box>=1.13` and `sing-box<1.15`. Synthetic full-VPN
    tests passed with Arch sing-box `1.14.1-2` and OpenVPN `2.7.7-1`, both as root
    and as a restricted service user (three service lifecycles). An opt-in real
    subscription test also passed: 20 candidates tested, 10 successful; the

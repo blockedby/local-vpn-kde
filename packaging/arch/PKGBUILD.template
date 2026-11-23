@@ -15,6 +15,7 @@ depends=(
   'ca-certificates'
   'procps-ng'
   'openvpn'
+  'sing-box>=1.13'
   'networkmanager'
   'networkmanager-openvpn'
   'nftables'

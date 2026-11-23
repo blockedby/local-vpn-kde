@@ -53,7 +53,7 @@ if args.package:
             remote('rm -f -- ' + shlex.quote(path))
 for script in ('native-policy-installed-vm-test.py', 'native-profiles-installed-vm-test.py',
                'native-subscription-cache-installed-vm-test.py', 'native-lifecycle-installed-vm-test.py',
-               'native-rename-country-installed-vm-test.py'):
+               'native-rename-country-installed-vm-test.py', 'native-sing-box-fallback-installed-vm-test.py'):
     guest_test(script)
 if args.server_file:
     info = args.server_file.lstat()

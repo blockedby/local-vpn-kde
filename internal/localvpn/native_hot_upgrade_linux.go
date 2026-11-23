@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,6 +18,9 @@ import (
 )
 
 const nativePinnedRuntime = "/var/lib/local-vpn-kde-runtime"
+
+var selectNativeSingBox = nativegateway.SelectSingBox
+var nativeRuntimeStageOutput io.Writer = os.Stdout
 
 // Bump whenever the worker protocol, private state or network journal becomes
 // incompatible with a running supervisor from a previous package.
@@ -47,6 +51,10 @@ func StageNativeRuntime(ctx context.Context) error {
 	if blocked {
 		return errors.New("package transaction blocks runtime staging")
 	}
+	choice, err := nativeSingBoxSource(ctx, nativeRuntimeStageOutput)
+	if err != nil {
+		return err
+	}
 	if err := os.Mkdir(nativePinnedRuntime, 0755); err != nil && !os.IsExist(err) {
 		return err
 	}
@@ -62,12 +70,36 @@ func StageNativeRuntime(ctx context.Context) error {
 	if st.Uid != 0 || st.Mode&0022 != 0 {
 		return errors.New("unsafe pinned runtime directory")
 	}
-	for _, name := range []string{"sing-box", "vibe-vpn"} {
-		if err := copyRuntimeBinary(ctx, fd, filepath.Join(nativegateway.LibexecDir, name), name, 0); err != nil {
-			return err
-		}
+	if err := stageNativeSingBox(ctx, fd, choice, nativeRuntimeStageOutput, copyRuntimeBinary); err != nil {
+		return err
+	}
+	if err := copyRuntimeBinary(ctx, fd, filepath.Join(nativegateway.LibexecDir, "vibe-vpn"), "vibe-vpn", 0); err != nil {
+		return err
 	}
 	return atomicWrite(fd, "contract", nativeRuntimeContract())
+}
+
+func nativeSingBoxSource(ctx context.Context, w io.Writer) (nativegateway.SingBoxChoice, error) {
+	choice, err := selectNativeSingBox(ctx)
+	if err != nil {
+		// Same canonical line as the gateway's own failure, so status and
+		// autostart recognise it and do not retry it as transient.
+		fmt.Fprintln(w, NativeGatewayFailureMessage(gatewayFailure("sing-box", "unavailable", nil)))
+		return nativegateway.SingBoxChoice{}, err
+	}
+	return choice, nil
+}
+
+func stageNativeSingBox(ctx context.Context, fd int, choice nativegateway.SingBoxChoice, w io.Writer, copyBinary func(context.Context, int, string, string, uint32) error) error {
+	if err := copyBinary(ctx, fd, choice.Path, "sing-box", 0); err != nil {
+		return err
+	}
+	message := fmt.Sprintf("native_sing_box_selected=%s version=%s", choice.Source, choice.Version)
+	if choice.BundledProblem != "" {
+		message += " bundled=" + choice.BundledProblem
+	}
+	_, err := fmt.Fprintln(w, message)
+	return err
 }
 
 func copyRuntimeBinary(ctx context.Context, dst int, source, name string, expectedUID uint32) error {

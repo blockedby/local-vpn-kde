@@ -243,7 +243,7 @@ func (a Autostart) unit() (string, error) {
 			return "", err
 		}
 		executable = layout.Executable
-		session += "ConditionPathIsExecutable=" + InstalledCLI + "\n"
+		session += "ConditionFileIsExecutable=" + InstalledCLI + "\n"
 		extra += " --secrets-dir " + systemdArg(layout.State)
 		// A shell's XDG override may not be imported into the user manager.
 		// Environment= expands specifiers, but unlike ExecStart not dollar signs.

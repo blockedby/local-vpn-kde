@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tarfile
@@ -93,6 +94,10 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("arch=('x86_64')", template)
         self.assertIn("'sing-box>=1.13'", template)
         self.assertIn("'sing-box<1.15'", template)
+        depends = re.search(r"(?m)^depends=\((.*?)\)", template, re.DOTALL)
+        self.assertIsNotNone(depends)
+        self.assertIn("'sing-box>=1.13'", depends.group(1))
+        self.assertNotIn("sing-box<", depends.group(1))
         self.assertNotIn("'docker'", template.lower())
         self.assertNotIn("run.sh", template)
         self.assertIn("go run ./packaging/arch/generate-units", template)
