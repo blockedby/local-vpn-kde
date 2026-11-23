@@ -123,3 +123,40 @@ func TestProbeSingBox(t *testing.T) {
 		t.Fatalf("cap: n=%d err=%v len=%d overflow=%v", n, err, output.Len(), output.overflow)
 	}
 }
+
+func TestSingBoxBuildMetadataDoesNotAffectRange(t *testing.T) {
+	for output, supported := range map[string]bool{
+		"sing-box version 1.13.0+build.7": true,
+		"sing-box version 1.15.0+build.7": false,
+	} {
+		v, ok := parseSingBoxVersion(output)
+		if !ok {
+			t.Fatalf("parse %q", output)
+		}
+		min := singBoxVersion{parts: [3]string{"1", "13", "0"}}
+		max := singBoxVersion{parts: [3]string{"1", "15", "0"}}
+		got := compareSingBoxVersions(v, min) >= 0 && compareSingBoxVersions(v, max) < 0
+		if got != supported {
+			t.Fatalf("%q supported=%v, want %v", output, got, supported)
+		}
+	}
+}
+
+func TestTrustedSingBoxFileRejectsBeforeExecution(t *testing.T) {
+	dir := t.TempDir() // owned by the test user, never root in CI
+	file := filepath.Join(dir, "sing-box")
+	if err := os.WriteFile(file, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if os.Geteuid() != 0 {
+		if err := trustedSingBoxFile(file); !errors.Is(err, errUntrustedSingBox) {
+			t.Fatalf("user-owned candidate accepted: %v", err)
+		}
+	}
+	if err := trustedSingBoxFile("/usr/libexec/local-vpn-kde-missing-dir/sing-box"); err == nil {
+		t.Fatal("missing directory accepted")
+	}
+	if err := trustedSingBoxFile("/usr/bin/local-vpn-kde-no-such-sing-box"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing file in trusted dir: %v", err)
+	}
+}

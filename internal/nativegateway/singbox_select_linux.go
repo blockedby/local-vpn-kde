@@ -8,10 +8,13 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -42,7 +45,9 @@ func parseSingBoxVersion(output string) (singBoxVersion, bool) {
 	if match == nil {
 		return singBoxVersion{}, false
 	}
-	v := singBoxVersion{suffix: match[4], text: match[1] + "." + match[2] + "." + match[3] + match[4]}
+	// SemVer build metadata ("+...") does not affect precedence.
+	suffix, _, _ := strings.Cut(match[4], "+")
+	v := singBoxVersion{suffix: suffix, text: match[1] + "." + match[2] + "." + match[3] + match[4]}
 	for i := range v.parts {
 		v.parts[i] = strings.TrimLeft(match[i+1], "0")
 		if v.parts[i] == "" {
@@ -196,11 +201,33 @@ func probeSingBox(ctx context.Context, path string) (string, error) {
 }
 
 func SelectSingBox(ctx context.Context) (SingBoxChoice, error) {
-	return selectSingBox(ctx, probeSingBox, func(path string) error {
-		_, err := os.Stat(path)
-		return err
-	})
+	return selectSingBox(ctx, probeSingBox, trustedSingBoxFile)
 }
+
+// trustedSingBoxFile rejects a candidate before it is ever executed (the gateway
+// probes as root): it must be a root-owned regular file, not a symlink, in a
+// root-owned directory, with neither writable by group or others.
+func trustedSingBoxFile(path string) error {
+	var dir, file unix.Stat_t
+	if err := unix.Lstat(filepath.Dir(path), &dir); err != nil {
+		return err
+	}
+	if dir.Mode&unix.S_IFMT != unix.S_IFDIR || dir.Uid != 0 || dir.Mode&0o022 != 0 {
+		return errUntrustedSingBox
+	}
+	if err := unix.Lstat(path, &file); err != nil {
+		if errors.Is(err, unix.ENOENT) {
+			return os.ErrNotExist
+		}
+		return err
+	}
+	if file.Mode&unix.S_IFMT != unix.S_IFREG || file.Uid != 0 || file.Mode&0o022 != 0 {
+		return errUntrustedSingBox
+	}
+	return nil
+}
+
+var errUntrustedSingBox = errors.New("untrusted sing-box candidate")
 
 var (
 	singBoxCacheMu     sync.Mutex
