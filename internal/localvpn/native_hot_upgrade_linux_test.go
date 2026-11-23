@@ -3,12 +3,66 @@
 package localvpn
 
 import (
+	"bytes"
 	"context"
-	"golang.org/x/sys/unix"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/blockedby/local-vpn-kde/internal/nativegateway"
+	"golang.org/x/sys/unix"
 )
+
+func TestNativeSingBoxSelectionAndStaging(t *testing.T) {
+	original := selectNativeSingBox
+	t.Cleanup(func() { selectNativeSingBox = original })
+	for _, tt := range []struct {
+		name   string
+		choice nativegateway.SingBoxChoice
+		output string
+	}{
+		{"bundled", nativegateway.SingBoxChoice{Path: nativegateway.BundledSingBox, Source: "bundled", Version: "1.14.4"}, "native_sing_box_selected=bundled version=1.14.4\n"},
+		{"system", nativegateway.SingBoxChoice{Path: nativegateway.SystemSingBox, Source: "system", Version: "1.14.5", BundledProblem: "cannot-run"}, "native_sing_box_selected=system version=1.14.5 bundled=cannot-run\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			selectNativeSingBox = func(context.Context) (nativegateway.SingBoxChoice, error) { return tt.choice, nil }
+			var output bytes.Buffer
+			choice, err := nativeSingBoxSource(context.Background(), &output)
+			if err != nil || output.Len() != 0 {
+				t.Fatalf("selection: error=%v output=%q", err, output.String())
+			}
+			called := false
+			err = stageNativeSingBox(context.Background(), 42, choice, &output, func(_ context.Context, fd int, source, name string, uid uint32) error {
+				called = true
+				if fd != 42 || source != tt.choice.Path || name != "sing-box" || uid != 0 {
+					t.Errorf("copy arguments: fd=%d source=%q name=%q uid=%d", fd, source, name, uid)
+				}
+				return nil
+			})
+			if err != nil || !called || output.String() != tt.output {
+				t.Fatalf("staging: error=%v called=%v output=%q", err, called, output.String())
+			}
+		})
+	}
+}
+
+func TestNativeSingBoxUnavailable(t *testing.T) {
+	original := selectNativeSingBox
+	t.Cleanup(func() { selectNativeSingBox = original })
+	selectNativeSingBox = func(context.Context) (nativegateway.SingBoxChoice, error) {
+		return nativegateway.SingBoxChoice{}, nativegateway.ErrNoUsableSingBox
+	}
+	var output bytes.Buffer
+	_, err := nativeSingBoxSource(context.Background(), &output)
+	if !errors.Is(err, nativegateway.ErrNoUsableSingBox) {
+		t.Fatalf("selection error: %v", err)
+	}
+	const want = "native_runtime_stage_failure=sing-box-unavailable: neither the bundled nor the system sing-box can run a supported version (1.13-1.14)\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
 
 func TestRuntimeSnapshotSurvivesPackageReplacement(t *testing.T) {
 	dir := t.TempDir()
