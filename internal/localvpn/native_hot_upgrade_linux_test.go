@@ -58,7 +58,10 @@ func TestNativeSingBoxUnavailable(t *testing.T) {
 	if !errors.Is(err, nativegateway.ErrNoUsableSingBox) {
 		t.Fatalf("selection error: %v", err)
 	}
-	const want = "native_runtime_stage_failure=sing-box-unavailable: neither the bundled nor the system sing-box can run a supported version (1.13-1.14)\n"
+	want := NativeGatewayFailureMessage(gatewayFailure("sing-box", "unavailable", nil)) + "\n"
+	if gatewayJournalReason([]byte(want)) != "sing-box-unavailable" {
+		t.Fatalf("staging failure line is not recognised by status: %q", want)
+	}
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
 	}

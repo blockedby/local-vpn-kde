@@ -82,7 +82,9 @@ func StageNativeRuntime(ctx context.Context) error {
 func nativeSingBoxSource(ctx context.Context, w io.Writer) (nativegateway.SingBoxChoice, error) {
 	choice, err := selectNativeSingBox(ctx)
 	if err != nil {
-		fmt.Fprintln(w, "native_runtime_stage_failure=sing-box-unavailable: neither the bundled nor the system sing-box can run a supported version (1.13-1.14)")
+		// Same canonical line as the gateway's own failure, so status and
+		// autostart recognise it and do not retry it as transient.
+		fmt.Fprintln(w, NativeGatewayFailureMessage(gatewayFailure("sing-box", "unavailable", nil)))
 		return nativegateway.SingBoxChoice{}, err
 	}
 	return choice, nil
