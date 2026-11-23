@@ -47,7 +47,7 @@ packages=(/work/local-vpn-kde-native-[0-9]*-x86_64.pkg.tar.zst)
 sha256sum "${packages[0]}"
 python /work/portable-src/packaging/portable/build.py "${packages[0]}" /work/vpnkit-portable
 /work/vpnkit-portable --inspect > /work/portable-manifest.json
-python -c '\''import json; m=json.load(open("/work/portable-manifest.json")); assert "bun" not in m["dependencies"] and not any(d.startswith("sing-box") for d in m["dependencies"])'\''
+python -c '\''import json; m=json.load(open("/work/portable-manifest.json")); assert "bun" not in m["dependencies"] and [d for d in m["dependencies"] if d.startswith("sing-box")] == ["sing-box>=1.13"]'\''
 builder_uid=$(id -u builder)
 # Reject missing/mismatched elevated caller before executing an artifact.
 if env -u SUDO_UID -u SUDO_USER bash /work/install-native.sh /work/vpnkit-portable >/dev/null 2>&1; then exit 1; fi
