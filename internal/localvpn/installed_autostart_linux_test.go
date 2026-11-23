@@ -27,7 +27,7 @@ func TestInstalledAutostartUsesFixedExecutableAndGraphicalSession(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{InstalledCLI, "--runtime \"native\"", "--secrets-dir ", "WantedBy=graphical-session.target", "PartOf=graphical-session.target", "ConditionPathIsExecutable=" + InstalledCLI} {
+	for _, want := range []string{InstalledCLI, "--runtime \"native\"", "--secrets-dir ", "WantedBy=graphical-session.target", "PartOf=graphical-session.target", "ConditionFileIsExecutable=" + InstalledCLI} {
 		if !strings.Contains(unit, want) {
 			t.Fatalf("missing unit contract %q", want)
 		}
