@@ -31,6 +31,12 @@ profile import runs through that session's systemd manager, without activating
 it. A foreign or active profile is subject to the existing ownership protections;
 an actual import failure exits with “package installed; desktop setup incomplete”.
 
+After every install or upgrade the package post-change hook also checks, read-only and
+without touching NetworkManager, whether an enrolled user's native client profile
+still points at a non-native `remote` (for example a Docker-mode leftover). If so it
+prints `native_profile=stale: re-run native setup` and still succeeds; regeneration
+needs the subscription, so it is left to the normal native setup flow.
+
 On a fresh install, open `local-vpn-kde` **without sudo**, add your server/profile,
 then connect when ready. If configuration or the desktop session is absent,
 NetworkManager import is explicitly deferred to the normal setup/first-connect

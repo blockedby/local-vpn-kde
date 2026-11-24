@@ -69,7 +69,12 @@ func run(args []string) error {
 			return localvpn.RecoverNativePackageChange(ctx)
 		}
 		if args[2] == "post-change" {
-			return localvpn.CompleteNativePackageChange(ctx)
+			if err := localvpn.CompleteNativePackageChange(ctx); err != nil {
+				return err
+			}
+			// Advisory only: never fails the package transaction.
+			localvpn.ReportStaleNativeClientProfiles(os.Stdout)
+			return nil
 		}
 		return localvpn.PrepareNativePackageRemoval(ctx)
 	}

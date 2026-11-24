@@ -274,6 +274,13 @@ func (n NetworkManager) nativeProfileStale() bool {
 	if err != nil {
 		return false
 	}
+	return nativeProfileDataStale(data)
+}
+
+// nativeProfileDataStale reports whether any top-level `remote` directive in
+// the profile differs from the native loopback endpoint. Inline blocks (keys,
+// certificates) are skipped and never inspected further.
+func nativeProfileDataStale(data []byte) bool {
 	inline := ""
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
