@@ -32,7 +32,7 @@ export class HomeView {
     const lifecycle = actions.find(a => ["home:connect", "home:start-service", "home:x"].includes(a.id));
     const lifecycleTask = [...state.tasks.values()].find(task => ["backend/start", "start", "disconnect", "stop"].includes(task.action));
     // A tile shows a letter only when that key does what Enter on the tile does.
-    const opensProfiles = state.nativeInstalled() && state.status?.subscription === "configured";
+    const opensProfiles = state.opensProfiles();
     const titleActions = [lifecycle, ...["global:servers", "global:tasks", opensProfiles ? "global:subscription" : "", "global:diagnostics", "global:settings"].map(id => actions.find(a => a.id === id))];
     const glyphs = ["▶", "≡", "•", "◇", "+", "*"];
     const data = [

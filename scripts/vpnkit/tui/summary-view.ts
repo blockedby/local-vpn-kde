@@ -2,6 +2,7 @@ import { BoxRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
 import type { AppState } from "./app-state";
 import { palette as p } from "./model";
 import { safeText } from "./formatting";
+import { recoveryFor } from "./recovery";
 import { detailsLines } from "./details-view";
 
 function wrapDialogLine(input: string, width: number): string[] {
@@ -69,7 +70,9 @@ export class SummaryView {
         ? "Проверяем состояние…"
         : state.nativePreviewOnly()
           ? state.nativePreview()
-          : !state.ready()
+          : state.nativeProfileStale()
+            ? `${recoveryFor("status", "native-profile-stale", "native").message} Нажмите [c] и повторите настройку с подпиской.`
+            : !state.ready()
             ? `Подписку можно настроить до запуска ${state.nativeMode() ? "сервиса" : "Docker"}.`
             : state.status.subscription !== "configured"
               ? "Добавьте подписку, затем откройте серверы."

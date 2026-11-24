@@ -32,7 +32,7 @@ func ReportStaleNativeClientProfiles(output io.Writer) {
 	if os.Geteuid() != 0 {
 		return
 	}
-	if reportStaleNativeClientProfilesAt(nativegateway.ConfigDir+"/sing-box/config.json", "/etc/group", nativeEnrolledMembers) {
+	if reportStaleNativeClientProfilesAt(nativegateway.ConfigDir+"/"+nativeConfigurationManifest, "/etc/group", nativeEnrolledMembers) {
 		fmt.Fprintln(output, NativeProfileStaleMessage)
 	}
 }
@@ -63,7 +63,7 @@ func nativeEnrolledMembers(groupFile string) []*user.User {
 }
 
 // reportStaleNativeClientProfilesAt returns true when any enrolled user's
-// client profile is stale. Test seams: configuration marker and group file.
+// client profile is stale. Test seams: configuration manifest and group file.
 func reportStaleNativeClientProfilesAt(configPath, groupFile string, members func(string) []*user.User) bool {
 	if info, err := os.Stat(configPath); err != nil || !info.Mode().IsRegular() {
 		return false

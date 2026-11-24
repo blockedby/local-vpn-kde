@@ -65,6 +65,18 @@ func TestBridgeStatusPythonParity(t *testing.T) {
 		t.Fatal("status leaked output")
 	}
 }
+func TestBridgeReportsAndClearsStaleNativeProfile(t *testing.T) {
+	b := bridgeFixture(t, `{"container":"healthy","subscription":"configured","native_profile":"stale","networkmanager":{"configured":"yes","active":"no"}}`)
+	if got := b.QueryStatus(context.Background())["native_profile"]; got != "stale" {
+		t.Fatalf("native_profile = %v", got)
+	}
+	if err := os.WriteFile(b.options.Executable, []byte("#!/bin/sh\nprintf '%s' '{\"container\":\"healthy\",\"networkmanager\":{\"configured\":\"yes\",\"active\":\"no\"}}'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := b.QueryStatus(context.Background())["native_profile"]; present {
+		t.Fatal("stale state not cleared")
+	}
+}
 func TestBridgeFailureClassificationAndPrivateLog(t *testing.T) {
 	b := bridgeFixture(t, `{"container":"absent","networkmanager":{"configured":"yes","active":"no"}}`)
 	var output bytes.Buffer

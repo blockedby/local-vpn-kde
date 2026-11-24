@@ -118,7 +118,7 @@ export function actionRegistry(state: AppState, rowActions = false): ActionDefin
   add("global:cancel", ["k"], "Отменить", "global", () => state.cancel(), cancellable ? undefined : "Нет операции для отмены.");
   const screens: [string, string, string, () => Screen][] = [
     ["servers", "v", "Серверы", () => "servers"],
-    ["subscription", "c", state.nativeInstalled() && state.status?.subscription === "configured" ? "Профили · подписки и серверы" : "Подписка", () => state.nativeInstalled() && state.status?.subscription === "configured" ? "profiles" : "subscription"],
+    ["subscription", "c", state.opensProfiles() ? "Профили · подписки и серверы" : state.nativeProfileStale() ? "Подписка · повторить настройку native" : "Подписка", () => state.opensProfiles() ? "profiles" : "subscription"],
     ["diagnostics", "d", "Диагностика", () => "diagnostics"],
     ["settings", "i", "Настройки", () => "settings"],
   ];

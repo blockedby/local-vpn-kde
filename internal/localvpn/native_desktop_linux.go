@@ -105,6 +105,17 @@ func parseNativeDesktopNMStatus(data []byte) (configured, active string, err err
 	return configured, active, nil
 }
 
+// parseNativeDesktopProfile reads the already validated status's profile
+// field; only "stale" is surfaced to the bridge.
+func parseNativeDesktopProfile(data []byte) string {
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "profile=stale" {
+			return "stale"
+		}
+	}
+	return ""
+}
+
 func nativeDesktopGatewayState(status GatewayStatus) string {
 	if status.Ready {
 		return "healthy"
@@ -148,7 +159,7 @@ func runNativeDesktopStatus(ctx context.Context, base string, output io.Writer, 
 	if err != nil {
 		return fmt.Errorf("native gateway status failed: %w", err)
 	}
-	configured, active := "no", "no"
+	configured, active, profile := "no", "no", ""
 	if !baseMissing {
 		capture := &nativeDesktopLimitWriter{remain: nativeDesktopStatusLimit}
 		if err = dependencies.nm.Run(ctx, "status", true, capture); err != nil {
@@ -161,6 +172,7 @@ func runNativeDesktopStatus(ctx context.Context, base string, output io.Writer, 
 		if err != nil {
 			return err
 		}
+		profile = parseNativeDesktopProfile(capture.buffer.Bytes())
 	}
 	policy := "strict"
 	if executable, _ := os.Executable(); executable == InstalledCLI {
@@ -180,12 +192,14 @@ func runNativeDesktopStatus(ctx context.Context, base string, output io.Writer, 
 		NetworkManagerActive     string `json:"networkmanager_active"`
 		Runtime                  string `json:"runtime"`
 		RoutingPolicy            string `json:"routing_policy"`
+		NativeProfile            string `json:"native_profile,omitempty"`
 	}{
 		Container:                nativeDesktopGatewayState(gateway),
 		NetworkManagerConfigured: configured,
 		NetworkManagerActive:     active,
 		Runtime:                  "native",
 		RoutingPolicy:            policy,
+		NativeProfile:            profile,
 	}
 	if err = json.NewEncoder(output).Encode(status); err != nil {
 		return fmt.Errorf("write native desktop status: %w", err)

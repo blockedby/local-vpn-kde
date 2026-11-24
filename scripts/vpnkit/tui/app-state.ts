@@ -415,6 +415,10 @@ export class AppState {
   nativeInstalled() {
     return this.nativeMode() && this.status?.installed === true;
   }
+  nativeProfileStale() { return this.nativeInstalled() && this.status?.native_profile === "stale"; }
+  // "c" opens profiles only while the native client profile is usable; a stale
+  // profile routes to the subscription editor, which re-runs native setup.
+  opensProfiles() { return this.nativeInstalled() && this.status?.subscription === "configured" && !this.nativeProfileStale(); }
   nativePreviewOnly() { return this.nativeMode() && !this.nativeInstalled(); }
   subscriptionAvailable() {
     return !this.nativeMode() || this.nativeInstalled();
@@ -598,7 +602,7 @@ export class AppState {
   }
   activateHome() {
     const target = [undefined, "servers", "tasks", "profiles", "diagnostics", "settings"] as const;
-    if (this.homeIndex) { this.open(target[this.homeIndex]!); return; }
+    if (this.homeIndex) { this.open(this.homeIndex === 3 && this.nativeProfileStale() ? "subscription" : target[this.homeIndex]!); return; }
     const action = this.actions().find(item => ["home:connect", "home:start-service", "home:x"].includes(item.id));
     if (action?.available) action.run();
     else if (action?.unavailableBehavior === "notice" && action.unavailableReason) this.notify(action.unavailableReason, true);

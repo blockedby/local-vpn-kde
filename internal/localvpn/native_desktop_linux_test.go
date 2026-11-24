@@ -229,6 +229,23 @@ func TestRunNativeDesktopStatusJSONAndMissingBasePolicy(t *testing.T) {
 	}
 }
 
+func TestRunNativeDesktopStatusReportsStaleProfile(t *testing.T) {
+	for profile, want := range map[string]string{"stale": "stale", "ready": "", "missing": ""} {
+		events := []string{}
+		service := &fakeNativeDesktopService{events: &events, status: GatewayStatus{Gateway: "inactive"}}
+		nm := &fakeNativeDesktopNM{events: &events, status: "command=status\nmutation=none\nconnection=vpnkit-local\nconfigured=yes\nactive=no\nownership=owned\ndevice=none\nprofile=" + profile + "\nprivate_values=not_printed\n", errors: map[string]error{}}
+		installNativeDesktopFakes(t, service, nm)
+		var output bytes.Buffer
+		if err := RunNativeDesktop(context.Background(), t.TempDir(), "status", false, &output); err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]string
+		if err := json.Unmarshal(output.Bytes(), &got); err != nil || got["native_profile"] != want {
+			t.Fatalf("profile %s: %v %#v", profile, err, got)
+		}
+	}
+}
+
 func TestRunNativeDesktopRejectsUnknownAndUnauthorizedActions(t *testing.T) {
 	for _, test := range []struct {
 		action string

@@ -156,7 +156,7 @@ export function menuItems(state: AppState): MenuItem[] {
           : []),
         { key: "t", label: state.nativePreviewOnly() ? "Тест скорости · недоступно в native preview" : state.inlineSpeed() ? `Тест скорости · ${state.homeTesting ? `${frames[state.frame % 10]} ${state.measurementAction === "servers/ping" ? "ping" : state.measurementAction === "servers/speed" ? "замер" : "подготовка"} · ` : ""}${state.homePing === undefined ? "—" : Math.round(state.homePing)}ms, ${state.homeSpeed === undefined ? "—" : state.homeSpeed.toFixed(1)} Мбит/с` : "Тест скорости", run: () => void state.testHomeSpeed() },
         { key: "v", label: state.nativePreviewOnly() ? "Серверы · native preview" : "Серверы", run: () => state.open("servers") },
-        { key: "c", label: state.nativeInstalled() && state.status?.subscription==="configured" ? "Профили · подписки и серверы" : state.nativeMode() ? (state.nativeInstalled() ? "Подписка · настройка native-пакета" : "Подписка · недоступна в native preview") : "Подписка", run: () => state.open(state.nativeInstalled() && state.status?.subscription==="configured"?"profiles":"subscription") },
+        { key: "c", label: state.opensProfiles() ? "Профили · подписки и серверы" : state.nativeProfileStale() ? "Подписка · повторить настройку native" : state.nativeMode() ? (state.nativeInstalled() ? "Подписка · настройка native-пакета" : "Подписка · недоступна в native preview") : "Подписка", run: () => state.open(state.opensProfiles()?"profiles":"subscription") },
         { key: "d", label: state.nativePreviewOnly() ? "Диагностика · недоступна в native" : "Диагностика", run: () => state.open("diagnostics") },
         { key: "a", label: "Автозапуск", run: () => state.open("autostart") },
         {
@@ -183,7 +183,7 @@ export function menuItems(state: AppState): MenuItem[] {
     if (state.screen === "settings") return [
       { key: "a", label: `Автозапуск: ${state.autostart ? `шлюз ${state.autostart.gateway ? "да" : "нет"}, VPN ${state.autostart.connect ? "да" : "нет"}` : "не проверен"} · служба ${state.serviceState ? `${state.activeServiceLabel(state.serviceState.active)}/${({ enabled: "вкл", disabled: "выкл", masked: "маска" } as Record<string, string>)[state.serviceState.enabled] ?? "неизвестно"}` : "неизвестно"}`, run: () => state.open("autostart") },
       { key: "m", label: `Режим: ${state.status?.routing_mode === "smart" ? "умный" : state.status?.routing_mode === "strict" ? "строгий" : "неизвестно"}`, run: () => void state.perform("toggle-mode") },
-      { key: "c", label: "Профили и источники", run: () => state.open(state.nativeInstalled() && state.status?.subscription === "configured" ? "profiles" : "subscription") },
+      { key: "c", label: "Профили и источники", run: () => state.open(state.opensProfiles() ? "profiles" : "subscription") },
       { key: "e", label: `Сайт для проверки: ${displayCheckAddress(state.target)}`, run: () => state.open("target") },
       ...(!state.ready() ? [{ key: "s", label: `Запустить ${state.serviceObject()}`, run: run("backend/start") }] : []),
       ...(["healthy", "unhealthy", "running", "stopped", "starting"].includes(state.status?.gateway_state ?? state.status?.vpn_state ?? "") ? [{ key: "z", label: state.nativeMode() ? "Остановить сервис" : "Остановить Docker и VPN", run: () => state.confirm("stop") }] : []),
