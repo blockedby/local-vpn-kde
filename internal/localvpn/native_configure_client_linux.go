@@ -32,7 +32,9 @@ func ConfigureNativeDesktop(ctx context.Context, base, subscription string) erro
 	command := exec.CommandContext(ctx, InstalledCLI, "native-configure-client")
 	command.Stdin = bytes.NewReader(request)
 	command.Stdout = io.Discard
-	command.Stderr = io.Discard
+	// Forward only fixed native_setup_failure=<stage> lines; all other output
+	// (which could contain private data) is dropped.
+	command.Stderr = &nativeSetupFailureFilter{out: os.Stderr}
 	command.WaitDelay = 3 * time.Second
 	if err = command.Run(); err != nil {
 		return errors.New("native setup incomplete; check authorization, stopped services and subscription")
@@ -50,7 +52,9 @@ func RunNativeConfigurationClient(ctx context.Context, input io.Reader) error {
 	if err != nil {
 		return err
 	}
-	return configureNativeDesktop(ctx, request.StatePath, request.Subscription)
+	err = configureNativeDesktop(ctx, request.StatePath, request.Subscription)
+	reportNativeSetupFailure(os.Stderr, err)
+	return err
 }
 
 func configureNativeDesktop(ctx context.Context, base, subscription string) error {
@@ -77,7 +81,7 @@ func configureNativeDesktop(ctx context.Context, base, subscription string) erro
 
 	command := exec.CommandContext(bounded, "/usr/bin/pkexec", "--disable-internal-agent", InstalledCLI, "native-configure")
 	command.Env = os.Environ()
-	command.Stderr = io.Discard
+	command.Stderr = &nativeSetupFailureFilter{out: os.Stderr}
 	command.Cancel = func() error { return command.Process.Signal(syscall.SIGTERM) }
 	command.WaitDelay = 2 * time.Second
 	process := &nativeExecConfigurationProcess{command: command}
