@@ -273,15 +273,6 @@ func TestNativeProfileRemoteValidation(t *testing.T) {
 				t.Fatal(err)
 			}
 			fp, err := n.profileFingerprint()
-			if scenario == "docker-file" {
-				if !errors.Is(err, ErrNativeProfileStale) {
-					t.Fatalf("fingerprint error = %v", err)
-				}
-				// The docker-era fingerprint was recorded before the mode switch.
-				n.Native = false
-				fp, err = n.profileFingerprint()
-				n.Native = true
-			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -334,6 +325,55 @@ func TestNativeProfileRemoteValidation(t *testing.T) {
 				if err != nil || imports != 0 || mutations != 0 {
 					t.Fatalf("err=%v imports=%d mutations=%d", err, imports, mutations)
 				}
+			}
+		})
+	}
+}
+
+func TestNativeStaleProfileStatusAndRemove(t *testing.T) {
+	const id = "12345678-1234-4234-8234-123456789abc"
+	for _, action := range []string{"status", "plan", "remove"} {
+		t.Run(action, func(t *testing.T) {
+			n := NetworkManager{Base: t.TempDir(), Native: true}
+			if err := os.MkdirAll(filepath.Dir(n.profilePath()), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(n.profilePath(), []byte("client\ndev tun\nproto udp\nremote 127.0.0.1 21194\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			fp, err := n.profileFingerprint()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = n.writeCapability(nmCapability{UUID: id, Fingerprint: fp}); err != nil {
+				t.Fatal(err)
+			}
+			deletes := 0
+			n.command = func(_ context.Context, args ...string) (string, error) {
+				joined := strings.Join(args, " ")
+				switch {
+				case joined == "-t -f NAME,UUID,TYPE connection show":
+					return "vpnkit-native:" + id + ":vpn\n", nil
+				case joined == "-t -f NAME,UUID,TYPE,DEVICE connection show --active":
+					return "", nil
+				case strings.HasPrefix(joined, "-t -f connection.id,"):
+					return "vpnkit-native:" + id + ":vpn:org.freedesktop.NetworkManager.openvpn:remote = 127.0.0.1:21194\n", nil
+				case strings.HasPrefix(joined, "connection delete uuid "):
+					deletes++
+					return "", nil
+				}
+				return "", errors.New("unexpected NetworkManager command")
+			}
+			var out bytes.Buffer
+			if err = n.Run(context.Background(), action, true, &out); err != nil {
+				t.Fatal(err)
+			}
+			if action == "remove" {
+				if deletes != 1 {
+					t.Fatalf("deletes = %d", deletes)
+				}
+			} else if !strings.Contains(out.String(), "profile=stale\n") {
+				t.Fatalf("output = %q", out.String())
 			}
 		})
 	}

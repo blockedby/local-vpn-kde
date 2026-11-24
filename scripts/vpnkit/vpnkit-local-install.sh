@@ -542,7 +542,7 @@ while IFS= read -r status_line; do
         configured|active) [[ "$status_value" == yes || "$status_value" == no || "$status_value" == not-managed || "$status_value" == unavailable ]] || status_value=redacted ;;
         ownership) [[ "$status_value" == owned || "$status_value" == missing || "$status_value" == stale || "$status_value" == foreign || "$status_value" == foreign-collision || "$status_value" == duplicate || "$status_value" == invalid || "$status_value" == source-invalid || "$status_value" == drift || "$status_value" == not-managed || "$status_value" == unavailable ]] || status_value=redacted ;;
         device) [[ "$status_value" == none || "$status_value" == not-managed || "$status_value" == unavailable || "$status_value" =~ ^tun[A-Za-z0-9_.-]{0,14}$ ]] || status_value=redacted ;;
-        profile) [[ "$status_value" == ready || "$status_value" == missing ]] || status_value=redacted ;;
+        profile) [[ "$status_value" == ready || "$status_value" == missing || "$status_value" == stale ]] || status_value=redacted ;;
         private_values) status_value=not_printed ;;
       esac
       printf '%s=%s\n' "$status_key" "$status_value"

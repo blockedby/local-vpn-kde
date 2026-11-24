@@ -243,9 +243,6 @@ func (n NetworkManager) profileFingerprint() (string, error) {
 			if len(fields) < 2 || len(fields) > 3 {
 				return "", errors.New("invalid local remote")
 			}
-			if n.Native && strings.Join(fields[1:], " ") != nativeClientRemote {
-				return "", ErrNativeProfileStale
-			}
 			host := strings.Trim(fields[1], "[]")
 			if host != "localhost" && host != "127.0.0.1" {
 				return "", errors.New("foreign profile endpoint")
@@ -263,6 +260,42 @@ func (n NetworkManager) profileFingerprint() (string, error) {
 	}
 	digest := sha256.Sum256(data)
 	return hex.EncodeToString(digest[:]), nil
+}
+
+// nativeProfileStale reports whether the client profile's remote differs from
+// the native loopback endpoint. It is only a staleness check; source validity
+// remains profileFingerprint's job, and an unreadable or unparsable profile is
+// not reported as stale.
+func (n NetworkManager) nativeProfileStale() bool {
+	if !n.Native {
+		return false
+	}
+	data, err := runtimeRead(n.profilePath())
+	if err != nil {
+		return false
+	}
+	inline := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if inline != "" {
+			if line == "</"+inline+">" {
+				inline = ""
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "<") && strings.HasSuffix(line, ">") {
+			inline = strings.Trim(line, "<>")
+			continue
+		}
+		fields := strings.Fields(line)
+		if fields[0] == "remote" && strings.Join(fields[1:], " ") != nativeClientRemote {
+			return true
+		}
+	}
+	return false
 }
 func (n NetworkManager) inventory(ctx context.Context, active bool) ([]nmConnection, error) {
 	args := []string{"-t", "-f", "NAME,UUID,TYPE", "connection", "show"}
@@ -516,6 +549,9 @@ func (n NetworkManager) delete(ctx context.Context, uuid string) error {
 }
 
 func (n NetworkManager) importProfile(ctx context.Context, cap nmCapability, ownership string) (resultErr error) {
+	if n.nativeProfileStale() {
+		return ErrNativeProfileStale
+	}
 	fingerprint, err := n.profileFingerprint()
 	if err != nil {
 		return err
@@ -741,7 +777,9 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 	if action == "plan" || action == "status" {
 		configured, active, device := "no", "no", "none"
 		profile := "missing"
-		if _, e := n.profileFingerprint(); e == nil {
+		if n.nativeProfileStale() {
+			profile = "stale"
+		} else if _, e := n.profileFingerprint(); e == nil {
 			profile = "ready"
 		} else if _, e = runtimeRead(n.profilePath()); e == nil {
 			profile = "invalid"
