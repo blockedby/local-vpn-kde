@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/blockedby/local-vpn-kde/internal/nativegateway"
 	"golang.org/x/sys/unix"
 )
 
@@ -88,7 +89,9 @@ func readNativeConfigurationRequestBounded(parent context.Context, input io.Read
 // contains executable paths, unit names, owner IDs, or caller-generated configs.
 // It does not start services, connect NetworkManager, or enable autostart.
 func ConfigureNativeInstallation(ctx context.Context, input io.Reader) error {
-	return configureNativeInstallationProtocol(ctx, input, os.Stdout)
+	err := configureNativeInstallationProtocol(ctx, input, os.Stdout)
+	reportNativeSetupFailure(os.Stderr, err)
+	return err
 }
 
 func configureNativeInstallationProtocol(ctx context.Context, input io.Reader, output io.Writer) error {
@@ -203,13 +206,42 @@ func nativeConfigurationCommand(ctx context.Context, program string, args ...str
 }
 
 func nativeConfigurationInactive(ctx context.Context) error {
-	service := NativeService{}
+	return nativeConfigurationInactiveFor(ctx, NativeService{})
+}
+
+// nativeConfigurationInactiveFor requires both fixed native units to be
+// stopped. A unit left in systemd's "failed" state (for example the network
+// unit exiting after the setup-incomplete start guard) is already stopped, so
+// its failed state is cleared with reset-failed instead of deadlocking the
+// retry that is the recovery path. Active, activating, reloading and
+// deactivating units are never treated as stopped.
+func nativeConfigurationInactiveFor(ctx context.Context, service NativeService) error {
 	if err := service.mutationPreflight(ctx); err != nil {
 		return err
 	}
 	status, err := service.Status(ctx)
 	if err != nil {
 		return err
+	}
+	if status.Gateway == "failed" || status.Network == "failed" {
+		// Only clear units that are failed; refuse before touching anything if
+		// the other unit is running or transitioning.
+		for _, state := range []string{status.Gateway, status.Network} {
+			if state != "inactive" && state != "failed" {
+				return errors.New("native services must be stopped before configuration")
+			}
+		}
+		for _, unit := range []struct{ name, state string }{{nativegateway.GatewayUnit, status.Gateway}, {nativegateway.NetworkUnit, status.Network}} {
+			if unit.state != "failed" {
+				continue
+			}
+			if _, err = service.call(ctx, "systemctl", "reset-failed", unit.name); err != nil {
+				return errors.New("native failed services could not be reset")
+			}
+		}
+		if status, err = service.Status(ctx); err != nil {
+			return err
+		}
 	}
 	if status.Gateway != "inactive" || status.Network != "inactive" {
 		return errors.New("native services must be stopped before configuration")

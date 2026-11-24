@@ -78,6 +78,8 @@ export function failure(
       "Подключение не прошло проверку готовности. Причина и результат отката сохранены в журнал.",
     "native-profile-stale":
       "Профиль VPN устарел (остался от Docker-режима). Повторите настройку native.",
+    "setup-incomplete":
+      "Настройка native не завершена. Запустите настройку native ещё раз, затем повторите подключение.",
     "nm-activation-failed":
       "KDE не смог подключить профиль OpenVPN. Журнал NetworkManager сохранён для разбора.",
     "docker-registry-failed": native

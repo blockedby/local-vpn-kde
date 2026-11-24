@@ -15,6 +15,7 @@ import (
 )
 
 var diagnosticReasons = []struct{ message, reason string }{
+	{"retry incomplete native setup", "setup-incomplete"},
 	{"native-network-busy", "native-network-busy"},
 	{"native-network-settings-changed", "native-network-settings-changed"},
 	{"Docker is unavailable", "docker-unavailable"},

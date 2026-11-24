@@ -4,6 +4,7 @@ package localvpn
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -12,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/blockedby/local-vpn-kde/internal/nativegateway"
 )
 
 func TestNativeConfigurationGeneratedContractsAgree(t *testing.T) {
@@ -509,5 +512,43 @@ func TestNativeConfigurationRollbackUncertaintyRetainsInhibitor(t *testing.T) {
 	}
 	if err := configureNativeInstallation(context.Background(), nativeConfigurationRequest{}, 1000, 1000, operations); err == nil || strings.Contains(strings.Join(calls, ","), "inhibitor=false") {
 		t.Fatalf("rollback uncertainty did not retain inhibitor: calls=%v err=%v", calls, err)
+	}
+}
+
+func TestNativeConfigurationInactiveResetsFailedUnits(t *testing.T) {
+	run := func(gateway, network string) (error, []string) {
+		states := map[string][]byte{
+			nativegateway.GatewayUnit: nativeServiceTestState("loaded", gateway, "dead", "notify", ""),
+			nativegateway.NetworkUnit: nativeServiceTestState("loaded", network, "dead", "oneshot", ""),
+		}
+		service, _ := newNativeServiceTestFixture(t, states)
+		base := service.command
+		var resets []string
+		service.command = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name == "systemctl" && len(args) == 2 && args[0] == "reset-failed" {
+				resets = append(resets, args[1])
+				states[args[1]] = bytes.Replace(states[args[1]], []byte("ActiveState=failed"), []byte("ActiveState=inactive"), 1)
+				return nil, nil
+			}
+			return base(ctx, name, args...)
+		}
+		return nativeConfigurationInactiveFor(context.Background(), *service), resets
+	}
+	if err, resets := run("inactive", "failed"); err != nil || len(resets) != 1 || resets[0] != nativegateway.NetworkUnit {
+		t.Fatalf("network failed: err=%v resets=%v", err, resets)
+	}
+	if err, resets := run("failed", "failed"); err != nil || len(resets) != 2 {
+		t.Fatalf("both failed: err=%v resets=%v", err, resets)
+	}
+	if err, resets := run("inactive", "inactive"); err != nil || len(resets) != 0 {
+		t.Fatalf("inactive: err=%v resets=%v", err, resets)
+	}
+	for _, busy := range []string{"active", "activating", "reloading", "deactivating"} {
+		if err, resets := run("failed", busy); err == nil || len(resets) != 0 {
+			t.Fatalf("%s must block without reset: err=%v resets=%v", busy, err, resets)
+		}
+		if err, resets := run(busy, "inactive"); err == nil || len(resets) != 0 {
+			t.Fatalf("%s gateway must block: err=%v resets=%v", busy, err, resets)
+		}
 	}
 }
