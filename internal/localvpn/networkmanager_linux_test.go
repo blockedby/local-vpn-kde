@@ -267,7 +267,7 @@ func TestNativeNMConnectAlreadyActiveRequiresOwnedTunnelRoutes(t *testing.T) {
 			if err := os.MkdirAll(profileDir, 0700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(profileDir, "vpnkit-local.ovpn"), []byte("client\ndev tun\nproto udp\nremote 127.0.0.1 21194\n"), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(profileDir, "vpnkit-local.ovpn"), []byte("client\ndev tun\nproto udp\nremote 127.0.0.1 31194\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			n := NetworkManager{Base: base, Native: true}
@@ -285,7 +285,7 @@ func TestNativeNMConnectAlreadyActiveRequiresOwnedTunnelRoutes(t *testing.T) {
 				case "-t -f NAME,UUID,TYPE connection show":
 					return "vpnkit-native:" + id + ":vpn\n", nil
 				case "-t -f connection.id,connection.uuid,connection.type,vpn.service-type,vpn.data connection show uuid " + id:
-					return "vpnkit-native:" + id + ":vpn:org.freedesktop.NetworkManager.openvpn:remote = 127.0.0.1:21194\n", nil
+					return "vpnkit-native:" + id + ":vpn:org.freedesktop.NetworkManager.openvpn:remote = 127.0.0.1:31194\n", nil
 				case "-t -f NAME,UUID,TYPE,DEVICE connection show --active":
 					rows := "vpnkit-native:" + id + ":vpn:tun0\n"
 					if scenario == "foreign-vpn" {

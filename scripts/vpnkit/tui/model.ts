@@ -76,6 +76,8 @@ export function failure(
       "Проверка обнаружила доступный IPv6 в обход VPN. Подключение откатывается.",
     "host-smoke-failed":
       "Подключение не прошло проверку готовности. Причина и результат отката сохранены в журнал.",
+    "native-profile-stale":
+      "Профиль VPN устарел (остался от Docker-режима). Повторите настройку native.",
     "nm-activation-failed":
       "KDE не смог подключить профиль OpenVPN. Журнал NetworkManager сохранён для разбора.",
     "docker-registry-failed": native

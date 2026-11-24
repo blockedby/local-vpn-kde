@@ -382,6 +382,9 @@ func main() {
 			if errors.Is(err, localvpn.ErrForeignNMProfile) {
 				fmt.Fprintln(os.Stderr, "networkmanager_failure=foreign-profile")
 			}
+			if errors.Is(err, localvpn.ErrNativeProfileStale) {
+				fmt.Fprintln(os.Stderr, "networkmanager_failure=native-profile-stale")
+			}
 			if errors.Is(err, localvpn.ErrActiveNMMigration) {
 				fmt.Fprintln(os.Stderr, "networkmanager_failure=previous-profile-active")
 			}

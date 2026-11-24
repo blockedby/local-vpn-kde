@@ -13,7 +13,7 @@ export interface Recovery {
 const groups: Record<string, readonly string[]> = {
   docker: ["docker-unavailable", "docker-registry-failed", "gateway-build-failed", "gateway-start-failed", "gateway-unhealthy", "gateway-not-ready", "backend-outdated"],
   routes: ["route-conflict", "route-invalid", "ipv6-leak", "underlay-install-failed", "underlay-verify-failed", "underlay-not-ready"],
-  profile: ["profiles-failed", "other-vpn-active", "foreign-profile", "previous-profile-active", "profile-import-failed", "profile-invalid", "nm-activation-failed"],
+  profile: ["profiles-failed", "other-vpn-active", "foreign-profile", "previous-profile-active", "profile-import-failed", "profile-invalid", "native-profile-stale", "nm-activation-failed"],
   dns: ["dns-failed"],
   server: ["stale", "ip-https-failed", "hostname-https-failed", "ping-failed"],
   management: ["native-network-busy", "unavailable", "backend-unavailable", "diagnostics-unavailable", "recovery_required", "host-smoke-failed", "assets-failed"],
@@ -28,6 +28,7 @@ const messages: Record<string, string> = {
   "previous-profile-active": "Предыдущий локальный профиль ещё подключён. Проверьте состояние VPN.",
   "profile-import-failed": "Не удалось импортировать профиль KDE. Подробности — в диагностике.",
   "profile-invalid": "Профиль KDE изменён или не принадлежит приложению. Нужна проверка в диагностике.",
+  "native-profile-stale": "Профиль VPN остался от другого режима и не подходит для native. Повторите настройку native.",
   "assets-failed": "Не удалось подготовить ключи и конфигурацию. Подробности — в диагностике.",
   "invalid-request": "Проверьте введённые данные и повторите действие.",
 };

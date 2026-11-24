@@ -39,6 +39,21 @@ type NetworkManager struct {
 var ErrForeignNMProfile = errors.New("existing vpnkit-local profile belongs to another installation; ownership migration could not be verified")
 var ErrNMAuthorization = errors.New("NetworkManager permission denied; authorize local VPN profile changes and retry")
 
+// ErrNativeProfileStale reports a client profile whose remote is not the native
+// loopback endpoint (typically left over from Docker mode).
+var ErrNativeProfileStale = errors.New("native client profile is stale: its remote is not the native endpoint; re-run native setup to regenerate it")
+
+// nativeNMRemoteCurrent reports whether a NetworkManager vpn.data remote value
+// ("host:port[:proto]") is exactly the native loopback endpoint.
+func nativeNMRemoteCurrent(value string) bool {
+	parts := strings.Split(value, ":")
+	want := strings.Fields(nativeClientRemote)
+	if len(parts) < 2 || len(parts) > 3 || parts[0] != want[0] || parts[1] != want[1] {
+		return false
+	}
+	return len(parts) == 2 || parts[2] == "udp"
+}
+
 var ErrOtherVPNActive = errors.New("another VPN profile is active; disconnect it before connecting native VPN")
 
 var ErrActiveNMMigration = errors.New("disconnect the previous local VPN before migrating its profile")
@@ -228,6 +243,9 @@ func (n NetworkManager) profileFingerprint() (string, error) {
 			if len(fields) < 2 || len(fields) > 3 {
 				return "", errors.New("invalid local remote")
 			}
+			if n.Native && strings.Join(fields[1:], " ") != nativeClientRemote {
+				return "", ErrNativeProfileStale
+			}
 			host := strings.Trim(fields[1], "[]")
 			if host != "localhost" && host != "127.0.0.1" {
 				return "", errors.New("foreign profile endpoint")
@@ -362,6 +380,14 @@ func (n NetworkManager) connection(ctx context.Context, uuid string) (nmConnecti
 	}
 	return result, nil
 }
+func liveRemoteCurrent(c nmConnection) bool {
+	for _, entry := range strings.Split(c.Data, ",") {
+		if key, value, ok := strings.Cut(strings.TrimSpace(entry), "="); ok && strings.TrimSpace(key) == "remote" {
+			return nativeNMRemoteCurrent(strings.TrimSpace(value))
+		}
+	}
+	return false
+}
 func (n NetworkManager) assess(ctx context.Context, checkSource bool) (nmCapability, string, error) {
 	cap, err := n.readCapability()
 	if err != nil {
@@ -495,7 +521,18 @@ func (n NetworkManager) importProfile(ctx context.Context, cap nmCapability, own
 		return err
 	}
 	if ownership == "owned" && cap.Fingerprint == fingerprint {
-		return nil
+		if !n.Native {
+			return nil
+		}
+		// The source is current; a live connection imported from an older
+		// source (for example Docker's port) is drift and is re-imported.
+		live, e := n.connection(ctx, cap.UUID)
+		if e != nil {
+			return e
+		}
+		if liveRemoteCurrent(live) {
+			return nil
+		}
 	}
 	old := ""
 	if ownership == "owned" {
