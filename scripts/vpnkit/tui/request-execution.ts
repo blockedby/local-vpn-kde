@@ -93,7 +93,8 @@ export async function perform(
     const allowedDuringMeasurement = requestClasses[action] === "read" || action === "servers/select";
     if ((measurementActive && !insideBatch && !allowedDuringMeasurement) ||
         [...state.tasks.values()].some(task => !compatible(action, task.action))) {
-      if (!insideBatch && queueable.has(action)) state.enqueue(action, value);
+      if (action === "servers/refresh" && ([...state.tasks.values()].some(task => task.action === action) || state.queue.some(entry => entry.action === action))) state.notify("Каталог уже обновляется.");
+      else if (!insideBatch && queueable.has(action)) state.enqueue(action, value);
       else if (action !== "status") state.notify("Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k].");
       return;
     }

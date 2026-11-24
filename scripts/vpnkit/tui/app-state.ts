@@ -189,7 +189,7 @@ export class AppState {
       if (((this.batch || this.homeTesting) && requestClasses[entry.action] !== "read") || [...this.tasks.values()].some(task => !compatible(entry.action, task.action))) return;
       this.queue.shift();
       const needsService = requestClasses[entry.action] === "measurement" || entry.action === "servers/list" || entry.action === "servers/refresh";
-      if ((needsService && entry.wasReady && !this.ready()) || (entry.action.startsWith("servers/") && (entry.signature !== this.catalogSignature() || entry.catalogRevision !== this.catalogRevision))) {
+      if ((needsService && entry.wasReady && !this.ready()) || (entry.action.startsWith("servers/") && entry.action !== "servers/refresh" && (entry.signature !== this.catalogSignature() || entry.catalogRevision !== this.catalogRevision))) {
         this.history.unshift({ action: entry.action, started: entry.started, ended: Date.now(), outcome: "Не запущено: условия изменились", phase: "" });
         this.history.length = Math.min(20, this.history.length);
         this.notify("Задача снята с очереди: состояние или каталог изменились.", true);

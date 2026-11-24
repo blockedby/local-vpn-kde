@@ -138,3 +138,21 @@ test("cancelled catalog refresh invalidates queued snapshots and rereads cached 
     expect(state.history.some(item => item.outcome.includes("условия изменились"))).toBe(true);
   } finally { finish(reply()); await state.close(); }
 });
+
+test("repeated catalog refresh is coalesced into one backend call without an error", async () => {
+  const backend = new FakeBackend(); const state = new AppState(backend);
+  let finish!: (result: Reply) => void;
+  try {
+    await state.perform("status"); await state.perform("servers/list");
+    backend.hold = { action: "servers/refresh", promise: new Promise(resolve => { finish = resolve; }) };
+    const first = state.perform("servers/refresh");
+    await state.perform("servers/refresh");
+    expect(state.queue).toHaveLength(0);
+    expect(state.notice).toBe("Каталог уже обновляется.");
+    expect(state.error).toBe(false);
+    finish(reply()); await first; await settle();
+    expect(backend.calls.filter(call => call.action === "servers/refresh")).toHaveLength(1);
+    expect(state.error).toBe(false);
+    expect(state.history.some(item => item.outcome.includes("условия изменились"))).toBe(false);
+  } finally { finish(reply()); await settle(); await state.close(); }
+});
