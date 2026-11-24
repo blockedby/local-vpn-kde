@@ -19,7 +19,7 @@ func TestNativeConnectImportsOnlyProvenProfiles(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(n.profilePath()), 0700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(n.profilePath(), []byte("client\ndev tun\nproto udp\nremote 127.0.0.1 21194\n"), 0600); err != nil {
+			if err := os.WriteFile(n.profilePath(), []byte("client\ndev tun\nproto udp\nremote 127.0.0.1 31194\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			fp, err := n.profileFingerprint()
@@ -87,7 +87,7 @@ func TestNativeConnectImportsOnlyProvenProfiles(t *testing.T) {
 					if scenario == "tampered" {
 						remote = "192.0.2.1"
 					}
-					return names[id] + ":" + id + ":vpn:org.freedesktop.NetworkManager.openvpn:remote = " + remote + ":21194\n", nil
+					return names[id] + ":" + id + ":vpn:org.freedesktop.NetworkManager.openvpn:remote = " + remote + ":31194\n", nil
 				case strings.HasPrefix(joined, "connection import "):
 					imports++
 					if scenario == "denied" {
@@ -250,5 +250,131 @@ func TestNativeSplitRouteSettings(t *testing.T) {
 		if got := nativeSplitRoutesMatch(tc.raw); got != tc.valid {
 			t.Fatalf("route setting %q accepted=%v", tc.raw, got)
 		}
+	}
+}
+
+func TestNativeProfileRemoteValidation(t *testing.T) {
+	const id = "12345678-1234-4234-8234-123456789abc"
+	const fresh = "22222222-2222-4222-8222-222222222222"
+	for _, scenario := range []string{"docker-file", "file-ok-live-stale", "all-current", "docker-mode-unchanged"} {
+		t.Run(scenario, func(t *testing.T) {
+			n := NetworkManager{Base: t.TempDir(), Native: scenario != "docker-mode-unchanged"}
+			if err := os.MkdirAll(filepath.Dir(n.profilePath()), 0700); err != nil {
+				t.Fatal(err)
+			}
+			filePort, livePort := "31194", "31194"
+			switch scenario {
+			case "docker-file", "docker-mode-unchanged":
+				filePort, livePort = "21194", "21194"
+			case "file-ok-live-stale":
+				livePort = "21194"
+			}
+			if err := os.WriteFile(n.profilePath(), []byte("client\ndev tun\nproto udp\nremote 127.0.0.1 "+filePort+"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			fp, err := n.profileFingerprint()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = n.writeCapability(nmCapability{UUID: id, Fingerprint: fp}); err != nil {
+				t.Fatal(err)
+			}
+			imports, mutations := 0, 0
+			n.command = func(_ context.Context, args ...string) (string, error) {
+				joined := strings.Join(args, " ")
+				switch {
+				case joined == "-t -f NAME,UUID,TYPE connection show":
+					return "vpnkit-native:" + id + ":vpn\n", nil
+				case joined == "-t -f NAME,UUID,TYPE,DEVICE connection show --active":
+					return "", nil
+				case strings.HasPrefix(joined, "-t -f connection.id,"):
+					return "vpnkit-native:" + id + ":vpn:org.freedesktop.NetworkManager.openvpn:remote = 127.0.0.1:" + livePort + "\n", nil
+				case strings.HasPrefix(joined, "connection import "):
+					imports++
+					return fresh, nil
+				default:
+					mutations++
+					return "", errors.New("stop after import decision")
+				}
+			}
+			err = n.importProfile(context.Background(), nmCapability{UUID: id, Fingerprint: fp}, "owned")
+			switch scenario {
+			case "docker-file":
+				if !errors.Is(err, ErrNativeProfileStale) || imports != 0 || mutations != 0 {
+					t.Fatalf("err=%v imports=%d mutations=%d", err, imports, mutations)
+				}
+				err = n.Run(context.Background(), "connect", true, &bytes.Buffer{})
+				if !errors.Is(err, ErrNativeProfileStale) || imports != 0 || mutations != 0 {
+					t.Fatalf("connect err=%v imports=%d mutations=%d", err, imports, mutations)
+				}
+				reason := ""
+				for _, entry := range diagnosticReasons {
+					if strings.Contains(err.Error(), entry.message) {
+						reason = entry.reason
+						break
+					}
+				}
+				if reason != "native-profile-stale" {
+					t.Fatalf("diagnostic reason = %q", reason)
+				}
+			case "file-ok-live-stale":
+				if imports != 1 {
+					t.Fatalf("stale live remote was not re-imported: err=%v imports=%d", err, imports)
+				}
+			default:
+				if err != nil || imports != 0 || mutations != 0 {
+					t.Fatalf("err=%v imports=%d mutations=%d", err, imports, mutations)
+				}
+			}
+		})
+	}
+}
+
+func TestNativeStaleProfileStatusAndRemove(t *testing.T) {
+	const id = "12345678-1234-4234-8234-123456789abc"
+	for _, action := range []string{"status", "plan", "remove"} {
+		t.Run(action, func(t *testing.T) {
+			n := NetworkManager{Base: t.TempDir(), Native: true}
+			if err := os.MkdirAll(filepath.Dir(n.profilePath()), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(n.profilePath(), []byte("client\ndev tun\nproto udp\nremote 127.0.0.1 21194\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			fp, err := n.profileFingerprint()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = n.writeCapability(nmCapability{UUID: id, Fingerprint: fp}); err != nil {
+				t.Fatal(err)
+			}
+			deletes := 0
+			n.command = func(_ context.Context, args ...string) (string, error) {
+				joined := strings.Join(args, " ")
+				switch {
+				case joined == "-t -f NAME,UUID,TYPE connection show":
+					return "vpnkit-native:" + id + ":vpn\n", nil
+				case joined == "-t -f NAME,UUID,TYPE,DEVICE connection show --active":
+					return "", nil
+				case strings.HasPrefix(joined, "-t -f connection.id,"):
+					return "vpnkit-native:" + id + ":vpn:org.freedesktop.NetworkManager.openvpn:remote = 127.0.0.1:21194\n", nil
+				case strings.HasPrefix(joined, "connection delete uuid "):
+					deletes++
+					return "", nil
+				}
+				return "", errors.New("unexpected NetworkManager command")
+			}
+			var out bytes.Buffer
+			if err = n.Run(context.Background(), action, true, &out); err != nil {
+				t.Fatal(err)
+			}
+			if action == "remove" {
+				if deletes != 1 {
+					t.Fatalf("deletes = %d", deletes)
+				}
+			} else if !strings.Contains(out.String(), "profile=stale\n") {
+				t.Fatalf("output = %q", out.String())
+			}
+		})
 	}
 }

@@ -39,6 +39,21 @@ type NetworkManager struct {
 var ErrForeignNMProfile = errors.New("existing vpnkit-local profile belongs to another installation; ownership migration could not be verified")
 var ErrNMAuthorization = errors.New("NetworkManager permission denied; authorize local VPN profile changes and retry")
 
+// ErrNativeProfileStale reports a client profile whose remote is not the native
+// loopback endpoint (typically left over from Docker mode).
+var ErrNativeProfileStale = errors.New("native client profile is stale: its remote is not the native endpoint; re-run native setup to regenerate it")
+
+// nativeNMRemoteCurrent reports whether a NetworkManager vpn.data remote value
+// ("host:port[:proto]") is exactly the native loopback endpoint.
+func nativeNMRemoteCurrent(value string) bool {
+	parts := strings.Split(value, ":")
+	want := strings.Fields(nativeClientRemote)
+	if len(parts) < 2 || len(parts) > 3 || parts[0] != want[0] || parts[1] != want[1] {
+		return false
+	}
+	return len(parts) == 2 || parts[2] == "udp"
+}
+
 var ErrOtherVPNActive = errors.New("another VPN profile is active; disconnect it before connecting native VPN")
 
 var ErrActiveNMMigration = errors.New("disconnect the previous local VPN before migrating its profile")
@@ -246,6 +261,42 @@ func (n NetworkManager) profileFingerprint() (string, error) {
 	digest := sha256.Sum256(data)
 	return hex.EncodeToString(digest[:]), nil
 }
+
+// nativeProfileStale reports whether the client profile's remote differs from
+// the native loopback endpoint. It is only a staleness check; source validity
+// remains profileFingerprint's job, and an unreadable or unparsable profile is
+// not reported as stale.
+func (n NetworkManager) nativeProfileStale() bool {
+	if !n.Native {
+		return false
+	}
+	data, err := runtimeRead(n.profilePath())
+	if err != nil {
+		return false
+	}
+	inline := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if inline != "" {
+			if line == "</"+inline+">" {
+				inline = ""
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "<") && strings.HasSuffix(line, ">") {
+			inline = strings.Trim(line, "<>")
+			continue
+		}
+		fields := strings.Fields(line)
+		if fields[0] == "remote" && strings.Join(fields[1:], " ") != nativeClientRemote {
+			return true
+		}
+	}
+	return false
+}
 func (n NetworkManager) inventory(ctx context.Context, active bool) ([]nmConnection, error) {
 	args := []string{"-t", "-f", "NAME,UUID,TYPE", "connection", "show"}
 	if active {
@@ -361,6 +412,14 @@ func (n NetworkManager) connection(ctx context.Context, uuid string) (nmConnecti
 		return result, errors.New("invalid NetworkManager remote")
 	}
 	return result, nil
+}
+func liveRemoteCurrent(c nmConnection) bool {
+	for _, entry := range strings.Split(c.Data, ",") {
+		if key, value, ok := strings.Cut(strings.TrimSpace(entry), "="); ok && strings.TrimSpace(key) == "remote" {
+			return nativeNMRemoteCurrent(strings.TrimSpace(value))
+		}
+	}
+	return false
 }
 func (n NetworkManager) assess(ctx context.Context, checkSource bool) (nmCapability, string, error) {
 	cap, err := n.readCapability()
@@ -490,12 +549,26 @@ func (n NetworkManager) delete(ctx context.Context, uuid string) error {
 }
 
 func (n NetworkManager) importProfile(ctx context.Context, cap nmCapability, ownership string) (resultErr error) {
+	if n.nativeProfileStale() {
+		return ErrNativeProfileStale
+	}
 	fingerprint, err := n.profileFingerprint()
 	if err != nil {
 		return err
 	}
 	if ownership == "owned" && cap.Fingerprint == fingerprint {
-		return nil
+		if !n.Native {
+			return nil
+		}
+		// The source is current; a live connection imported from an older
+		// source (for example Docker's port) is drift and is re-imported.
+		live, e := n.connection(ctx, cap.UUID)
+		if e != nil {
+			return e
+		}
+		if liveRemoteCurrent(live) {
+			return nil
+		}
 	}
 	old := ""
 	if ownership == "owned" {
@@ -704,7 +777,9 @@ func (n NetworkManager) Run(ctx context.Context, action string, yes bool, output
 	if action == "plan" || action == "status" {
 		configured, active, device := "no", "no", "none"
 		profile := "missing"
-		if _, e := n.profileFingerprint(); e == nil {
+		if n.nativeProfileStale() {
+			profile = "stale"
+		} else if _, e := n.profileFingerprint(); e == nil {
 			profile = "ready"
 		} else if _, e = runtimeRead(n.profilePath()); e == nil {
 			profile = "invalid"

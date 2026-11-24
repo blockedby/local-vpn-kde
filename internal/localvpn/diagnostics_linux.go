@@ -20,6 +20,7 @@ var diagnosticReasons = []struct{ message, reason string }{
 	{"Docker is unavailable", "docker-unavailable"},
 	{"refusing unowned or changed NetworkManager profile", "profile-invalid"},
 	{"refusing foreign or invalid NetworkManager profile", "profile-invalid"},
+	{"native client profile is stale", "native-profile-stale"},
 	{"foreign same-name profile", "foreign-profile"},
 	{"NetworkManager connect timed out before the owned tunnel and full-tunnel routes became ready", "nm-activation-failed"},
 	{"NetworkManager import failed after creating a profile", "profile-import-failed"},

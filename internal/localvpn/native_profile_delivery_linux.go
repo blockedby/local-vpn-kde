@@ -11,9 +11,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/blockedby/local-vpn-kde/internal/nativegateway"
 )
 
 const (
@@ -21,11 +24,15 @@ const (
 	nativeClientProfileName    = "vpnkit-local.ovpn"
 )
 
+// nativeClientRemote is the only `remote` directive value native mode accepts:
+// the loopback DNAT port, never the Docker-mode port.
+var nativeClientRemote = "127.0.0.1 " + strconv.Itoa(nativegateway.LoopbackPort)
+
 var nativeClientProfileDirectives = map[string]string{
 	"client":                "",
 	"dev":                   "tun",
 	"proto":                 "udp",
-	"remote":                "127.0.0.1 31194",
+	"remote":                nativeClientRemote,
 	"resolv-retry":          "infinite",
 	"nobind":                "",
 	"persist-key":           "",
