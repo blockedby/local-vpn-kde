@@ -71,7 +71,7 @@ runtime dependency was not proven for `aarch64`.
 4. Upstream currently has no repository license file or publishable license
    metadata. The local template records `custom:unlicensed`; licensing must be
    resolved before any public redistribution or AUR publication.
-5. The package build requires `sing-box>=1.13` and `sing-box<1.15`. Synthetic full-VPN
+5. The package build downloads the pinned static upstream sing-box release (sha256-verified) and bundles it; the runtime still depends on `sing-box>=1.13` as a fallback. Synthetic full-VPN
    tests passed with Arch sing-box `1.14.1-2` and OpenVPN `2.7.7-1`, both as root
    and as a restricted service user (three service lifecycles). An opt-in real
    subscription test also passed: 20 candidates tested, 10 successful; the

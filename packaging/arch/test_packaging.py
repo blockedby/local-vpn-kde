@@ -62,7 +62,7 @@ class PackagingTests(unittest.TestCase):
 
             checksum = hashlib.sha256(archives[0].read_bytes()).hexdigest()
             pkgbuild = (outputs[0] / "PKGBUILD").read_text()
-            self.assertIn(f"sha256sums=('{checksum}')", pkgbuild)
+            self.assertIn(f"sha256sums=('{checksum}'", pkgbuild)
             self.assertNotIn("@PKGVER@", pkgbuild)
             with tarfile.open(archives[0], "r:gz") as archive:
                 members = archive.getmembers()
@@ -93,7 +93,22 @@ class PackagingTests(unittest.TestCase):
         template = (HERE / "PKGBUILD.template").read_text()
         self.assertIn("arch=('x86_64')", template)
         self.assertIn("'sing-box>=1.13'", template)
-        self.assertIn("'sing-box<1.15'", template)
+        self.assertNotIn("'sing-box<1.15'", template)
+        self.assertNotIn("/usr/bin/sing-box", template)
+        self.assertNotIn("/usr/share/licenses/sing-box", template)
+        self.assertIn(
+            "https://github.com/SagerNet/sing-box/releases/download/v$_singbox/"
+            "sing-box-$_singbox-linux-amd64.tar.gz",
+            template,
+        )
+        self.assertIn("_singbox=1.14.1", template)
+        self.assertIn(
+            "'12cb2816b52febb356f6a885b740cc8758c3f30b8ae0ca8edba80f0d2d35343f'", template
+        )
+        self.assertIn('readelf -d "$singbox_dir/sing-box"', template)
+        self.assertIn("grep -Ev '^(libc\\.so\\.6|", template)
+        self.assertIn("non-glibc dynamic dependencies", template)
+        self.assertIn('"$singbox_dir/sing-box" version', template)
         depends = re.search(r"(?m)^depends=\((.*?)\)", template, re.DOTALL)
         self.assertIsNotNone(depends)
         self.assertIn("'sing-box>=1.13'", depends.group(1))

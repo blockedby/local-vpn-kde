@@ -27,6 +27,14 @@ for line in info.splitlines():
         fields.setdefault(key, []).append(value)
 if fields.get("pkgname") != ["local-vpn-kde-native"] or fields.get("arch") != ["x86_64"]:
     parser.error("expected local-vpn-kde-native x86_64 package")
+# The bundled sing-box must link only glibc core libraries: a host-linked binary breaks on other distros.
+with tempfile.TemporaryDirectory(prefix="vpnkit-portable-check-") as check:
+    subprocess.run(["bsdtar", "-xf", str(package), "-C", check, "usr/libexec/local-vpn-kde/sing-box"], check=True)
+    dynamic = subprocess.check_output(["readelf", "-d", str(Path(check) / "usr/libexec/local-vpn-kde/sing-box")], text=True)
+    allowed = {"libc.so.6", "libdl.so.2", "libm.so.6", "libpthread.so.0", "libresolv.so.2", "librt.so.1", "ld-linux-x86-64.so.2"}
+    needed = {line.split("[", 1)[1].rstrip("]") for line in dynamic.splitlines() if "(NEEDED)" in line}
+    if needed - allowed:
+        parser.error("bundled sing-box has non-glibc dynamic dependencies: " + ", ".join(sorted(needed - allowed)))
 manifest = {
     "format": 1,
     "package": "application.pkg.tar.zst",
