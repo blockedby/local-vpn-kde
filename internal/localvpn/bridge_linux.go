@@ -628,6 +628,10 @@ func (b *Bridge) refresh(parent context.Context) {
 		for k, v := range status {
 			b.status[k] = v
 		}
+		// Only a stale native profile is reported; absence means ok.
+		if status["native_profile"] != "stale" {
+			delete(b.status, "native_profile")
+		}
 	}()
 
 	status["vpn_state"] = "unknown"
@@ -661,6 +665,9 @@ func (b *Bridge) refresh(parent context.Context) {
 		status["subscription"] = "configured"
 	} else if raw["subscription"] == "missing" {
 		status["subscription"] = "not configured"
+	}
+	if raw["native_profile"] == "stale" {
+		status["native_profile"] = "stale"
 	}
 	configured, active := raw["networkmanager_configured"], raw["networkmanager_active"]
 	if configured == nil {

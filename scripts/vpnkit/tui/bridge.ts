@@ -36,6 +36,7 @@ export interface Status {
   networkmanager_active: string;
   diagnostics: string;
   last_attempt?: string;
+  native_profile?: string;
 }
 export interface Server {
  profile_id?: string;
