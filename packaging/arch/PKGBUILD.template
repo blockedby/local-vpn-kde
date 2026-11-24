@@ -31,10 +31,15 @@ depends=(
   'brotli'
   'zstd'
 )
-makedepends=('go' 'bun>=1.3.14' 'sing-box>=1.13' 'sing-box<1.15')
+makedepends=('go' 'bun>=1.3.14' 'binutils')
 install=local-vpn-kde-native.install
-source=('@ARCHIVE@')
-sha256sums=('@SHA256@')
+# The bundled engine is the upstream static release, never the build host's
+# dynamically linked distro binary (its shared-library sonames differ per host).
+_singbox=1.14.1
+source=('@ARCHIVE@'
+        "sing-box-$_singbox-linux-amd64.tar.gz::https://github.com/SagerNet/sing-box/releases/download/v$_singbox/sing-box-$_singbox-linux-amd64.tar.gz")
+sha256sums=('@SHA256@'
+            '12cb2816b52febb356f6a885b740cc8758c3f30b8ae0ca8edba80f0d2d35343f')
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"
@@ -68,10 +73,18 @@ package() {
   install -Dm755 build/local-vpn-kde.bin "$pkgdir/usr/libexec/local-vpn-kde/local-vpn-kde.bin"
   install -Dm755 build/vibe-vpn "$pkgdir/usr/libexec/local-vpn-kde/vibe-vpn"
   install -Dm755 build/vibe-vpn-server-op-supervisor "$pkgdir/usr/libexec/local-vpn-kde/vibe-vpn-server-op-supervisor"
-  install -Dm755 /usr/bin/sing-box "$pkgdir/usr/libexec/local-vpn-kde/sing-box"
+  local singbox_dir="$srcdir/sing-box-$_singbox-linux-amd64"
+  # Upstream links only glibc core libraries (stable sonames on any glibc host);
+  # any other NEEDED entry means a host-specific distro build.
+  if readelf -d "$singbox_dir/sing-box" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | grep -Ev '^(libc\.so\.6|libdl\.so\.2|libm\.so\.6|libpthread\.so\.0|libresolv\.so\.2|librt\.so\.1|ld-linux-x86-64\.so\.2)$'; then
+    echo 'bundled sing-box has non-glibc dynamic dependencies' >&2
+    return 1
+  fi
+  "$singbox_dir/sing-box" version >/dev/null
+  install -Dm755 "$singbox_dir/sing-box" "$pkgdir/usr/libexec/local-vpn-kde/sing-box"
   install -Dm644 packaging/licenses/ip-location-db.LICENSE "$pkgdir/usr/share/licenses/$pkgname/ip-location-db.LICENSE"
-  install -Dm644 /usr/share/licenses/sing-box/LICENSE "$pkgdir/usr/share/licenses/$pkgname/sing-box.LICENSE"
-  /usr/bin/sing-box version > build/sing-box-version.txt
+  install -Dm644 "$singbox_dir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/sing-box.LICENSE"
+  "$singbox_dir/sing-box" version > build/sing-box-version.txt
   install -Dm644 build/sing-box-version.txt "$pkgdir/usr/share/licenses/$pkgname/sing-box-version.txt"
 
   # ip netns exec bind-mounts this file only in the worker's mount namespace.

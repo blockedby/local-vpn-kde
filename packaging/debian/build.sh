@@ -22,6 +22,13 @@ go run ./packaging/arch/generate-units "$stage/usr/lib/systemd/system"
   bun build --compile --target=bun-linux-x64-baseline --external '@opentui/core-linux-x64-musl' --define 'process.env.VPNKIT_COMPILED_NATIVE="1"' index.ts --outfile "$stage/usr/share/local-vpn-kde/scripts/vpnkit/tui/vpnkit-tui"
 )
 install -Dm755 /usr/bin/sing-box "$stage/usr/libexec/local-vpn-kde/sing-box"
+# Upstream links only glibc core libraries (stable sonames on any glibc host);
+# any other NEEDED entry means a host-specific distro build.
+if readelf -d "$stage/usr/libexec/local-vpn-kde/sing-box" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | grep -Ev '^(libc\.so\.6|libdl\.so\.2|libm\.so\.6|libpthread\.so\.0|libresolv\.so\.2|librt\.so\.1|ld-linux-x86-64\.so\.2)$'; then
+  echo 'bundled sing-box has non-glibc dynamic dependencies' >&2
+  exit 1
+fi
+"$stage/usr/libexec/local-vpn-kde/sing-box" version >/dev/null
 install -Dm755 packaging/arch/local-vpn-kde "$stage/usr/bin/local-vpn-kde"
 install -Dm755 scripts/vpnkit/vpnkit-native.sh "$stage/usr/share/local-vpn-kde/scripts/vpnkit/vpnkit-native.sh"
 install -Dm644 packaging/arch/native-netns-resolv.conf "$stage/etc/netns/vpnkit-native/resolv.conf"
