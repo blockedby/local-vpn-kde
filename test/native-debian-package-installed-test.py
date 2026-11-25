@@ -22,6 +22,8 @@ result = run("runuser", "-u", "builder", "--", "/usr/bin/local-vpn-kde", "ui", "
 status = json.loads(result.stdout)
 assert status["runtime"] == "native" and status["installed"] is True
 run("runuser", "-u", "builder", "--", "/usr/bin/local-vpn-kde", "bridge", input=b"")
+assert os.readlink("/usr/bin/kvpn") == "local-vpn-kde"
+run("runuser", "-u", "builder", "--", "/usr/bin/kvpn", "bridge", input=b"")
 assert Path("/home/builder/.local/state/local-vpn-kde").stat().st_mode & 0o777 == 0o700
 # Verify persistent POSIX locks, not lock-file existence, gate recovery.
 marker = Path("/run/local-vpn-kde-package-blocked")
@@ -41,6 +43,7 @@ retained = Path("/etc/local-vpn-kde/debian-lab-retain")
 retained.write_text("preserve")
 run("dpkg", "-r", "local-vpn-kde-native")
 assert not Path("/usr/bin/local-vpn-kde").exists()
+assert not Path("/usr/bin/kvpn").is_symlink()
 assert retained.read_text() == "preserve"
 run("getent", "passwd", "local-vpn-kde", stdout=subprocess.DEVNULL)
 run("dpkg", "--purge", "local-vpn-kde-native")

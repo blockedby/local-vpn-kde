@@ -38,7 +38,7 @@ Native без Docker или отдельный Docker-шлюз.
 | **Система** | Arch Linux / CachyOS, x86_64 | Ubuntu 24.04+, Debian 13+, Fedora, Arch / CachyOS, x86-64 |
 | **Запуск шлюза** | Системная служба, без Docker | Контейнер Docker |
 | **Способ установки** | Готовый локальный bundle | Сборка из репозитория |
-| **Запуск интерфейса** | `local-vpn-kde` | `./run.sh` |
+| **Запуск интерфейса** | `kvpn` (старое имя `local-vpn-kde` удаляется в 0.5.0) | `./run.sh` |
 
 Оба варианта рассчитаны на Linux с KDE и NetworkManager. Для установки нужны интернет и права администратора.
 
@@ -58,7 +58,7 @@ sudo bash ./install-native.sh
 Запускайте интерфейс **без sudo**:
 
 ```bash
-local-vpn-kde
+kvpn
 ```
 
 > Native bundle пока собирается локально; публичная загрузка готового релиза здесь не предполагается. Состав bundle и команды сборки: [native-установщик](portable-installer.md).

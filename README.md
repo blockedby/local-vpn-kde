@@ -39,8 +39,10 @@ VPN для Linux и KDE · NetworkManager · Native и Docker
 ```bash
 sha256sum -c vpnkit-portable.sha256
 sudo bash ./install-native.sh
-local-vpn-kde
+kvpn
 ```
+
+Команда `local-vpn-kde` пока работает как старое имя и будет удалена в 0.5.0.
 
 Один запуск установщика с sudo; интерфейс запускается обычным пользователем. Go, Bun и Docker на этом компьютере не нужны. Установка не подключает VPN.
 

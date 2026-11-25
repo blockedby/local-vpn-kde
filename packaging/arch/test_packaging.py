@@ -95,6 +95,7 @@ class PackagingTests(unittest.TestCase):
         policy = (HERE / "org.local-vpn-kde.configure.policy").read_text()
         self.assertIn('<action id="org.local-vpn-kde.update">', policy)
         self.assertIn(">native-update-install<", policy)
+        self.assertIn('ln -s local-vpn-kde "$pkgdir/usr/bin/kvpn"', template)
         self.assertIn("'sing-box>=1.13'", template)
         self.assertNotIn("'sing-box<1.15'", template)
         self.assertNotIn("/usr/bin/sing-box", template)

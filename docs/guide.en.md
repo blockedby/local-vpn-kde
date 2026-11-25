@@ -38,7 +38,7 @@ Choose your runtime:
 | **System** | Arch Linux / CachyOS, x86_64 | Ubuntu 24.04+, Debian 13+, Fedora, Arch / CachyOS, x86-64 |
 | **Gateway** | System service, no Docker | Docker container |
 | **Installation** | Prebuilt local bundle | Build from the repository |
-| **Launch** | `local-vpn-kde` | `./run.sh` |
+| **Launch** | `kvpn` (the old `local-vpn-kde` name goes away in 0.5.0) | `./run.sh` |
 
 Both options target Linux with KDE and NetworkManager. Installation requires internet access and administrator privileges.
 
@@ -58,7 +58,7 @@ The installer adds missing system dependencies, installs the application and set
 Launch the interface **without sudo**:
 
 ```bash
-local-vpn-kde
+kvpn
 ```
 
 > Native bundles are currently built locally; these instructions do not assume a published release download. See [native installer](portable-installer.md) for bundle contents and build commands.
