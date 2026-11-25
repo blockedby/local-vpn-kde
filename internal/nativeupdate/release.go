@@ -98,12 +98,14 @@ func NewClient(userAgent string) *Client {
 	}}, APIBase: DefaultAPIBase, DownloadBase: DefaultDownloadBase, UserAgent: userAgent}
 }
 
-func (c *Client) get(ctx context.Context, address string) (*http.Response, error) {
+func (c *Client) get(ctx context.Context, address string, api bool) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
+	if api {
+		req.Header.Set("Accept", "application/vnd.github+json")
+	}
 	req.Header.Set("User-Agent", c.UserAgent)
 	client := c.HTTP
 	if client == nil {
@@ -144,7 +146,7 @@ func (c *Client) latest(ctx context.Context) (Release, error) {
 	if base == "" {
 		base = DefaultAPIBase
 	}
-	resp, err := c.get(ctx, strings.TrimRight(base, "/")+"/repos/"+Repository+"/releases/latest")
+	resp, err := c.get(ctx, strings.TrimRight(base, "/")+"/repos/"+Repository+"/releases/latest", true)
 	if err != nil {
 		return Release{}, err
 	}
@@ -198,7 +200,7 @@ func (c *Client) assetResponse(ctx context.Context, r Release, name string) (*ht
 		base = DefaultDownloadBase
 	}
 	address := strings.TrimRight(base, "/") + "/" + Repository + "/releases/download/" + url.PathEscape(r.Tag) + "/" + url.PathEscape(name)
-	return c.get(ctx, address)
+	return c.get(ctx, address, false)
 }
 
 var checksumLine = regexp.MustCompile(`^([0-9a-fA-F]{64}) (?: |\*)(.+)$`)
