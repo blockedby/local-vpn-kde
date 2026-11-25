@@ -34,7 +34,7 @@ suffix = uuid.uuid4().hex[:12]
 backup_name = "vpnkit-bootstrap-backup-"+suffix
 tampered_name = "vpnkit-bootstrap-tampered-"+suffix
 foreign_name = "vpnkit-bootstrap-foreign-"+suffix
-proc = subprocess.Popen(["/usr/bin/local-vpn-kde", "bridge"], stdin=subprocess.PIPE,
+proc = subprocess.Popen(["/usr/bin/kvpn", "bridge"], stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
 replies = queue.Queue()
 threading.Thread(target=lambda: [replies.put(json.loads(line)) for line in proc.stdout], daemon=True).start()

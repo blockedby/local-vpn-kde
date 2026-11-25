@@ -23,7 +23,7 @@ LABEL = "Lab rename check"
 
 class Bridge:
     def __init__(self):
-        self.proc = subprocess.Popen(["/usr/bin/local-vpn-kde", "bridge"], stdin=subprocess.PIPE,
+        self.proc = subprocess.Popen(["/usr/bin/kvpn", "bridge"], stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
         self.next = 0
 

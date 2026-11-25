@@ -119,7 +119,7 @@ with tempfile.TemporaryDirectory(prefix="native-cache-https-") as temporary:
         assert select.select([server.stdout], [], [], 30)[0], "HTTPS fixture startup timed out"
         port = int(server.stdout.readline().strip())
         threading.Thread(target=lambda: [requests.append(line.strip()) for line in server.stdout], daemon=True).start()
-        proc = subprocess.Popen(["/usr/bin/local-vpn-kde", "bridge"], stdin=subprocess.PIPE,
+        proc = subprocess.Popen(["/usr/bin/kvpn", "bridge"], stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
         threading.Thread(target=lambda: [replies.put(json.loads(line)) for line in proc.stdout], daemon=True).start()
         initial = run("profiles/list")["profiles"]

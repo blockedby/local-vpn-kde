@@ -47,7 +47,7 @@ def wait_journal(since, needle, timeout=90):
 
 class Bridge:
     def __init__(self):
-        self.proc = subprocess.Popen(["/usr/bin/local-vpn-kde", "bridge"], stdin=subprocess.PIPE,
+        self.proc = subprocess.Popen(["/usr/bin/kvpn", "bridge"], stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
         self.replies = queue.Queue()
         threading.Thread(target=lambda: [self.replies.put(json.loads(line)) for line in self.proc.stdout],

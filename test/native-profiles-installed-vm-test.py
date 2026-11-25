@@ -32,7 +32,7 @@ paths = [
 ]
 before = [digest(path) for path in paths]
 process = subprocess.Popen(
-    ["/usr/bin/local-vpn-kde", "bridge"],
+    ["/usr/bin/kvpn", "bridge"],
     stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,
     stderr=subprocess.DEVNULL,
@@ -87,7 +87,7 @@ try:
         assert len(matching) == 1, "catalog source boundary lost"
         # A second installed bridge proves persistence across UI sessions.
         persisted = subprocess.run(
-            ["/usr/bin/local-vpn-kde", "bridge"],
+            ["/usr/bin/kvpn", "bridge"],
             input=json.dumps({"id": "persisted", "action": "profiles/list"}) + "\n",
             text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30, check=True,
         )

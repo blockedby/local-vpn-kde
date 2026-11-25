@@ -16,7 +16,6 @@ import { EditorView } from "./editor-view";
 import { AppState, isOverlay } from "./app-state";
 export { cell } from "./formatting";
 
-// 0.5.0 removes /usr/bin/local-vpn-kde; relaunch through the name that stays.
 const RELAUNCH_COMMAND = "/usr/bin/kvpn";
 
 export class App extends AppState {

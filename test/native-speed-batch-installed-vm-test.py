@@ -25,7 +25,7 @@ private = pathlib.Path.home() / ".config/vpn-lab/speed-batch-validation"
 private.mkdir(parents=True, exist_ok=True, mode=0o700)
 baseline_path = private / "baseline.json"
 target = os.environ.get("VPNKIT_NATIVE_LAB_HTTPS_TARGET", "https://www.gstatic.com/generate_204")
-proc = subprocess.Popen(["/usr/bin/local-vpn-kde", "bridge"], stdin=subprocess.PIPE,
+proc = subprocess.Popen(["/usr/bin/kvpn", "bridge"], stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
 replies = queue.Queue()
 threading.Thread(target=lambda: [replies.put(json.loads(line)) for line in proc.stdout], daemon=True).start()

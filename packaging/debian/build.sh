@@ -29,8 +29,7 @@ if readelf -d "$stage/usr/libexec/local-vpn-kde/sing-box" | sed -n 's/.*Shared l
   exit 1
 fi
 "$stage/usr/libexec/local-vpn-kde/sing-box" version >/dev/null
-install -Dm755 packaging/arch/local-vpn-kde "$stage/usr/bin/local-vpn-kde"
-ln -s local-vpn-kde "$stage/usr/bin/kvpn"
+install -Dm755 packaging/arch/local-vpn-kde "$stage/usr/bin/kvpn"
 install -Dm755 scripts/vpnkit/vpnkit-native.sh "$stage/usr/share/local-vpn-kde/scripts/vpnkit/vpnkit-native.sh"
 install -Dm644 packaging/arch/native-netns-resolv.conf "$stage/etc/netns/vpnkit-native/resolv.conf"
 install -Dm644 packaging/arch/local-vpn-kde-native.sysusers "$stage/usr/lib/sysusers.d/local-vpn-kde-native.conf"

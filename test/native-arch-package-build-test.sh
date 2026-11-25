@@ -66,7 +66,7 @@ grep -qx "nameserver 8.8.8.8" /etc/netns/vpnkit-native/resolv.conf
 [[ $(stat -c "%u:%g:%a" /etc/netns/vpnkit-native/resolv.conf) == 0:0:644 ]]
 test ! -e /usr/share/local-vpn-kde/.build
 if runuser -u builder -- env HOME=/home/builder XDG_STATE_HOME=/home/builder/.local/state \
-  /usr/bin/local-vpn-kde ui --status-json > /work/status.json; then
+  /usr/bin/kvpn ui --status-json > /work/status.json; then
   printf "installed_first_launch=passed\n"
 else
   result=$?
@@ -74,7 +74,7 @@ else
     printf "installed_first_launch=failed_missing_private_directories\n"
     runuser -u builder -- bash -c '\''umask 077; mkdir -p /home/builder/.local/state/local-vpn-kde/vibe-vpn'\''
     if runuser -u builder -- env HOME=/home/builder XDG_STATE_HOME=/home/builder/.local/state \
-      /usr/bin/local-vpn-kde ui --status-json > /work/status.json; then
+      /usr/bin/kvpn ui --status-json > /work/status.json; then
       printf "diagnostic_only_manually_created_directories=passed\n"
     fi
   fi
@@ -84,16 +84,16 @@ python -c '\''import json; s=json.load(open("/work/status.json")); assert s["run
 # Installer initialized private state as the desktop user; bridge is idempotent.
 test -d /home/builder/.local/state/local-vpn-kde
 runuser -u builder -- env HOME=/home/builder XDG_STATE_HOME=/home/builder/.local/state \
-  /usr/bin/local-vpn-kde bridge </dev/null
-[[ $(readlink /usr/bin/kvpn) == local-vpn-kde ]]
+  /usr/bin/kvpn bridge </dev/null
+# 0.5.0 dropped the old command name.
+test ! -e /usr/bin/local-vpn-kde
+test ! -L /usr/bin/kvpn
 help=$(runuser -u builder -- kvpn --help)
 grep -Fq "Usage: kvpn " <<< "$help"
 help=$(runuser -u builder -- kvpn update --help)
 grep -Fq "Usage: kvpn update [--check]" <<< "$help"
 if check=$(runuser -u builder -- kvpn update --check 2>&1); then exit 1; fi
 grep -Fq "this is a development build" <<< "$check"
-runuser -u builder -- env HOME=/home/builder XDG_STATE_HOME=/home/builder/.local/state \
-  /usr/bin/kvpn bridge </dev/null
 [[ $(stat -c %a /home/builder/.local/state/local-vpn-kde) == 700 ]]
 [[ $(stat -c %a /home/builder/.local/state/local-vpn-kde/vibe-vpn) == 700 ]]
 VPNKIT_NATIVE_PACKAGE_LAB=1 /work/profile-fixture
@@ -106,14 +106,14 @@ test ! -e /var/lib/pacman/db.lck
 install -d -m700 /var/lib/local-vpn-kde-install
 (umask 077; printf "native-setup-incomplete-v1\n" > /var/lib/local-vpn-kde-install/setup-incomplete)
 (umask 077; : > /var/lib/pacman/db.lck)
-if /usr/bin/local-vpn-kde native-package --action recover; then
+if /usr/bin/kvpn native-package --action recover; then
   echo "recovery incorrectly accepted an active package lock"; exit 1
 fi
 test -f /var/lib/pacman/db.lck
 test -f /run/local-vpn-kde-package-blocked
 # Only this test-created lock is removed, inside the disposable container.
 rm /var/lib/pacman/db.lck
-/usr/bin/local-vpn-kde native-package --action recover
+/usr/bin/kvpn native-package --action recover
 test ! -e /run/local-vpn-kde-package-blocked
 test -f /var/lib/local-vpn-kde-install/setup-incomplete
 printf "arch_package_abort_recovery=passed\n"
@@ -122,8 +122,7 @@ printf "arch_package_abort_recovery=passed\n"
 pacman -U --noconfirm "${packages[0]}"
 printf retained > /etc/local-vpn-kde/package-lab-retain
 pacman -R --noconfirm local-vpn-kde-native
-test ! -e /usr/bin/local-vpn-kde
-test ! -L /usr/bin/kvpn
+test ! -e /usr/bin/kvpn
 test ! -e /usr/libexec/local-vpn-kde/local-vpn-kde.bin
 test ! -e /etc/netns/vpnkit-native/resolv.conf
 test "$(</etc/local-vpn-kde/package-lab-retain)" == retained

@@ -128,7 +128,7 @@ A missing application-owned NetworkManager profile is created automatically. For
 
 ## Updates
 
-**Native (Arch or Debian package):** self-update is available from 0.4.4. If you still have 0.4.4, use `local-vpn-kde` in place of `kvpn` for your first update. The old command works throughout 0.4.x and will be removed in 0.5.0.
+**Native (Arch or Debian package):** self-update is available from 0.4.4. Since 0.5.0 the command is only `kvpn`. On 0.4.4, which predates `kvpn`, update with `local-vpn-kde update`.
 
 ```bash
 kvpn update          # asks before installing
