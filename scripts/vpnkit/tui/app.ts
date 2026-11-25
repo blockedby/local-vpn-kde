@@ -1,6 +1,6 @@
 import { BoxRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
 import type { Backend } from "./bridge";
-import { palette as p } from "./model";
+import { MIN_COLS, MIN_ROWS, palette as p } from "./model";
 import { observeRendererClose } from "./renderer-lifecycle";
 import { ServerTableView } from "./server-table-view";
 import { DetailsView, DETAILS_THRESHOLD, DETAILS_WIDTH } from "./details-view";
@@ -41,7 +41,7 @@ export class App extends AppState {
     this.headerView = new HeaderView(renderer, this.root);
     this.tabView = new TabView(renderer, this.root, tab => { if (!isOverlay(this.screen) && !this.helpOpen && !this.paletteOpen && !this.filterEditing) this.open(tab); });
     this.content = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, minHeight: 0, overflow: "hidden" }); this.root.add(this.content);
-    this.tooSmall = new TextRenderable(renderer, { content: "Увеличьте терминал минимум до 60 × 16.", height: 1, fg: p.amber, visible: false }); this.content.add(this.tooSmall);
+    this.tooSmall = new TextRenderable(renderer, { content: `Увеличьте окно до ${MIN_COLS} × ${MIN_ROWS}.`, height: 1, fg: p.amber, visible: false }); this.content.add(this.tooSmall);
     this.homeView = new HomeView(renderer, this.content, index => { if (this.screen !== "home" || this.helpOpen || this.paletteOpen) return; this.homeIndex = index; this.activateHome(); });
     this.summaryView = new SummaryView(renderer, this.content);
     this.menuView = new MenuView(renderer, this.content, index => {
@@ -74,17 +74,17 @@ export class App extends AppState {
     const tableVisible = (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0;
     const wide = this.renderer.width >= DETAILS_THRESHOLD && tableVisible;
     this.detailsView.update(this, wide);
-    this.tableView.update({ width: this.renderer.terminalWidth - 2 - (wide ? DETAILS_WIDTH : 0), visible: this.renderer.width >= 60 && this.renderer.height >= 16 && (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0, servers: this.visibleServers(), rowCount: this.rowCount(), serverID: this.serverID, batch: this.batch, frame: this.frame, liveSpeeds: this.liveSpeeds, sort: this.sort, sortDescending: this.sortDescending, filter: this.filter, filterEditing: this.filterEditing, shown: this.filteredServers().length, total: this.servers.length });
+    this.tableView.update({ width: this.renderer.terminalWidth - 2 - (wide ? DETAILS_WIDTH : 0), visible: this.renderer.width >= MIN_COLS && this.renderer.height >= MIN_ROWS && (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0, servers: this.visibleServers(), rowCount: this.rowCount(), serverID: this.serverID, batch: this.batch, frame: this.frame, liveSpeeds: this.liveSpeeds, sort: this.sort, sortDescending: this.sortDescending, filter: this.filter, filterEditing: this.filterEditing, shown: this.filteredServers().length, total: this.servers.length });
     this.headerView.update(this, this.demo);
     if (this.screen === "details" || this.serverMenu) this.overlayView.update(this);
   }
-  override paintProgress() { super.paintProgress(); this.tabView.update(this); this.headerView.update(this, this.demo); this.homeView.update(this, this.screen === "home" && this.renderer.width >= 60 && this.renderer.height >= 16); if (this.screen === "tasks") this.overlayView.update(this); }
+  override paintProgress() { super.paintProgress(); this.tabView.update(this); this.headerView.update(this, this.demo); this.homeView.update(this, this.screen === "home" && this.renderer.width >= MIN_COLS && this.renderer.height >= MIN_ROWS); if (this.screen === "tasks") this.overlayView.update(this); }
   override paintPalette() { super.paintPalette(); this.overlayView.updatePalette(this); }
   override paint() {
     if (this.disposed) return;
     super.paint();
     this.headerView.update(this, this.demo); this.tabView.update(this);
-    const small = this.renderer.width < 60 || this.renderer.height < 16;
+    const small = this.renderer.width < MIN_COLS || this.renderer.height < MIN_ROWS;
     this.tooSmall.visible = small;
     const overlayScreen = this.screen;
     const modal = isOverlay(overlayScreen);

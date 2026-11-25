@@ -585,8 +585,14 @@ export class AppState {
     // Diagnostics immediately displays the cached evidence. Refresh is explicit.
   }
 
+  /** Home tile columns: three when wide, one when narrow but tall enough to stack six tiles. */
+  homeColumns() {
+    const { width, height } = this.viewport();
+    return width >= 90 ? 3 : width < 56 && height >= 28 ? 1 : 2;
+  }
+
   moveHome(key: string) {
-    const columns = this.viewport().width >= 90 ? 3 : 2;
+    const columns = this.homeColumns();
     const row = Math.floor(this.homeIndex / columns), col = this.homeIndex % columns;
     if (key === "home") this.homeIndex = 0;
     else if (key === "end") this.homeIndex = 5;

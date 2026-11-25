@@ -8,23 +8,31 @@ export class FooterView {
     this.footer = new TextRenderable(renderer, { content: "", fg: p.muted, height: 1, flexShrink: 0 }); root.add(this.footer);
   }
   update(state: AppState, editor: boolean) {
-    if (state.helpOpen) { this.footer.content = "↑↓ прокрутка · Esc / ? закрыть"; return; }
-    if (state.screen === "server-rename") { this.footer.content = "Enter сохранить · Esc отмена"; return; }
-    if (state.filterEditing) { this.footer.content = "Enter применить · Esc очистить"; return; }
-    if (state.serverMenu) { this.footer.content = "↑↓ действие · Enter выполнить · Esc закрыть"; return; }
+    // Drop whole hints from the end rather than letting the terminal cut one mid-word.
+    const hints = this.hints(state, editor).split(" · ");
+    while (hints.length > 1 && Bun.stringWidth(hints.join(" · ")) > this.renderer.terminalWidth - 2) hints.pop();
+    this.footer.content = hints.join(" · ");
+  }
+  private hints(state: AppState, editor: boolean): string {
+    if (state.helpOpen) { return "↑↓ прокрутка · Esc / ? закрыть"; }
+    if (state.screen === "server-rename") { return "Enter сохранить · Esc отмена"; }
+    if (state.filterEditing) { return "Enter применить · Esc очистить"; }
+    if (state.serverMenu) { return "↑↓ действие · Enter выполнить · Esc закрыть"; }
     if (state.screen === "servers" && state.ready() && !state.nativePreviewOnly() && state.servers.length) {
       const base = "↑↓ сервер · Enter действия · / фильтр · Esc главная";
       let result = base;
       const actions = state.actions();
       for (const [id, hint] of [["global:cancel", "k отменить"], ["servers:p", "p ping"], ["servers:t", "t скорость"], ["servers:sort", "o сортировка"], ["global:help", "? помощь"]] as const)
         if (actions.some(action => action.id === id && action.available) && Bun.stringWidth(`${result} · ${hint}`) <= this.renderer.terminalWidth - 2) result += ` · ${hint}`;
-      this.footer.content = result; return;
+      return result;
     }
-    if (state.screen === "tasks") { this.footer.content = `↑↓ выбор${state.items()[state.selected]?.available ? " · Enter отменить" : ""} · Esc назад · ? помощь`; return; }
+    if (state.screen === "tasks") { return `↑↓ выбор${state.items()[state.selected]?.available ? " · Enter отменить" : ""} · Esc назад · ? помощь`; }
     const actions = state.groupedActions().flatMap(group => group.actions).filter(action => action.available);
     if (state.screen === "home") {
       const has = (id: string) => state.groupedActions().flatMap(group => group.actions).some(action => action.id === id);
-      this.footer.content = [has("tile:left") && "←↑↓→ выбор", has("tile:open") && "Enter открыть", has("global:help") && "? все клавиши", has("global:quit") && "q выход"].filter(Boolean).join(" · "); return;
+      const hints = [has("tile:left") && "←↑↓→ выбор", has("tile:open") && "Enter открыть", has("global:help") && "? все клавиши", has("global:quit") && "q выход"].filter(Boolean);
+      while (hints.length > 1 && Bun.stringWidth(hints.join(" · ")) > this.renderer.terminalWidth - 2) hints.pop();
+      return hints.join(" · ");
     }
     if (isOverlay(state.screen) && !editor) {
       const choices = actions.filter(action => !["global:help", "global:back", "global:quit-control", "menu:previous", "menu:next"].includes(action.id));
@@ -32,7 +40,7 @@ export class FooterView {
       hints.push("Esc назад");
       if (actions.some(action => action.id === "global:help")) hints.push("? помощь");
       while (hints.length > 1 && Bun.stringWidth(hints.join(" · ")) > this.renderer.terminalWidth - 2) hints.shift();
-      this.footer.content = hints.join(" · "); return;
+      return hints.join(" · ");
     }
     const priorities = editor ? ["editor:submit", "global:back", "global:quit-control"] : state.screen === "servers"
       ? ["global:recovery", "servers:select", "servers:filter", "global:cancel", "servers:details", "servers:p", "servers:t", "servers:r", "home:connect", "home:start-service", "home:x", "servers:sort"]
@@ -43,6 +51,6 @@ export class FooterView {
     const suffix = help ? "? помощь" : "";
     const width = this.renderer.terminalWidth - 2;
     while (hints.length && Bun.stringWidth([...hints, suffix].filter(Boolean).join(" · ")) > width) hints.pop();
-    this.footer.content = [...hints, suffix].filter(Boolean).join(" · ");
+    return [...hints, suffix].filter(Boolean).join(" · ");
   }
 }

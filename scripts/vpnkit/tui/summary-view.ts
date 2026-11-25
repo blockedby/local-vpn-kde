@@ -21,7 +21,7 @@ function wrapDialogLine(input: string, width: number): string[] {
 
 export class SummaryView {
   private summary: TextRenderable;
-  constructor(renderer: CliRenderer, parent: BoxRenderable) {
+  constructor(private renderer: CliRenderer, parent: BoxRenderable) {
     this.summary = new TextRenderable(renderer, { content: "", fg: p.muted, height: 2, flexShrink: 0 });
     this.summary.minHeight = 0;
     parent.add(this.summary);
@@ -95,7 +95,7 @@ export class SummaryView {
             ? "Подписка · загрузка сохранённого адреса…"
             : "Подписка";
     }
-    if(state.screen==="profiles") { this.summary.height = 1; this.summary.content="Выбор профиля не меняет активное VPN-подключение."; }
+    if(state.screen==="profiles") { const lines = wrapDialogLine("Выбор профиля не меняет активное VPN-подключение.", Math.max(10, this.renderer.terminalWidth - 2)); this.summary.height = lines.length; this.summary.content = lines.join("\n"); }
     if (state.screen === "server-rename") { this.summary.content = "Переименовать сервер"; }
     if(state.screen==="profile-name") this.summary.content="Новый профиль · имя\nНапример: Моя VPS или Основная подписка";
     if(state.screen==="profile-source") this.summary.content=`${state.profileName} · ссылка\nHTTPS-подписка, vless://, hysteria2:// или hy2://`;

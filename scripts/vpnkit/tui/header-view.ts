@@ -19,7 +19,7 @@ export class HeaderView {
     const runtime = state.nativePreviewOnly() ? "NATIVE PREVIEW" : state.status?.runtime === "native" ? "NATIVE" : state.status ? "Docker" : "?";
     const applying = [...state.tasks.values()].find(task => ["start", "disconnect", "toggle-mode", "servers/select"].includes(task.action));
     const title = applying ? state.actionLabel(applying.action) + "…" : status.title === "VPN подключён" ? "подключён" : status.title === "VPN отключён" ? "отключён" : status.title;
-    const core = `◈ VPNKIT · ${runtime}${demo ? " · ДЕМО" : ""} ${symbol} ${title}${stale}`;
+    const core = `◈ ${width >= 50 ? "VPNKIT · " : ""}${runtime}${demo ? " · ДЕМО" : ""} ${symbol} ${title}${stale}`;
     const live = server && state.liveSpeeds.get(server.server_id);
     const ping = server?.latency_ms === undefined ? undefined : `${server.latency_ms} мс`;
     const speed = live !== undefined ? `~${live.toFixed(1)} Мбит/с` : server?.download_mbps === undefined ? undefined : `${server.download_mbps.toFixed(1)} Мбит/с`;
@@ -33,7 +33,10 @@ export class HeaderView {
     const remaining = width - Bun.stringWidth(core) - 3 - Bun.stringWidth(modePart) - 3;
     const includeLive = !!activeSpeed && remaining >= Bun.stringWidth(activeSpeed) + 4;
     const available = Math.max(1, remaining - (includeLive ? Bun.stringWidth(activeSpeed!) + 3 : 0));
-    const parts = [cell(name, available).trimEnd(), modePart, ...(includeLive ? [activeSpeed!] : [])];
+    // A name cut to a few letters says nothing; give its room to the mode instead.
+    const nameFits = available >= Math.min(12, Bun.stringWidth(name));
+    const modeFits = Bun.stringWidth(`${core} · ${modePart}`) <= width;
+    const parts = [...(nameFits ? [cell(name, available).trimEnd()] : []), modeFits ? modePart : mode, ...(includeLive ? [activeSpeed!] : [])];
     const at = server && state.measurementTimes.get(server.server_id);
     const age = at ? `${Math.floor((Date.now() - at) / 60000)} мин` : undefined;
     for (const part of [ping, activeSpeed ? undefined : speed]) if (part) parts.push(part);

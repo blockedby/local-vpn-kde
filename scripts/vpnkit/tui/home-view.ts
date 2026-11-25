@@ -10,7 +10,7 @@ export class HomeView {
   private tiles: { box: BoxRenderable; title: TextRenderable; lines: TextRenderable[] }[] = [];
   constructor(private renderer: CliRenderer, parent: BoxRenderable, activate: (index: number) => void) {
     this.root = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, minHeight: 0 }); parent.add(this.root);
-    for (let i = 0; i < 3; i++) { const row = new BoxRenderable(renderer, { flexDirection: "row", flexShrink: 0 }); this.root.add(row); this.rows.push(row); }
+    for (let i = 0; i < 6; i++) { const row = new BoxRenderable(renderer, { flexDirection: "row", flexShrink: 0 }); this.root.add(row); this.rows.push(row); }
     for (let i = 0; i < 6; i++) {
       const box = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, flexBasis: 0, minWidth: 0, border: true, borderStyle: "rounded", onMouseDown: e => { if (e.button === 0) activate(i); } });
       const title = new TextRenderable(renderer, { height: 1, fg: p.text, attributes: TextAttributes.BOLD }); box.add(title);
@@ -21,7 +21,7 @@ export class HomeView {
   update(state: AppState, visible: boolean) {
     this.root.visible = visible;
     if (!visible) return;
-    const cols = this.renderer.width >= 90 ? 3 : 2, compact = this.renderer.height < 20;
+    const cols = state.homeColumns(), compact = this.renderer.height < (cols === 1 ? 35 : 20);
     const selected = state.catalogLoaded && !state.catalogStale ? state.servers.find(s => s.selected) : undefined;
     const best = state.catalogLoaded && !state.catalogStale ? state.servers.filter(s => s.ping_status === "ready" && s.latency_ms !== undefined && Number.isFinite(s.latency_ms)).sort((a, b) => a.latency_ms! - b.latency_ms!)[0] : undefined;
     const profile = state.profiles?.items.find(item => item.id === state.profiles?.active);
