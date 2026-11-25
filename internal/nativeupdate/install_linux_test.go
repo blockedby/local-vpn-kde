@@ -33,6 +33,7 @@ type fixture struct {
 	installCtx context.Context
 	installErr error
 	onInstall  func()
+	onDownload func()
 	phases     []string
 	installer  *Installer
 }
@@ -80,6 +81,9 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 	case "/" + Repository + "/releases/download/v" + f.latest + "/SHA256SUMS":
 		fmt.Fprintf(w, "%s  %s\n", f.checksum, f.asset())
 	case "/" + Repository + "/releases/download/v" + f.latest + "/" + f.asset():
+		if f.onDownload != nil {
+			f.onDownload()
+		}
 		fmt.Fprint(w, fixturePackage)
 	default:
 		http.NotFound(w, r)
@@ -213,6 +217,68 @@ func TestInstallDpkgGateRefusesRemovals(t *testing.T) {
 	expectError(t, err, "remove sing-box")
 	if len(f.installs) != 0 {
 		t.Fatal("package was installed")
+	}
+}
+
+func TestInstallDpkgGateRefusesOtherConfiguration(t *testing.T) {
+	f := newFixture(t, "dpkg")
+	f.gate += "Conf half-configured-package (1.0 Debian:stable)\n"
+	_, err := f.runInstall()
+	expectError(t, err, "configure half-configured-package")
+	if len(f.installs) != 0 {
+		t.Fatal("package was installed")
+	}
+}
+
+func TestInstallRechecksBeforeCommit(t *testing.T) {
+	t.Run("administrator upgraded during the download", func(t *testing.T) {
+		f := newFixture(t, "pacman")
+		f.onDownload = func() { f.installed = "0.5.0" }
+		_, err := f.runInstall()
+		expectError(t, err, "changed to 0.5.0-1 during the download")
+		if len(f.installs) != 0 {
+			t.Fatal("package was installed over a newer version")
+		}
+	})
+	t.Run("earlier upgrade left the inhibitor", func(t *testing.T) {
+		f := newFixture(t, "pacman")
+		if err := os.WriteFile(f.installer.Inhibitor, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := f.runInstall()
+		expectError(t, err, "blocked by an earlier unfinished upgrade")
+		if len(f.installs) != 0 {
+			t.Fatal("package was installed while blocked")
+		}
+		assertWorkEmpty(t, f)
+	})
+}
+
+func TestInstallCommandIsDetachedFromTheTerminal(t *testing.T) {
+	for _, manager := range []string{"pacman", "dpkg"} {
+		command, err := installCommand(manager, "/var/cache/local-vpn-kde/update/x/pkg")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if command.SysProcAttr == nil || !command.SysProcAttr.Setsid {
+			t.Fatalf("%s install shares the terminal session", manager)
+		}
+		if command.Cancel != nil || command.WaitDelay != 0 {
+			t.Fatalf("%s install can be killed by a context", manager)
+		}
+	}
+	if _, err := installCommand("rpm", "x"); err == nil {
+		t.Fatal("unsupported manager accepted")
+	}
+}
+
+func TestExecRunnerBoundsOutput(t *testing.T) {
+	if _, err := ExecRunner(context.Background(), "/usr/bin/head", "-c", "70000", "/dev/zero"); err == nil {
+		t.Fatal("oversized command output accepted")
+	}
+	out, err := ExecRunner(context.Background(), "/usr/bin/head", "-c", "100", "/dev/zero")
+	if err != nil || len(out) != 100 {
+		t.Fatalf("%d bytes, %v", len(out), err)
 	}
 }
 

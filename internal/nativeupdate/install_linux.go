@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -143,7 +142,26 @@ func (in *Installer) Install(ctx context.Context, version string, progress func(
 	if err := in.verifyMetadata(ctx, installed.Manager, path, want); err != nil {
 		return Installation{}, err
 	}
+	// The download can take minutes. Re-check the installed version and the
+	// planned transaction immediately before committing, so an administrator's
+	// upgrade in the meantime is neither downgraded nor widened. The package
+	// manager's own database lock excludes a transaction during the commit.
+	current, err := DetectInstallation(ctx, in.Run, in.Exists)
+	if err != nil {
+		return Installation{}, err
+	}
+	if current.Manager != installed.Manager || !current.Older(want.Major, want.Minor, want.Patch) {
+		return Installation{}, fmt.Errorf("the installed package changed to %s during the download; check again", current.Raw)
+	}
 	if err := in.verifyOnlyThisPackage(ctx, installed.Manager, path); err != nil {
+		return Installation{}, err
+	}
+	// A marker left by an earlier failed upgrade needs the documented recovery,
+	// not another upgrade whose hooks might clear it.
+	if _, err := os.Lstat(in.Inhibitor); !errors.Is(err, os.ErrNotExist) {
+		return Installation{}, errors.New("package management is blocked by an earlier unfinished upgrade; see docs/native-hot-upgrade.md (recovery)")
+	}
+	if err := ctx.Err(); err != nil {
 		return Installation{}, err
 	}
 
@@ -250,7 +268,13 @@ func (in *Installer) verifyOnlyThisPackage(ctx context.Context, manager, path st
 			switch parts[0] {
 			case "Inst":
 				changed = append(changed, parts[1])
-			case "Remv":
+			case "Conf":
+				// Configuring this package is expected; configuring any other
+				// (for example one left unconfigured) would run its scripts.
+				if parts[1] != PackageName {
+					changed = append(changed, "configure "+parts[1])
+				}
+			case "Remv", "Purg":
 				changed = append(changed, "remove "+parts[1])
 			}
 		}
@@ -279,28 +303,39 @@ func (t *tailBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func realInstall(ctx context.Context, manager, path string) error {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
-	var command *exec.Cmd
-	env := []string{"LC_ALL=C", "PATH=/usr/bin:/bin"}
-	switch manager {
-	case "pacman":
-		command = exec.CommandContext(ctx, "/usr/bin/pacman", "-U", "--noconfirm", path)
-	case "dpkg":
-		command = exec.CommandContext(ctx, "/usr/bin/apt-get", "install", "-y", "--no-remove", path)
-		env = append(env, "DEBIAN_FRONTEND=noninteractive")
-	default:
-		return fmt.Errorf("unsupported package manager %q", manager)
+// realInstall commits the transaction. It is never killed: a deadline or a
+// cancelled caller must not interrupt a package manager halfway through. The
+// package manager runs in its own session, so a terminal Ctrl+C or hang-up
+// does not reach it either.
+func realInstall(_ context.Context, manager, path string) error {
+	command, err := installCommand(manager, path)
+	if err != nil {
+		return err
 	}
 	var tail tailBuffer
-	command.Env = env
 	command.Stdout = &tail
 	command.Stderr = &tail
 	if err := command.Run(); err != nil {
 		return fmt.Errorf("%w: %s", err, bytes.TrimSpace(tail.data))
 	}
 	return nil
+}
+
+func installCommand(manager, path string) (*exec.Cmd, error) {
+	var command *exec.Cmd
+	env := []string{"LC_ALL=C", "PATH=/usr/bin:/bin"}
+	switch manager {
+	case "pacman":
+		command = exec.Command("/usr/bin/pacman", "-U", "--noconfirm", path)
+	case "dpkg":
+		command = exec.Command("/usr/bin/apt-get", "install", "-y", "--no-remove", path)
+		env = append(env, "DEBIAN_FRONTEND=noninteractive")
+	default:
+		return nil, fmt.Errorf("unsupported package manager %q", manager)
+	}
+	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	command.Env = env
+	return command, nil
 }
 
 type installRunner interface {

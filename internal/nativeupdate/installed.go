@@ -39,14 +39,18 @@ func ExecRunner(ctx context.Context, name string, args ...string) ([]byte, error
 	return out.Bytes(), nil
 }
 
-type limitedOutput struct{ bytes.Buffer }
+// limitedOutput keeps its buffer in a named field so os/exec cannot bypass
+// Write through bytes.Buffer.ReadFrom.
+type limitedOutput struct{ buf bytes.Buffer }
 
 func (o *limitedOutput) Write(p []byte) (int, error) {
-	if len(p) > maxCommandOutput-o.Len() {
+	if len(p) > maxCommandOutput-o.buf.Len() {
 		return 0, errors.New("command output exceeds 64 KiB")
 	}
-	return o.Buffer.Write(p)
+	return o.buf.Write(p)
 }
+
+func (o *limitedOutput) Bytes() []byte { return o.buf.Bytes() }
 
 // Installation describes the native package that owns the installed executable.
 type Installation struct {

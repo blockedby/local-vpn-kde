@@ -76,6 +76,30 @@ type Client struct {
 	APIBase      string
 	DownloadBase string
 	UserAgent    string
+	// IdleTimeout aborts a response whose body stops arriving; 0 means 60s.
+	IdleTimeout time.Duration
+}
+
+// idleBody cancels its request when no data arrives for the idle timeout, so
+// a stalled server cannot hold the update lock forever.
+type idleBody struct {
+	io.ReadCloser
+	timer  *time.Timer
+	idle   time.Duration
+	cancel context.CancelFunc
+}
+
+func (b *idleBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	b.timer.Reset(b.idle)
+	return n, err
+}
+
+func (b *idleBody) Close() error {
+	b.timer.Stop()
+	err := b.ReadCloser.Close()
+	b.cancel()
+	return err
 }
 
 func NewClient(userAgent string) *Client {
@@ -98,9 +122,17 @@ func NewClient(userAgent string) *Client {
 	}}, APIBase: DefaultAPIBase, DownloadBase: DefaultDownloadBase, UserAgent: userAgent}
 }
 
-func (c *Client) get(ctx context.Context, address string, api bool) (*http.Response, error) {
+func (c *Client) get(parent context.Context, address string, api bool) (*http.Response, error) {
+	idle := c.IdleTimeout
+	if idle <= 0 {
+		idle = 60 * time.Second
+	}
+	ctx, cancel := context.WithCancel(parent)
+	timer := time.AfterFunc(idle, cancel)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
+		timer.Stop()
+		cancel()
 		return nil, err
 	}
 	if api {
@@ -113,8 +145,11 @@ func (c *Client) get(ctx context.Context, address string, api bool) (*http.Respo
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		timer.Stop()
+		cancel()
 		return nil, err
 	}
+	resp.Body = &idleBody{ReadCloser: resp.Body, timer: timer, idle: idle, cancel: cancel}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		return nil, fmt.Errorf("HTTP status %d", resp.StatusCode)

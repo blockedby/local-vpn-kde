@@ -234,3 +234,30 @@ func TestAssetName(t *testing.T) {
 		}
 	}
 }
+
+func TestStalledBodyIsAbandoned(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"tag_name":`))
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+	client := &Client{HTTP: server.Client(), APIBase: server.URL, DownloadBase: server.URL, UserAgent: "test", IdleTimeout: 200 * time.Millisecond}
+	done := make(chan error, 1)
+	go func() { _, err := client.Latest(context.Background()); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("stalled response accepted")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stalled response body held the client")
+	}
+}
