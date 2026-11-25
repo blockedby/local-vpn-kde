@@ -25,4 +25,6 @@ export const names: Partial<Record<Action, string>> = {
   "servers/ping": "Ping",
   "servers/speed": "Тест скорости",
   "servers/availability": "Доступность сайта",
+  "update/check": "Проверяем обновления",
+  "update/install": "Устанавливаем обновление",
 };

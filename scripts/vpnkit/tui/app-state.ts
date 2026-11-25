@@ -38,6 +38,11 @@ const phases: Record<string, string> = {
   "runtime-wait": "Ожидание готовности",
   committing: "Сохранение состояния",
   committed: "Готово",
+  "update-checking": "Проверка выпуска",
+  "update-downloading": "Загрузка",
+  "update-verifying": "Проверка пакета",
+  "update-installing": "Установка",
+  "update-done": "Установлено",
   compensating: "Восстановление состояния",
 };
 const nativeSupportedActions: readonly Action[] = [
@@ -232,7 +237,13 @@ export class AppState {
   renameTarget?: { id: string; original: string };
   selectTarget?: { id: string; name: string };
   confirmationSnapshot?: string;
-  confirmation: "disconnect" | "stop" | "subscription" | "fastest" | "select" = "disconnect";
+  confirmation: "disconnect" | "stop" | "subscription" | "fastest" | "select" | "update" = "disconnect";
+  /** Latest update check or install result; shown in Settings. */
+  updateInfo?: import("./bridge").UpdateInfo;
+  /** Version installed by this session; offers relaunching the interface. */
+  updatedTo?: string;
+  /** Set when the user asks to restart the interface after an update. */
+  relaunchRequested = false;
   fastestCandidate?: { id: string; name: string; speed: number; measuredAt: number };
   pendingSubscription?: string;
   serverID?: string;
@@ -704,6 +715,16 @@ export class AppState {
     this.confirmationSnapshot = this.confirmationContext();
     this.confirmation = action;
     this.open("confirm");
+  }
+  confirmUpdate() {
+    if (!this.updateInfo?.available) return;
+    this.confirmationSnapshot = this.confirmationContext();
+    this.confirmation = "update";
+    this.open("confirm");
+  }
+  relaunch() {
+    this.relaunchRequested = true;
+    void this.close();
   }
   confirmSubscription(value: string) {
     this.pendingSubscription = value;

@@ -16,6 +16,8 @@ import { EditorView } from "./editor-view";
 import { AppState, isOverlay } from "./app-state";
 export { cell } from "./formatting";
 
+const RELAUNCH_COMMAND = "/usr/bin/local-vpn-kde";
+
 export class App extends AppState {
   private root: BoxRenderable;
   private headerView: HeaderView;
@@ -102,5 +104,12 @@ export class App extends AppState {
   }
   override onClosing() { this.editorView.blur(); }
   override onBeforeDispose() { this.renderer.keyInput.off("keypress", this.onKey); this.renderer.off("resize", this.onResize); }
-  override async onDispose() { this.renderer.destroy(); await this.rendererClosed; }
+  override async onDispose() {
+    this.renderer.destroy(); await this.rendererClosed;
+    // After an update, start the newly installed interface in the same terminal.
+    if (this.relaunchRequested) {
+      const child = Bun.spawn([RELAUNCH_COMMAND], { stdio: ["inherit", "inherit", "inherit"] });
+      process.exit(await child.exited);
+    }
+  }
 }

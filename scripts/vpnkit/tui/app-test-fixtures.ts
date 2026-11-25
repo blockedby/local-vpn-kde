@@ -46,6 +46,8 @@ export class FakeBackend implements Backend {
     const r = reply(this.status);
     if (action === "subscription/read")
       r.value = "https://example.invalid/saved";
+    if (action === "update/check") r.update = { installed: "0.4.3", latest: "0.4.4", available: true };
+    if (action === "update/install") r.update = { installed: value ?? "", latest: value ?? "", available: false };
     if (action === "servers/rename") {
       const { id, name } = JSON.parse(value ?? "{}");
       const row = this.rows.find(s => s.server_id === id);

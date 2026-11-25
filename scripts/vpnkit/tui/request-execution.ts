@@ -126,6 +126,8 @@ export async function perform(
       }
       if (reply.ok && ["servers/refresh", "subscription", "profiles/add", "profiles/open", "profiles/remove"].includes(action)) state.catalogRevision++;
       if (reply.ok && reply.autostart) state.autostart = reply.autostart;
+      if (reply.ok && reply.update) state.updateInfo = reply.update;
+      if (reply.ok && action === "update/install" && reply.update) state.updatedTo = reply.update.installed;
       if (action === "autostart/read" || action === "autostart/set") {
         state.serviceState = reply.ok ? reply.autostart_service : undefined;
         if (!reply.ok && action === "autostart/set") state.autostart = undefined;
@@ -164,7 +166,7 @@ export async function perform(
         }
       }
       if (!reply.ok && reply.reason === "cancelled") state.recovery = undefined;
-      else if (!reply.ok && action === "servers/rename") state.recovery = undefined;
+      else if (!reply.ok && (action === "servers/rename" || action.startsWith("update/"))) state.recovery = undefined;
       else if (!reply.ok) state.recovery = { ...recoveryFor(action, reply.reason, state.status?.runtime), action, value,
         homeServerID: state.homeTesting ? state.homeSpeedServer?.id : undefined,
         batchRetry: state.batch ? { kind: state.batch.kind, ids: [...(state.batch.ids ?? [])], target: state.batch.target ?? state.target } : undefined,
@@ -172,7 +174,11 @@ export async function perform(
       if (!reply.ok && !insideBatch) {
         state.noticeIdentity = { action, reason: reply.reason, ok: false };
         const renameFailures: Record<string, string> = { "invalid-name": "Недопустимое имя сервера.", "too-many-names": "Достигнут предел сохранённых имён серверов.", "server-names-unavailable": "Не удалось сохранить имена серверов." };
-        state.notice = action === "servers/rename" && renameFailures[reply.reason] ? renameFailures[reply.reason] : nativeSubscriptionSetup
+        const updateFailures: Record<string, string> = {
+          "update-not-packaged": "Эта установка не из пакета Arch или Debian. Обновите её тем же способом, каким устанавливали.",
+          "update-development-build": "Это сборка для разработки. Установите пакет выпуска вручную.",
+        };
+        state.notice = action.startsWith("update/") ? updateFailures[reply.reason] ?? `${action === "update/check" ? "Не удалось проверить обновления" : "Обновление не установлено"}: ${reply.error ?? reply.reason}` : action === "servers/rename" && renameFailures[reply.reason] ? renameFailures[reply.reason] : nativeSubscriptionSetup
           ? "Не удалось настроить native-пакет. Проверьте подтверждение администратора и повторите."
           : reply.reason === "autostart-unavailable" ? "Не удалось настроить автозапуск. Проверьте пользовательскую службу systemd." : state.recovery?.message ?? failure(reply.reason, reply.code, state.status?.runtime);
         state.noticeAttempt = reply.reason === "native-network-settings-changed" ? "" : [
@@ -217,6 +223,10 @@ export async function perform(
             : "Подписка сохранена. Обновите список серверов.",
           diagnostics: "Состояние компонентов обновлено.",
           "toggle-mode": "Режим изменён.",
+          "update/check": reply.update?.available
+            ? `Доступна версия ${reply.update.latest}. Установить: [u] в настройках.`
+            : `Установлена последняя версия ${reply.update?.installed ?? ""}.`,
+          "update/install": `Обновлено до ${reply.update?.installed ?? ""}, VPN не отключался. Нажмите [R], чтобы перезапустить интерфейс; шлюз перейдёт на новую версию при следующем перезапуске.`,
         };
         state.noticeIdentity = { action, reason: reply.reason, ok: true };
         state.notice = done[action] ?? "Готово.";

@@ -111,6 +111,12 @@ export function menuItems(state: AppState): MenuItem[] {
               else state.notify("Состояние изменилось. Подтвердите настройку заново.", true);
               return;
             }
+            if (state.confirmation === "update") {
+              const latest = state.updateInfo?.available ? state.updateInfo.latest : undefined;
+              state.open(state.overlayBase, false);
+              if (latest) void state.perform("update/install", latest);
+              return;
+            }
             if (state.confirmation === "fastest") {
               const candidate = state.fastestCandidate;
               state.fastestCandidate = undefined;
@@ -185,6 +191,12 @@ export function menuItems(state: AppState): MenuItem[] {
       { key: "m", label: `Режим: ${state.status?.routing_mode === "smart" ? "умный" : state.status?.routing_mode === "strict" ? "строгий" : "неизвестно"}`, run: () => void state.perform("toggle-mode") },
       { key: "c", label: "Профили и источники", run: () => state.open(state.nativeInstalled() && state.status?.subscription === "configured" ? "profiles" : "subscription") },
       { key: "e", label: `Сайт для проверки: ${displayCheckAddress(state.target)}`, run: () => state.open("target") },
+      ...(state.nativeInstalled() ? [{
+        key: "u",
+        label: state.updatedTo ? `Обновлено до ${state.updatedTo}` : state.updateInfo?.available ? `Обновление: ${state.updateInfo.installed} → ${state.updateInfo.latest} · установить` : state.updateInfo ? `Версия ${state.updateInfo.installed} · последняя · проверить снова` : "Проверить обновления",
+        run: () => { if (state.updateInfo?.available && !state.updatedTo) state.confirmUpdate(); else void state.perform("update/check"); },
+      }] : []),
+      ...(state.updatedTo ? [{ key: "R", label: "Перезапустить интерфейс", run: () => state.relaunch() }] : []),
       ...(!state.ready() ? [{ key: "s", label: `Запустить ${state.serviceObject()}`, run: run("backend/start") }] : []),
       ...(["healthy", "unhealthy", "running", "stopped", "starting"].includes(state.status?.gateway_state ?? state.status?.vpn_state ?? "") ? [{ key: "z", label: state.nativeMode() ? "Остановить сервис" : "Остановить Docker и VPN", run: () => state.confirm("stop") }] : []),
     ];
