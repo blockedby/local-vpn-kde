@@ -250,7 +250,7 @@ func onboardDesktop(account *user.User, run func(*user.User, []string, bool) err
 	if account == nil || account.Username == "" || account.Uid == "" || account.Uid == "0" || !filepath.IsAbs(account.HomeDir) || filepath.Clean(account.HomeDir) != account.HomeDir || account.HomeDir == "/" {
 		return "", errors.New("invalid desktop account")
 	}
-	if err := run(account, []string{"/usr/bin/local-vpn-kde", "bridge"}, false); err != nil {
+	if err := run(account, []string{"/usr/bin/kvpn", "bridge"}, false); err != nil {
 		return "", err
 	}
 	profile := filepath.Join(account.HomeDir, ".local/state/local-vpn-kde/openvpn/client/vpnkit-local.ovpn")
@@ -270,7 +270,7 @@ func onboardDesktop(account *user.User, run func(*user.User, []string, bool) err
 	}
 	args := []string{"/usr/bin/systemd-run", "--user", "--quiet", "--wait", "--collect", "--pipe",
 		"--setenv=HOME=" + account.HomeDir, "--setenv=XDG_STATE_HOME=" + filepath.Join(account.HomeDir, ".local/state"),
-		"/usr/bin/local-vpn-kde", "networkmanager", "--runtime", "native", "--action", "import", "--yes"}
+		"/usr/bin/kvpn", "networkmanager", "--runtime", "native", "--action", "import", "--yes"}
 	if err := run(account, args, true); err != nil {
 		return "", errors.New("NetworkManager profile import failed in desktop session; open diagnostics in kvpn")
 	}
