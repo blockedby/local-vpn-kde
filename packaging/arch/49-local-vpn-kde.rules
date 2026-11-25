@@ -2,8 +2,11 @@
 // Query current account membership: existing desktop processes retain old groups.
 // Do not cache the result; removing membership must revoke access immediately.
 polkit.addRule(function(action, subject) {
+    // The update helper takes only a version and installs only a verified
+    // release of this package, so enrolled users may run it without a password.
     var operation = action.id === "org.local-vpn-kde.operation" ||
-                    action.id === "org.local-vpn-kde.configure";
+                    action.id === "org.local-vpn-kde.configure" ||
+                    action.id === "org.local-vpn-kde.update";
     var lifecycle = action.id === "org.freedesktop.systemd1.manage-units";
     if (!operation && !lifecycle) return;
     if (lifecycle) {

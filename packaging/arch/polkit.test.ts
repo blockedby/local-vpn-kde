@@ -41,6 +41,9 @@ test("native operations require explicit enrollment", () => {
   expect(decision("org.local-vpn-kde.operation", "", "", false)).toBeUndefined();
   expect(decision("org.local-vpn-kde.configure", "", "")).toBe("yes");
   expect(decision("org.local-vpn-kde.configure", "", "", false)).toBeUndefined();
+  expect(decision("org.local-vpn-kde.update", "", "")).toBe("yes");
+  expect(decision("org.local-vpn-kde.update", "", "", false)).toBeUndefined();
+  expect(decision("org.local-vpn-kde.update-other", "", "")).toBeUndefined();
 });
 
 test("lookup errors and similarly named groups do not authorize", () => {
