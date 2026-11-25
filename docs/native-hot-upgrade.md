@@ -23,8 +23,8 @@ both unit definitions. Developers must bump the ABI for incompatible worker,
 private-state or network-journal changes. A post-upgrade incompatibility leaves
 running forwarding intact and keeps management inhibited. Pacman may already
 have replaced files when a post hook fails: this is NOT automatic package
-rollback. An administrator must stop the gateway, run `local-vpn-kde
-native-package --action recover` as root, and restart explicitly. Do not remove
+rollback. An administrator must stop the gateway, run `kvpn native-package
+--action recover` as root, and restart explicitly. Do not remove
 an inhibitor by hand. Failed transactions use the same bounded recovery path.
 
 The first upgrade from packages predating this feature still invokes their old
