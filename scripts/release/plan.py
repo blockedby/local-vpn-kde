@@ -16,6 +16,17 @@ def version_tuple(value):
     return tuple(map(int, value.split('.')))
 
 
+def notes_path(version):
+    return f'docs/releases/{version}.md'
+
+
+def check_notes(text):
+    """Release notes are written per release; reject a missing or empty file."""
+    if text is None or not text.strip():
+        raise ValueError('Release PR must add non-empty release notes in docs/releases/<VERSION>.md')
+    return text.strip() + '\n'
+
+
 def validate(event, files, version_text, tags, head, repository):
     pr = event.get('pull_request') or {}
     if event.get('action') != 'closed' or pr.get('merged') is not True:
@@ -54,6 +65,8 @@ def main():
     plan = validate(json.loads(Path(event_path).read_text()), files,
                     subprocess.check_output(['git', 'show', 'HEAD:VERSION'], text=True),
                     git('tag', '--list').splitlines(), git('rev-parse', 'HEAD'), repository)
+    shown = subprocess.run(['git', 'show', f'HEAD:{notes_path(plan["version"])}'], capture_output=True, text=True)
+    check_notes(shown.stdout if shown.returncode == 0 else None)
     Path(output).write_text(json.dumps(plan, indent=2) + '\n')
     print('\n'.join(f'{key}={value}' for key, value in plan.items()))
 

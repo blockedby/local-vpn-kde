@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 from assemble import verify_manifest
-from plan import SHA, VERSION, version_tuple
+from plan import SHA, VERSION, check_notes, notes_path, version_tuple
 
 
 def gh(*args, payload=None):
@@ -18,8 +18,9 @@ def gh(*args, payload=None):
     return subprocess.check_output(command, input=None if payload is None else json.dumps(payload).encode()).decode()
 
 
-def publish(assets, version, commit, pr, repository):
+def publish(assets, version, commit, pr, repository, notes_text):
     current = version_tuple(version)
+    notes_text = check_notes(notes_text)
     if not SHA.fullmatch(commit) or not re.fullmatch(r'[1-9][0-9]*', pr):
         raise ValueError('Invalid release commit/PR')
     if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository):
@@ -57,21 +58,9 @@ def publish(assets, version, commit, pr, repository):
     with tempfile.TemporaryDirectory(prefix='vpnkit-publish-') as temporary:
         work = Path(temporary)
         notes = work / 'notes.md'
-        notes.write_text(f'''Revision: `{commit}` · approved release PR #{pr}
-
-Native packages: Arch/CachyOS x86_64 `.pkg.tar.zst` and Debian 13 amd64 `.deb`.
-They include the compiled OpenTUI, Go services and sing-box. NetworkManager,
-OpenVPN, systemd, polkit and networking utilities remain system dependencies.
-Install using pacman/apt, then run `kvpn` as your desktop user.
-Package installation does not activate a VPN; initial TUI setup requests authorization.
-
-The `local-vpn-kde-{tag}-linux-amd64.tar.gz` archive is the separate Docker installer.
-Extract, run `./install.sh` without sudo, then `./run.sh`. It installs dependencies
-and rebuilds the application; it is not a standalone VPN executable.
-
-The arch-/debian- source archives and provenance files describe the native builds.
-Verify downloads using `SHA256SUMS`. Release CI ran Go/OpenTUI tests and isolated
-package lifecycle checks. These do not replace real KDE/systemd/VPN acceptance.
+        notes.write_text(notes_text + f'''
+---
+Revision `{commit}` · approved release PR #{pr} · verify downloads with `SHA256SUMS`.
 ''')
         gh('release', 'create', tag, '--repo', repository, '--verify-tag', '--draft', '--title', tag,
            '--notes-file', str(notes), *[str(path) for path in sorted(assets.iterdir())])
@@ -85,4 +74,6 @@ package lifecycle checks. These do not replace real KDE/systemd/VPN acceptance.
         gh('release', 'edit', tag, '--repo', repository, '--draft=false', '--latest')
 
 if __name__ == '__main__':
-    publish(Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4], os.environ['GH_REPO'])
+    notes_file = Path(notes_path(sys.argv[2]))
+    publish(Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4], os.environ['GH_REPO'],
+            notes_file.read_text() if notes_file.is_file() else None)
