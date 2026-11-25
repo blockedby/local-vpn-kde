@@ -65,3 +65,18 @@ test("update items are hidden outside the installed native app and relaunch clos
     expect(state.closing || state.disposed).toBe(true);
   } finally { await state.close(); }
 });
+
+test("a refused install forgets the stale release so [u] checks again", async () => {
+  const backend = new FakeBackend();
+  backend.status = { ...initial, runtime: "native", installed: true };
+  backend.updateInstallFails = true;
+  const state = new AppState(backend);
+  try {
+    await state.perform("status"); await state.perform("update/check");
+    await state.perform("update/install", "0.4.4");
+    expect(state.notice).toContain("0.4.5");
+    expect(state.updateInfo).toBeUndefined();
+    state.open("settings");
+    expect(state.items().find(item => item.key === "u")?.label).toBe("Проверить обновления");
+  } finally { await state.close(); }
+});

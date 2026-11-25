@@ -128,6 +128,8 @@ export async function perform(
       if (reply.ok && reply.autostart) state.autostart = reply.autostart;
       if (reply.ok && reply.update) state.updateInfo = reply.update;
       if (reply.ok && action === "update/install" && reply.update) state.updatedTo = reply.update.installed;
+      // A refused install may mean the release moved on; check again next time.
+      if (!reply.ok && action === "update/install") state.updateInfo = undefined;
       if (action === "autostart/read" || action === "autostart/set") {
         state.serviceState = reply.ok ? reply.autostart_service : undefined;
         if (!reply.ok && action === "autostart/set") state.autostart = undefined;
