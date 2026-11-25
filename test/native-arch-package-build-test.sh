@@ -86,6 +86,12 @@ test -d /home/builder/.local/state/local-vpn-kde
 runuser -u builder -- env HOME=/home/builder XDG_STATE_HOME=/home/builder/.local/state \
   /usr/bin/local-vpn-kde bridge </dev/null
 [[ $(readlink /usr/bin/kvpn) == local-vpn-kde ]]
+help=$(runuser -u builder -- kvpn --help)
+grep -Fq "Usage: kvpn " <<< "$help"
+help=$(runuser -u builder -- kvpn update --help)
+grep -Fq "Usage: kvpn update [--check]" <<< "$help"
+if check=$(runuser -u builder -- kvpn update --check 2>&1); then exit 1; fi
+grep -Fq "this is a development build" <<< "$check"
 runuser -u builder -- env HOME=/home/builder XDG_STATE_HOME=/home/builder/.local/state \
   /usr/bin/kvpn bridge </dev/null
 [[ $(stat -c %a /home/builder/.local/state/local-vpn-kde) == 700 ]]

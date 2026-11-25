@@ -155,14 +155,19 @@ func run(args []string) error {
 	}
 	if len(args) > 0 {
 		switch args[0] {
+		case "--help", "-h":
+			if len(args) == 1 {
+				fmt.Fprintln(os.Stdout, "Usage: kvpn [command]\n\nRun kvpn without arguments to open the interface.\nRun kvpn update --help for update options.")
+				return nil
+			}
 		case "container", "routing", "health", "dns-switch":
 			return runContainer(args)
 		}
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: local-vpn-kde render|assets|prepare|bridge")
+		return fmt.Errorf("usage: kvpn render|assets|prepare|bridge|update")
 	}
-	flags := flag.NewFlagSet("local-vpn-kde", flag.ContinueOnError)
+	flags := flag.NewFlagSet("kvpn", flag.ContinueOnError)
 	action := flags.String("action", "status", "NetworkManager action")
 	yes := flags.Bool("yes", false, "authorize the requested local mutation")
 	repo := flags.String("repo", ".", "repository root")

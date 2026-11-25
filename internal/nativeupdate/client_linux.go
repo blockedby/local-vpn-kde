@@ -153,7 +153,7 @@ func StartInstall(ctx context.Context, version string, options InstallOptions, p
 	return "", errors.New("update helper ended without a result")
 }
 
-// RunCommand implements `local-vpn-kde update [--check] [--yes]`.
+// RunCommand implements `kvpn update [--check] [--yes]`.
 func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, checker *Checker, install func(ctx context.Context, version string, progress func(string)) (string, error)) error {
 	checkOnly, yes := false, false
 	for _, arg := range args {
@@ -163,7 +163,7 @@ func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.W
 		case "--yes", "-y":
 			yes = true
 		case "--help", "-h":
-			fmt.Fprintln(stdout, "Usage: local-vpn-kde update [--check] [--yes]\n\nInstalls the latest release of the native package. The VPN stays connected.\n  --check  only report whether an update is available\n  --yes    install without asking")
+			fmt.Fprintln(stdout, "Usage: kvpn update [--check] [--yes]\n\nInstalls the latest release of the native package. The VPN stays connected.\n  --check  only report whether an update is available\n  --yes    install without asking")
 			return nil
 		default:
 			return fmt.Errorf("update accepts only --check and --yes, not %q", arg)
@@ -188,7 +188,7 @@ func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.W
 		return nil
 	}
 	if checkOnly {
-		fmt.Fprintln(stdout, "An update is available. Install it with: local-vpn-kde update")
+		fmt.Fprintln(stdout, "An update is available. Install it with: kvpn update")
 		return nil
 	}
 	if !yes {

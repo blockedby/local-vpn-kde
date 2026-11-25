@@ -23,7 +23,7 @@ func TestRunCommand(t *testing.T) {
 		wantOutput             string
 	}{
 		{"up to date", "0.4.4", "", nil, false, "Up to date."},
-		{"check only", "0.4.3", "", []string{"--check"}, false, "An update is available"},
+		{"check only", "0.4.3", "", []string{"--check"}, false, "An update is available. Install it with: kvpn update"},
 		{"declined", "0.4.3", "n\n", nil, false, "Not installed."},
 		{"no answer", "0.4.3", "", nil, false, "Not installed."},
 		{"confirmed", "0.4.3", "y\n", nil, true, "Updated to 0.4.4."},
