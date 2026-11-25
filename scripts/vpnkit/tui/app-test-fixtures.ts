@@ -37,6 +37,7 @@ export class FakeBackend implements Backend {
   rows = structuredClone(rows);
   hold?: { action: Action; promise: Promise<Reply> };
   cancelled = 0;
+  updateInstallFails = false;
   onProgress?: (phase: string) => void;
   onCheckProgress?: (result: CheckProgress, requestId?: string) => void;
   onSpeedProgress?: (result: SpeedProgress, requestId?: string) => void;
@@ -46,6 +47,9 @@ export class FakeBackend implements Backend {
     const r = reply(this.status);
     if (action === "subscription/read")
       r.value = "https://example.invalid/saved";
+    if (action === "update/check") r.update = { installed: "0.4.3", latest: "0.4.4", available: true };
+    if (action === "update/install" && this.updateInstallFails) { r.ok = false; r.reason = "update-failed"; r.error = "the latest release is now 0.4.5; check again"; }
+    else if (action === "update/install") r.update = { installed: value ?? "", latest: value ?? "", available: false };
     if (action === "servers/rename") {
       const { id, name } = JSON.parse(value ?? "{}");
       const row = this.rows.find(s => s.server_id === id);

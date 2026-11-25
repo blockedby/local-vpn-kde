@@ -24,7 +24,14 @@ export type Action =
   | "servers/speed"
   | "servers/availability"
   | "servers/select"
-  | "servers/rename";
+  | "servers/rename"
+  | "update/check"
+  | "update/install";
+export interface UpdateInfo {
+  installed: string;
+  latest: string;
+  available: boolean;
+}
 export interface Status {
   runtime?: "docker" | "native";
   installed?: boolean;
@@ -65,6 +72,8 @@ export interface Reply {
   status: Status;
   value?: string;
   catalog?: { status: string; servers?: Server[]; server?: Server };
+  update?: UpdateInfo;
+  error?: string;
 }
 export interface CheckProgress {
   status?: string;

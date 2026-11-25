@@ -128,7 +128,16 @@ A missing application-owned NetworkManager profile is created automatically. For
 
 ## Updates
 
-**Native:** run the same installer from a new verified bundle:
+**Native (Arch or Debian package), from 0.4.4:**
+
+```bash
+local-vpn-kde update          # asks before installing
+local-vpn-kde update --check  # only check
+```
+
+The TUI has the same in **Settings → [u] Check for updates**. It takes the latest GitHub release, verifies the `SHA256SUMS` checksum and the package name, version and architecture, and installs it only if no other package changes. Members of `local-vpn-kde-users` need no password. Releases are not signed yet: the check catches corrupted or mixed-up downloads, not a replaced release on GitHub. Before 0.4.4, upgrade once by hand (`sudo pacman -U` with the release package).
+
+Without a package, run the same installer from a new verified bundle:
 
 ```bash
 sudo bash ./install-native.sh

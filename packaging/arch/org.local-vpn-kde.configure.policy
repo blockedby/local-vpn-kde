@@ -19,4 +19,11 @@
     <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/local-vpn-kde/local-vpn-kde.bin</annotate>
     <annotate key="org.freedesktop.policykit.exec.argv1">native-operation</annotate>
   </action>
+  <action id="org.local-vpn-kde.update">
+    <description>Install a Local VPN update</description>
+    <message>Authorize installing the latest Local VPN release</message>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/local-vpn-kde/local-vpn-kde.bin</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">native-update-install</annotate>
+  </action>
 </policyconfig>

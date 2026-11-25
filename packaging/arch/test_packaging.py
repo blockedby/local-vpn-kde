@@ -92,6 +92,9 @@ class PackagingTests(unittest.TestCase):
     def test_template_has_bounded_runtime_contract(self) -> None:
         template = (HERE / "PKGBUILD.template").read_text()
         self.assertIn("arch=('x86_64')", template)
+        policy = (HERE / "org.local-vpn-kde.configure.policy").read_text()
+        self.assertIn('<action id="org.local-vpn-kde.update">', policy)
+        self.assertIn(">native-update-install<", policy)
         self.assertIn("'sing-box>=1.13'", template)
         self.assertNotIn("'sing-box<1.15'", template)
         self.assertNotIn("/usr/bin/sing-box", template)

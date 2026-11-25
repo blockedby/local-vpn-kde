@@ -18,6 +18,7 @@ import (
 
 	"github.com/blockedby/local-vpn-kde/internal/localvpn"
 	"github.com/blockedby/local-vpn-kde/internal/nativegateway"
+	"github.com/blockedby/local-vpn-kde/internal/nativeupdate"
 )
 
 func env(name, fallback string) string {
@@ -112,6 +113,22 @@ func run(args []string) error {
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 		defer cancel()
 		return localvpn.HostSmoke(ctx, opts, os.Stdout)
+	}
+	if len(args) > 0 && args[0] == "native-update-install" {
+		if len(args) != 1 {
+			return fmt.Errorf("native-update-install takes protocol input only")
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer cancel()
+		return nativeupdate.RunInstallHelper(ctx, os.Stdin, os.Stdout)
+	}
+	if len(args) > 0 && (args[0] == "update" || args[0] == "--update") {
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer cancel()
+		install := func(ctx context.Context, version string, progress func(string)) (string, error) {
+			return nativeupdate.StartInstall(ctx, version, nativeupdate.InstallOptions{TextAgent: true}, progress)
+		}
+		return nativeupdate.RunCommand(ctx, args[1:], os.Stdin, os.Stdout, &nativeupdate.Checker{}, install)
 	}
 	if len(args) > 0 && args[0] == "ui" {
 		binary, err := os.Executable()
@@ -393,7 +410,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, localvpn.NativeGatewayFailureMessage(err))
 		} else if len(os.Args) > 1 && os.Args[1] == "autostart" {
 			fmt.Fprintln(os.Stderr, localvpn.AutostartFailureMessage(err))
-		} else if len(os.Args) > 1 && (os.Args[1] == "host-smoke" || os.Args[1] == "native-network" || os.Args[1] == "native-desktop") {
+		} else if len(os.Args) > 1 && (os.Args[1] == "host-smoke" || os.Args[1] == "update" || os.Args[1] == "--update" || os.Args[1] == "native-network" || os.Args[1] == "native-desktop") {
 			// Preserve network preflight and lifecycle reasons in the service
 			// journal; these commands never include subscription configuration.
 			fmt.Fprintln(os.Stderr, err)

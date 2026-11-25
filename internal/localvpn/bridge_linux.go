@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/blockedby/local-vpn-kde/internal/nativeupdate"
 	"github.com/blockedby/local-vpn-kde/internal/picker"
 	"github.com/blockedby/local-vpn-kde/internal/profiles"
 	"golang.org/x/sys/unix"
@@ -268,7 +269,7 @@ func (b *Bridge) Serve(ctx context.Context, input io.Reader, output io.Writer) e
 			defer func() { stop(); b.mu.Lock(); delete(b.active, head.ID); b.mu.Unlock() }()
 			// Selection changes only the active proxy. Probes own independent proxies;
 			// lifecycle and catalog mutations must wait for those proxies to finish.
-			shared := head.Action == "servers/rename" || head.Action == "servers/select" || head.Action == "servers/list" || head.Action == "servers/current" || head.Action == "servers/ping" || head.Action == "servers/speed" || head.Action == "servers/availability" || head.Action == "servers/check-batch" || head.Action == "servers/speed-batch" || head.Action == "status" || head.Action == "subscription/read"
+			shared := head.Action == "servers/rename" || head.Action == "servers/select" || head.Action == "servers/list" || head.Action == "servers/current" || head.Action == "servers/ping" || head.Action == "servers/speed" || head.Action == "servers/availability" || head.Action == "servers/check-batch" || head.Action == "servers/speed-batch" || head.Action == "status" || head.Action == "subscription/read" || head.Action == "update/check"
 			mutation := !shared || head.Action == "servers/select"
 			canceled := func() {
 				reason := "cancelled"
@@ -366,7 +367,7 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 	if b.options.Runtime == "native" {
 		switch request.Action {
 		case "status", "backend/start", "network/reapply", "start", "disconnect", "stop", "autostart/read", "autostart/set", "servers/rename":
-		case "profiles/list", "profiles/add", "profiles/open", "profiles/remove", "subscription", "subscription/read", "servers/list", "servers/refresh", "servers/current", "servers/select", "servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch", "toggle-mode", "diagnostics":
+		case "profiles/list", "profiles/add", "profiles/open", "profiles/remove", "subscription", "subscription/read", "servers/list", "servers/refresh", "servers/current", "servers/select", "servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch", "toggle-mode", "diagnostics", "update/check", "update/install":
 			if b.options.Repo != InstalledAssetRoot {
 				reply["ok"], reply["reason"], reply["status"] = false, "unsupported-native-action", b.Status()
 				return reply, nil
@@ -459,6 +460,35 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 			break
 		}
 		reply["profiles"] = result
+	case "update/check", "update/install":
+		if b.options.Runtime != "native" || b.options.Mock {
+			invalid()
+			break
+		}
+		if request.Action == "update/check" {
+			result, err := (&nativeupdate.Checker{}).Check(ctx)
+			if err != nil {
+				reply["ok"], reply["reason"], reply["error"] = false, updateFailureReason(err), err.Error()
+				break
+			}
+			reply["update"] = map[string]any{"installed": result.InstalledVersion(), "latest": result.Latest.String(), "available": result.Available}
+			break
+		}
+		if _, err := nativeupdate.ParseVersion(value); err != nil {
+			invalid()
+			break
+		}
+		report := func(phase string) {
+			if progress != nil {
+				progress("update-" + phase)
+			}
+		}
+		installed, err := nativeupdate.StartInstall(ctx, value, nativeupdate.InstallOptions{}, report)
+		if err != nil {
+			reply["ok"], reply["reason"], reply["error"] = false, "update-failed", err.Error()
+			break
+		}
+		reply["update"] = map[string]any{"installed": installed, "latest": installed, "available": false}
 	case "subscription/read":
 		text, err := ReadSubscription(b.options.Base)
 		if err != nil {
@@ -875,4 +905,14 @@ func (b *Bridge) captureSpeed(ctx context.Context, args []string, id string, pro
 	err := stream.Finish()
 	data, overflow := output.result()
 	return data, result, overflow || (err != nil && result.Reason == "ok")
+}
+
+func updateFailureReason(err error) string {
+	switch {
+	case errors.Is(err, nativeupdate.ErrNotPackaged):
+		return "update-not-packaged"
+	case errors.Is(err, nativeupdate.ErrDevelopmentBuild):
+		return "update-development-build"
+	}
+	return "update-unavailable"
 }

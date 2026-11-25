@@ -53,6 +53,9 @@ export class SummaryView {
         const candidate = state.fastestCandidate;
         const age = Math.max(0, Math.floor((Date.now() - candidate.measuredAt) / 1000));
         this.summary.content = `${candidate.name} · ${candidate.speed.toFixed(1)} Мбит/с · ${age} с назад${state.filter ? " · среди показанных" : ""}\nПереключение прервёт текущие соединения. Выбрать сервер?`;
+      } else if (state.confirmation === "update" && state.updateInfo) {
+        this.summary.height = 3;
+        this.summary.content = `Установить версию ${state.updateInfo.latest} (сейчас ${state.updateInfo.installed})?\nVPN останется подключён. Интерфейс можно будет перезапустить;\nшлюз перейдёт на новую версию при следующем перезапуске.`;
       } else if (state.confirmation === "subscription") {
         this.summary.height = 4;
         this.summary.content =
