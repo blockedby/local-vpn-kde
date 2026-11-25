@@ -12,6 +12,7 @@ export class NoticeView {
     const lines = wrapText(message, Math.max(1, this.renderer.terminalWidth - 2));
     this.notification.content = (this.renderer.terminalWidth < 60 ? lines : lines.slice(0, 2)).join("\n");
     this.notification.fg = state.error ? p.red : p.muted;
-    this.notification.visible = true; this.notification.height = this.renderer.terminalWidth < 60 ? lines.length : 2;
+    const reserved = state.noticeReserved();
+    this.notification.visible = reserved; this.notification.height = !reserved ? 0 : this.renderer.terminalWidth < 60 ? lines.length : 2;
   }
 }

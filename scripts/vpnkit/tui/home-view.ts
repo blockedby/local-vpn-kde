@@ -7,10 +7,14 @@ export class HomeView {
   private root: BoxRenderable;
   private rows: BoxRenderable[] = [];
   private columns = 0;
+  private firstRow = 0;
+  private more: TextRenderable;
   private tiles: { box: BoxRenderable; title: TextRenderable; lines: TextRenderable[] }[] = [];
   constructor(private renderer: CliRenderer, parent: BoxRenderable, activate: (index: number) => void) {
     this.root = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, minHeight: 0 }); parent.add(this.root);
     for (let i = 0; i < 6; i++) { const row = new BoxRenderable(renderer, { flexDirection: "row", flexShrink: 0 }); this.root.add(row); this.rows.push(row); }
+    this.more = new TextRenderable(renderer, { content: "", height: 1, flexShrink: 0, fg: p.muted, visible: false });
+    this.root.add(this.more);
     for (let i = 0; i < 6; i++) {
       const box = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, flexBasis: 0, minWidth: 0, border: true, borderStyle: "rounded", onMouseDown: e => { if (e.button === 0) activate(i); } });
       const title = new TextRenderable(renderer, { height: 1, fg: p.text, attributes: TextAttributes.BOLD }); box.add(title);
@@ -21,7 +25,22 @@ export class HomeView {
   update(state: AppState, visible: boolean) {
     this.root.visible = visible;
     if (!visible) return;
-    const cols = state.homeColumns(), compact = this.renderer.height < (cols === 1 ? 35 : 20);
+    const cols = state.homeColumns(), rowsTotal = Math.ceil(6 / cols);
+    // Full tiles take five rows, compact four, title-only three. Header, footer and
+    // a two-line notice take four; when even title-only rows do not fit, scroll.
+    const room = this.renderer.height - 2 - (state.noticeReserved() ? 2 : 0);
+    const compact = this.renderer.height < rowsTotal * 5 + 5;
+    const tileHeight = !compact ? 5 : rowsTotal * 4 <= room ? 4 : 3;
+    const fitsAll = rowsTotal * tileHeight <= room;
+    // A scrolled grid spends one row saying how many tiles are out of view.
+    const visibleRows = fitsAll ? rowsTotal : Math.max(1, Math.min(rowsTotal, Math.floor((room - 1) / tileHeight)));
+    const selectedRow = Math.floor(state.homeIndex / cols);
+    if (selectedRow < this.firstRow) this.firstRow = selectedRow;
+    if (selectedRow >= this.firstRow + visibleRows) this.firstRow = selectedRow - visibleRows + 1;
+    this.firstRow = Math.max(0, Math.min(this.firstRow, rowsTotal - visibleRows));
+    const above = this.firstRow * cols, below = Math.max(0, 6 - (this.firstRow + visibleRows) * cols);
+    this.more.visible = !fitsAll;
+    this.more.content = [above && `↑ ещё ${above}`, below && `↓ ещё ${below}`].filter(Boolean).join(" · ");
     const selected = state.catalogLoaded && !state.catalogStale ? state.servers.find(s => s.selected) : undefined;
     const best = state.catalogLoaded && !state.catalogStale ? state.servers.filter(s => s.ping_status === "ready" && s.latency_ms !== undefined && Number.isFinite(s.latency_ms)).sort((a, b) => a.latency_ms! - b.latency_ms!)[0] : undefined;
     const profile = state.profiles?.items.find(item => item.id === state.profiles?.active);
@@ -62,7 +81,7 @@ export class HomeView {
     };
     const settingsLines = compact ? [data[5]![1]!] : [...wrap(data[5]![1]!), ...wrap(data[5]![2]!)];
     const extra = compact ? 0 : Math.min(2, Math.max(0, this.renderer.height - (6 / cols * 5) - 2), Math.max(0, settingsLines.length - 2));
-    this.rows.forEach((row, i) => { row.visible = i < 6 / cols; row.height = compact ? 4 : 5 + (i === Math.floor(5 / cols) ? extra : 0); });
+    this.rows.forEach((row, i) => { row.visible = i >= this.firstRow && i < this.firstRow + visibleRows; row.height = compact ? tileHeight : 5 + (i === Math.floor(5 / cols) ? extra : 0); });
     // Rebuild every row when the column count changes: appending only the moved
     // tiles would leave them after the ones that stayed, out of navigation order.
     if (cols !== this.columns) {
@@ -71,7 +90,7 @@ export class HomeView {
       this.tiles.forEach((tile, i) => this.rows[Math.floor(i / cols)]!.add(tile.box));
     }
     this.tiles.forEach((tile, i) => {
-      tile.box.height = compact ? 4 : 5 + (Math.floor(i / cols) === Math.floor(5 / cols) ? extra : 0); tile.box.borderColor = i === state.homeIndex ? p.accent : p.edge;
+      tile.box.height = compact ? tileHeight : 5 + (Math.floor(i / cols) === Math.floor(5 / cols) ? extra : 0); tile.box.borderColor = i === state.homeIndex ? p.accent : p.edge;
       const title = `${i === state.homeIndex ? "›" : " "} ${glyphs[i]} ${data[i]![0]!}`;
       const shortcut = titleActions[i]?.keys[0];
       tile.title.content = shortcut && Bun.stringWidth(title) + 1 + Bun.stringWidth(shortcut) <= width
@@ -79,7 +98,7 @@ export class HomeView {
         : cell(title, width).trimEnd();
       tile.title.fg = i === state.homeIndex ? p.accent : p.text;
       const lines = i === 5 && extra ? settingsLines : data[i]!.slice(1);
-      tile.lines.forEach((line, n) => { line.visible = n < (compact ? 1 : 2 + (Math.floor(i / cols) === Math.floor(5 / cols) ? extra : 0)) && n < lines.length; line.content = cell(lines[n] ?? "", width).trimEnd(); });
+      tile.lines.forEach((line, n) => { line.visible = n < (compact ? tileHeight - 3 : 2 + (Math.floor(i / cols) === Math.floor(5 / cols) ? extra : 0)) && n < lines.length; line.content = cell(lines[n] ?? "", width).trimEnd(); });
     });
   }
 }

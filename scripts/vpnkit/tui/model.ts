@@ -1,7 +1,7 @@
 import type { Status } from "./bridge";
 
 /** Smallest terminal the workspace renders in; below it only a resize hint is shown. */
-export const MIN_COLS = 40, MIN_ROWS = 16;
+export const MIN_COLS = 40, MIN_ROWS = 10;
 
 export const palette = {
   base: "#0b1120",

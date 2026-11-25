@@ -30,7 +30,7 @@ export class FooterView {
     const actions = state.groupedActions().flatMap(group => group.actions).filter(action => action.available);
     if (state.screen === "home") {
       const has = (id: string) => state.groupedActions().flatMap(group => group.actions).some(action => action.id === id);
-      const hints = [has("tile:left") && "←↑↓→ выбор", has("tile:open") && "Enter открыть", has("global:help") && "? все клавиши", has("global:quit") && "q выход"].filter(Boolean);
+      const hints = [has("tile:left") && (state.homeColumns() === 1 ? "↑↓ выбор" : "←↑↓→ выбор"), has("tile:open") && "Enter открыть", has("global:help") && "? все клавиши", has("global:quit") && "q выход"].filter(Boolean);
       while (hints.length > 1 && Bun.stringWidth(hints.join(" · ")) > this.renderer.terminalWidth - 2) hints.pop();
       return hints.join(" · ");
     }

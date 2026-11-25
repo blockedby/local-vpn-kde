@@ -585,10 +585,10 @@ export class AppState {
     // Diagnostics immediately displays the cached evidence. Refresh is explicit.
   }
 
-  /** Home tile columns: three when wide, one when narrow but tall enough to stack six tiles. */
+  /** Home tile columns: three when wide, one stacked column when narrow; the grid scrolls when short. */
   homeColumns() {
-    const { width, height } = this.viewport();
-    return width >= 90 ? 3 : width < 56 && height >= 28 ? 1 : 2;
+    const { width } = this.viewport();
+    return width >= 90 ? 3 : width < 56 ? 1 : 2;
   }
 
   moveHome(key: string) {
@@ -736,8 +736,12 @@ export class AppState {
     this.syncServerViewport(); this.paint();
   }
   profilePageSize() { return Math.max(1, Math.min(9, this.viewport().height - 8 - wrapText(this.notice, Math.max(1, this.viewport().width - 2)).length)); }
+  /** Short terminals give the two notice rows back to content while there is nothing to say. */
+  noticeReserved() {
+    return this.viewport().height >= 16 || !!this.notice || this.closing;
+  }
   rowCount() {
-    return Math.max(1, Math.min(100, this.viewport().height - 6 - (this.filter || this.filterEditing ? 1 : 0)));
+    return Math.max(1, Math.min(100, this.viewport().height - (this.noticeReserved() ? 6 : 4) - (this.filter || this.filterEditing ? 1 : 0)));
   }
   syncServerViewport() {
     this.viewStart = serverViewport(this.sortedServers(), this.serverID, this.viewStart, this.rowCount()).start;
