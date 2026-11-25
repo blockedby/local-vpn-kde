@@ -137,7 +137,7 @@ export function actionRegistry(state: AppState, rowActions = false): ActionDefin
     for (const item of lifecycle) actions.push({ ...item, scope: "global", run: () => { item.run(); state.paint(); } });
   if (state.screen === "home") {
     for (const key of ["left", "right", "up", "down", "home", "end"]) {
-      const cols = state.viewport().width >= 90 ? 3 : 2, i = state.homeIndex;
+      const cols = state.homeColumns(), i = state.homeIndex;
       const blocked = key === "left" ? i % cols === 0 : key === "right" ? i % cols === cols - 1 || i === 5 : key === "up" ? i < cols : key === "down" ? i + cols >= 6 : key === "home" ? i === 0 : i === 5;
       add(`tile:${key}`, [key], "Выбор", "home", () => state.moveHome(key), blocked ? "Край сетки." : undefined, "none", true);
     }

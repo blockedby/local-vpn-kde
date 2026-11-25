@@ -31,6 +31,13 @@ interface TableState {
 }
 
 /** Owns the table renderables; selection and viewport remain application state. */
+/** Column layout for a table of the given width; narrow tables trade numeric padding for name room. */
+function columns(width: number) {
+  const showStatus = width >= 78, showSite = width >= 65, showCountry = width >= 60, numeric = width < 50 ? 6 : 8;
+  const nameWidth = Math.max(10, width - (showStatus ? 48 : showSite ? 33 : 24) - (showCountry ? 4 : 0) + 2 * (8 - numeric));
+  return { showStatus, showSite, showCountry, nameWidth, numeric };
+}
+
 export class ServerTableView {
   private header: TextRenderable;
   private filterLine: BoxRenderable;
@@ -50,10 +57,9 @@ export class ServerTableView {
     this.header.onMouseDown = event => {
       if (event.button !== 0) return;
       const x = event.x - this.header.x, width = Math.max(10, this.header.width);
-      const showCountry = width >= 60, showStatus = width >= 78, showSite = width >= 65;
-      const nameWidth = Math.max(10, width - (showStatus ? 48 : showSite ? 33 : 24) - (showCountry ? 4 : 0));
+      const { showCountry, nameWidth, numeric } = columns(width);
       const countryStart = 3 + nameWidth, pingStart = countryStart + (showCountry ? 6 : 2);
-      sort(x < countryStart ? "name" : showCountry && x < pingStart ? "country" : x < pingStart + 10 ? "ping" : x < pingStart + 20 ? "speed" : "availability");
+      sort(x < countryStart ? "name" : showCountry && x < pingStart ? "country" : x < pingStart + numeric + 2 ? "ping" : x < pingStart + 2 * numeric + 4 ? "speed" : "availability");
     };
     parent.add(this.header);
     for (let i = 0; i < 100; i++) {
@@ -67,10 +73,7 @@ export class ServerTableView {
   update(state: TableState) {
     const { batch, frame, liveSpeeds } = state;
     const width = Math.max(10, state.width);
-    const showStatus = width >= 78;
-    const showSite = width >= 65;
-    const showCountry = width >= 60;
-    const nameWidth = Math.max(10, width - (showStatus ? 48 : showSite ? 33 : 24) - (showCountry ? 4 : 0));
+    const { showStatus, showSite, showCountry, nameWidth, numeric } = columns(width);
     this.filterLine.visible = state.visible && (!!state.filter || state.filterEditing);
     if (this.filterInput.value !== state.filter) this.filterInput.value = state.filter;
     this.filterCount.content = ` ${state.shown}/${state.total}`;
@@ -79,7 +82,7 @@ export class ServerTableView {
     const right = (value: string, columns: number) => cell(value, columns).trimEnd().padStart(columns);
     const arrow = state.sortDescending ? "↓" : "↑";
     const nameLabel = `Сервер${state.sort === "name" ? ` · имя ${arrow}` : state.sort === "availability" && !showSite ? ` · сайт ${arrow}` : state.sort === "country" && !showCountry ? ` · страна ${arrow}` : ""}`;
-    this.header.content = `   ${cell(nameLabel, nameWidth)}${showCountry ? `Страна${state.sort === "country" ? arrow : ""}` : "  "}${right(`Ping мс${state.sort === "ping" ? arrow : ""}`, showCountry && state.sort === "country" ? 7 : 8)}  ${right(`Мбит/с${state.sort === "speed" ? arrow : ""}`, 8)}${showSite ? `  ${cell(`Сайт${state.sort === "availability" ? ` ${arrow}` : ""}`, 7)}` : ""}${showStatus ? "  Статус" : ""}`;
+    this.header.content = `   ${cell(nameLabel, nameWidth)}${showCountry ? `Страна${state.sort === "country" ? arrow : ""}` : "  "}${right(`${numeric < 8 ? "Ping" : "Ping мс"}${state.sort === "ping" ? arrow : ""}`, showCountry && state.sort === "country" ? numeric - 1 : numeric)}  ${right(`${numeric < 8 ? "Мб/с" : "Мбит/с"}${state.sort === "speed" ? arrow : ""}`, numeric)}${showSite ? `  ${cell(`Сайт${state.sort === "availability" ? ` ${arrow}` : ""}`, 7)}` : ""}${showStatus ? "  Статус" : ""}`;
     this.rows.forEach((row, i) => {
       const s = state.servers[i];
       row.visible = state.visible && i < state.rowCount && !!s;
@@ -94,7 +97,7 @@ export class ServerTableView {
         : s.status === "failed" ? "ошибка" : (s.download_mbps?.toFixed(1) ?? "—");
       const site = queued ? "—" : checking("availability") && batch?.pinged.has(s.server_id) && s.ping_status === "ready" && !batch?.completed.has(s.server_id)
         ? frames[frame % 10] : s.availability === "ready" ? "да" : s.availability === "failed" ? "нет" : "—";
-      row.content = `${s.server_id === state.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)}${showCountry ? `  ${cell(s.country ?? "—", 2)}  ` : "  "}${right(ping, 8)}  ${right(speed, 8)}${showSite ? `  ${cell(site, 7)}` : ""}${showStatus ? `  ${queued ? "в очереди" : active ? ({ start: "подготовка", ping: "сайт / ждёт", speed: "замер", complete: "готов" }[batch!.stages.get(s.server_id) ?? "start"]) : s.ping_status === "failed" || s.availability === "failed" || s.status === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не проверен"}` : ""}`;
+      row.content = `${s.server_id === state.serverID ? "›" : " "}${s.selected ? "●" : " "} ${cell(s.display_name, nameWidth)}${showCountry ? `  ${cell(s.country ?? "—", 2)}  ` : "  "}${right(ping, numeric)}  ${right(speed, numeric)}${showSite ? `  ${cell(site, 7)}` : ""}${showStatus ? `  ${queued ? "в очереди" : active ? ({ start: "подготовка", ping: "сайт / ждёт", speed: "замер", complete: "готов" }[batch!.stages.get(s.server_id) ?? "start"]) : s.ping_status === "failed" || s.availability === "failed" || s.status === "failed" ? "ошибка" : s.availability === "ready" ? "готов" : s.status === "failed" ? "ошибка" : s.status === "ready" ? "готов" : "не проверен"}` : ""}`;
       row.fg = s.server_id === state.serverID ? p.accent : s.selected ? p.green : p.text;
       row.attributes = s.server_id === state.serverID ? TextAttributes.BOLD : 0;
     });

@@ -32,7 +32,59 @@ test("shell: responsive table drops status then site and warns below minimum", a
     t.resize(80,24); await t.renderOnce(); expect(t.captureCharFrame().split("\n")[2]).toContain("Сайт");
     t.resize(60,16); await t.renderOnce(); const header = t.captureCharFrame().split("\n")[2]!;
     expect(header).toContain("Ping мс"); expect(header).toContain("Мбит/с"); expect(header).not.toContain("Сайт"); expect(header).not.toContain("Статус");
-    t.resize(59,16); await t.renderOnce(); expect(t.captureCharFrame()).toContain("Увеличьте терминал");
+    t.resize(40,16); await t.renderOnce(); let frame = t.captureCharFrame();
+    expect(frame).not.toContain("Увеличьте окно"); expect(frame.split("\n")[2]).toContain("Ping"); expect(frame).toContain("Node 00");
+    t.resize(39,16); await t.renderOnce(); expect(t.captureCharFrame()).toContain("Увеличьте окно до 40 × 10.");
+    t.resize(120,9); await t.renderOnce(); expect(t.captureCharFrame()).toContain("Увеличьте окно");
+    t.resize(120,10); await t.renderOnce(); frame = t.captureCharFrame();
+    expect(frame).not.toContain("Увеличьте окно"); expect(frame.split("\n").slice(3, -1).filter(line => /Node \d\d/.test(line))).toHaveLength(6);
+  } finally { await app.close(); }
+});
+
+test("shell: narrow terminals keep whole footer hints and the routing mode", async () => {
+  const { terminal: t, app } = await fixture(40, 16);
+  try {
+    app.status!.networkmanager_active = "yes";
+    app.servers[0]!.display_name = "Amsterdam · Netherlands";
+    for (const open of [() => app.open("home", false), () => app.open("servers", false), () => app.open("settings"), () => app.open("target")]) {
+      open(); app.notice = ""; app.paint(); await t.renderOnce();
+      const lines = t.captureCharFrame().split("\n");
+      expect(lines[0]).toContain("строгий");
+      const footer = lines.at(-2)!.trim();
+      expect(footer.length).toBeGreaterThan(0);
+      for (const hint of footer.split(" · ")) expect(hint).toMatch(/^\S+ \S/);
+      expect(footer).not.toMatch(/ (Esc|\?|q)$/);
+    }
+  } finally { await app.close(); }
+});
+
+test("shell: a narrow tall terminal stacks home tiles in one column", async () => {
+  const { terminal: t, app } = await fixture(51, 29);
+  try {
+    app.open("home", false); app.homeIndex = 0; app.notice = ""; app.paint(); await t.renderOnce();
+    const lines = t.captureCharFrame().split("\n");
+    for (const title of ["Подключение", "Серверы", "Замеры", "Профили", "Диагностика", "Настройки"])
+      expect(lines.filter(line => line.includes(title) && line.includes("│"))).toHaveLength(1);
+    expect(lines.findIndex(line => line.includes("Серверы"))).toBeGreaterThan(lines.findIndex(line => line.includes("Подключение")));
+    app.onKey({ name: "down", preventDefault() {} }); expect(app.homeIndex).toBe(1);
+    app.onKey({ name: "right", preventDefault() {} }); expect(app.homeIndex).toBe(1);
+    expect(lines.at(-2)).toContain("↑↓ выбор"); expect(lines.at(-2)).not.toContain("←");
+  } finally { await app.close(); }
+});
+
+test("shell: a short home grid scrolls to the selected tile and counts hidden tiles", async () => {
+  const { terminal: t, app } = await fixture(120, 12);
+  try {
+    app.open("home", false); app.homeIndex = 0; app.notice = ""; app.paint(); await t.renderOnce();
+    let frame = t.captureCharFrame();
+    for (const title of ["Подключение", "Настройки"]) expect(frame).toContain(title);
+    expect(frame).not.toContain("ещё");
+    t.resize(51, 16); app.paint(); await t.renderOnce();
+    frame = t.captureCharFrame();
+    expect(frame).toContain("Подключение"); expect(frame).not.toContain("Настройки"); expect(frame).toMatch(/↓ ещё \d/);
+    app.onKey({ name: "end", preventDefault() {} }); await t.renderOnce();
+    frame = t.captureCharFrame();
+    expect(frame).toContain("› * Настройки"); expect(frame).not.toContain("Подключение"); expect(frame).toMatch(/↑ ещё \d/); expect(frame).not.toContain("↓ ещё");
   } finally { await app.close(); }
 });
 

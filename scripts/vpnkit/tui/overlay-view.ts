@@ -3,7 +3,7 @@ import { isOverlay, type AppState } from "./app-state";
 import { SummaryView } from "./summary-view";
 import { MenuView } from "./menu-view";
 import { EditorView } from "./editor-view";
-import { palette as p } from "./model";
+import { MIN_COLS, MIN_ROWS, palette as p } from "./model";
 import { cell, safeText, wrapText } from "./formatting";
 import { serverMenuActions } from "./action-registry";
 
@@ -95,7 +95,7 @@ export class OverlayView {
   update(state: AppState) {
     this.current = state;
     this.updatePalette(state);
-    const rowVisible = state.serverMenu && !state.helpOpen && !state.paletteOpen && this.renderer.terminalWidth >= 60 && this.renderer.terminalHeight >= 16;
+    const rowVisible = state.serverMenu && !state.helpOpen && !state.paletteOpen && this.renderer.terminalWidth >= MIN_COLS && this.renderer.terminalHeight >= MIN_ROWS;
     this.rowBackdrop.visible = rowVisible; this.rowMenu.visible = rowVisible;
     if (rowVisible) {
       const width = Math.min(50, this.renderer.terminalWidth - 4);
@@ -119,7 +119,7 @@ export class OverlayView {
       this.rowMenu.left = Math.max(1, this.renderer.terminalWidth - width - 3);
       this.rowMenu.top = Math.min(3, this.renderer.terminalHeight - Number(this.rowMenu.height) - 1);
     }
-    const modal = isOverlay(state.screen) && this.renderer.terminalWidth >= 60 && this.renderer.terminalHeight >= 16;
+    const modal = isOverlay(state.screen) && this.renderer.terminalWidth >= MIN_COLS && this.renderer.terminalHeight >= MIN_ROWS;
     const editor = ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(state.screen);
     this.dialog.visible = modal;
     this.dialogEditor.update(state.editorValue, modal && editor && !state.helpOpen, state.closing, state.screen);
