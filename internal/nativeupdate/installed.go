@@ -60,7 +60,7 @@ type Installation struct {
 	Pkgrel              int
 }
 
-var ErrNotPackaged = errors.New("local-vpn-kde is not installed from a native package")
+var ErrNotPackaged = errors.New("kvpn is not installed from a native package")
 var ErrDevelopmentBuild = errors.New("snapshot/dev versions are never auto-updated")
 
 // DetectInstallation checks ownership with each installed package manager.

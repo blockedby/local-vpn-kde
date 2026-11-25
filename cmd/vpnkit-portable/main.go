@@ -250,29 +250,29 @@ func onboardDesktop(account *user.User, run func(*user.User, []string, bool) err
 	if account == nil || account.Username == "" || account.Uid == "" || account.Uid == "0" || !filepath.IsAbs(account.HomeDir) || filepath.Clean(account.HomeDir) != account.HomeDir || account.HomeDir == "/" {
 		return "", errors.New("invalid desktop account")
 	}
-	if err := run(account, []string{"/usr/bin/local-vpn-kde", "bridge"}, false); err != nil {
+	if err := run(account, []string{"/usr/bin/kvpn", "bridge"}, false); err != nil {
 		return "", err
 	}
 	profile := filepath.Join(account.HomeDir, ".local/state/local-vpn-kde/openvpn/client/vpnkit-local.ovpn")
 	info, err := stat(profile)
 	if errors.Is(err, os.ErrNotExist) {
-		return "Installed and enrolled. Open local-vpn-kde as your desktop user and add a server/profile; its NetworkManager profile is prepared on first connect. No VPN was connected.", nil
+		return "Installed and enrolled. Open kvpn as your desktop user and add a server/profile; its NetworkManager profile is prepared on first connect. No VPN was connected.", nil
 	}
 	if err != nil || !info.Mode().IsRegular() {
 		return "", errors.New("existing desktop profile is not a regular readable file")
 	}
 	bus, err := stat("/run/user/" + account.Uid + "/bus")
 	if errors.Is(err, os.ErrNotExist) {
-		return "Installed and enrolled; desktop profile import deferred until a logged-in desktop session. Open local-vpn-kde there; first connect prepares its profile. No VPN was connected.", nil
+		return "Installed and enrolled; desktop profile import deferred until a logged-in desktop session. Open kvpn there; first connect prepares its profile. No VPN was connected.", nil
 	}
 	if err != nil || bus.Mode()&os.ModeSocket == 0 {
 		return "", errors.New("desktop session bus unavailable")
 	}
 	args := []string{"/usr/bin/systemd-run", "--user", "--quiet", "--wait", "--collect", "--pipe",
 		"--setenv=HOME=" + account.HomeDir, "--setenv=XDG_STATE_HOME=" + filepath.Join(account.HomeDir, ".local/state"),
-		"/usr/bin/local-vpn-kde", "networkmanager", "--runtime", "native", "--action", "import", "--yes"}
+		"/usr/bin/kvpn", "networkmanager", "--runtime", "native", "--action", "import", "--yes"}
 	if err := run(account, args, true); err != nil {
-		return "", errors.New("NetworkManager profile import failed in desktop session; open local-vpn-kde diagnostics")
+		return "", errors.New("NetworkManager profile import failed in desktop session; open diagnostics in kvpn")
 	}
 	return "Installed and enrolled; desktop NetworkManager profile prepared. No VPN was connected.", nil
 }

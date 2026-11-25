@@ -38,7 +38,7 @@ Choose your runtime:
 | **System** | Arch Linux / CachyOS, x86_64 | Ubuntu 24.04+, Debian 13+, Fedora, Arch / CachyOS, x86-64 |
 | **Gateway** | System service, no Docker | Docker container |
 | **Installation** | Prebuilt local bundle | Build from the repository |
-| **Launch** | `local-vpn-kde` | `./run.sh` |
+| **Launch** | `kvpn` | `./run.sh` |
 
 Both options target Linux with KDE and NetworkManager. Installation requires internet access and administrator privileges.
 
@@ -58,7 +58,7 @@ The installer adds missing system dependencies, installs the application and set
 Launch the interface **without sudo**:
 
 ```bash
-local-vpn-kde
+kvpn
 ```
 
 > Native bundles are currently built locally; these instructions do not assume a published release download. See [native installer](portable-installer.md) for bundle contents and build commands.
@@ -128,11 +128,11 @@ A missing application-owned NetworkManager profile is created automatically. For
 
 ## Updates
 
-**Native (Arch or Debian package), from 0.4.4:**
+**Native (Arch or Debian package):** self-update is available from 0.4.4. If you still have 0.4.4, use `local-vpn-kde` in place of `kvpn` for your first update. The old command works throughout 0.4.x and will be removed in 0.5.0.
 
 ```bash
-local-vpn-kde update          # asks before installing
-local-vpn-kde update --check  # only check
+kvpn update          # asks before installing
+kvpn update --check  # only check
 ```
 
 The TUI has the same in **Settings → [u] Check for updates**. It takes the latest GitHub release, verifies the `SHA256SUMS` checksum and the package name, version and architecture, and installs it only if no other package changes. Members of `local-vpn-kde-users` need no password. Releases are not signed yet: the check catches corrupted or mixed-up downloads, not a replaced release on GitHub. Before 0.4.4, upgrade once by hand (`sudo pacman -U` with the release package).

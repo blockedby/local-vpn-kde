@@ -31,7 +31,7 @@ profile import runs through that session's systemd manager, without activating
 it. A foreign or active profile is subject to the existing ownership protections;
 an actual import failure exits with “package installed; desktop setup incomplete”.
 
-On a fresh install, open `local-vpn-kde` **without sudo**, add your server/profile,
+On a fresh install, open `kvpn` **without sudo**, add your server/profile,
 then connect when ready. If configuration or the desktop session is absent,
 NetworkManager import is explicitly deferred to the normal setup/first-connect
 flow. The installer never creates root-owned desktop state, starts a gateway or
@@ -42,7 +42,7 @@ through the normal full-system upgrade workflow; the installer does not perform
 a database-only refresh or retry.
 
 This is an installer, not a zero-install VPN daemon. After installation use
-`local-vpn-kde` as the desktop user. It installs root-owned files, systemd units,
+`kvpn` as the desktop user. It installs root-owned files, systemd units,
 sysusers/tmpfiles and polkit integration through pacman. Existing pre-transaction
 hooks guard upgrades/removal and retain private state. Remove using
 `sudo pacman -R local-vpn-kde-native`. Installation does not connect the VPN.

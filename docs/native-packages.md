@@ -63,9 +63,11 @@ sudo pacman -U ./local-vpn-kde-native-0.2.0rc1-1-x86_64.pkg.tar.zst
 # Debian 13
 sudo apt install ./local-vpn-kde-native_0.2.0~rc1_amd64.deb
 
-# Both: launch as your desktop user
+# These v0.2.0 candidates predate kvpn; launch as your desktop user:
 local-vpn-kde
 ```
+
+With a current candidate, launch the interface with `kvpn`.
 
 The package-manager installation does not choose a desktop user, enroll one,
 start a gateway or activate VPN. Initial profile setup in the TUI requests desktop

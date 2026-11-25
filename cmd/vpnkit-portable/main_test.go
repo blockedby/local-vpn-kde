@@ -137,7 +137,7 @@ func TestDesktopOnboarding(t *testing.T) {
 				t.Fatalf("outcome=%q err=%v commands=%v", outcome, err, commands)
 			}
 			if len(commands) == 2 {
-				want := []string{"/usr/bin/systemd-run", "--user", "--quiet", "--wait", "--collect", "--pipe", "--setenv=HOME=/home/desktop", "--setenv=XDG_STATE_HOME=/home/desktop/.local/state", "/usr/bin/local-vpn-kde", "networkmanager", "--runtime", "native", "--action", "import", "--yes"}
+				want := []string{"/usr/bin/systemd-run", "--user", "--quiet", "--wait", "--collect", "--pipe", "--setenv=HOME=/home/desktop", "--setenv=XDG_STATE_HOME=/home/desktop/.local/state", "/usr/bin/kvpn", "networkmanager", "--runtime", "native", "--action", "import", "--yes"}
 				if !reflect.DeepEqual(commands[1], want) {
 					t.Fatalf("unexpected mutation: %v", commands[1])
 				}

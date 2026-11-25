@@ -85,6 +85,15 @@ python -c '\''import json; s=json.load(open("/work/status.json")); assert s["run
 test -d /home/builder/.local/state/local-vpn-kde
 runuser -u builder -- env HOME=/home/builder XDG_STATE_HOME=/home/builder/.local/state \
   /usr/bin/local-vpn-kde bridge </dev/null
+[[ $(readlink /usr/bin/kvpn) == local-vpn-kde ]]
+help=$(runuser -u builder -- kvpn --help)
+grep -Fq "Usage: kvpn " <<< "$help"
+help=$(runuser -u builder -- kvpn update --help)
+grep -Fq "Usage: kvpn update [--check]" <<< "$help"
+if check=$(runuser -u builder -- kvpn update --check 2>&1); then exit 1; fi
+grep -Fq "this is a development build" <<< "$check"
+runuser -u builder -- env HOME=/home/builder XDG_STATE_HOME=/home/builder/.local/state \
+  /usr/bin/kvpn bridge </dev/null
 [[ $(stat -c %a /home/builder/.local/state/local-vpn-kde) == 700 ]]
 [[ $(stat -c %a /home/builder/.local/state/local-vpn-kde/vibe-vpn) == 700 ]]
 VPNKIT_NATIVE_PACKAGE_LAB=1 /work/profile-fixture
@@ -114,6 +123,7 @@ pacman -U --noconfirm "${packages[0]}"
 printf retained > /etc/local-vpn-kde/package-lab-retain
 pacman -R --noconfirm local-vpn-kde-native
 test ! -e /usr/bin/local-vpn-kde
+test ! -L /usr/bin/kvpn
 test ! -e /usr/libexec/local-vpn-kde/local-vpn-kde.bin
 test ! -e /etc/netns/vpnkit-native/resolv.conf
 test "$(</etc/local-vpn-kde/package-lab-retain)" == retained

@@ -62,7 +62,7 @@ def publish(assets, version, commit, pr, repository):
 Native packages: Arch/CachyOS x86_64 `.pkg.tar.zst` and Debian 13 amd64 `.deb`.
 They include the compiled OpenTUI, Go services and sing-box. NetworkManager,
 OpenVPN, systemd, polkit and networking utilities remain system dependencies.
-Install using pacman/apt, then run `local-vpn-kde` as your desktop user.
+Install using pacman/apt, then run `kvpn` as your desktop user.
 Package installation does not activate a VPN; initial TUI setup requests authorization.
 
 The `local-vpn-kde-{tag}-linux-amd64.tar.gz` archive is the separate Docker installer.
