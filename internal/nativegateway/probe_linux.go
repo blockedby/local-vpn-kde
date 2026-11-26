@@ -267,7 +267,9 @@ func parseRoutes(data []byte, interfaces []InterfaceState) ([]RouteState, []rout
 			return nil, nil, fmt.Errorf("invalid route type: %w", err)
 		}
 		states = append(states, RouteState{Table: table, Destination: destination, Gateway: gateway, Interface: device, Protocol: protocol})
-		facts = append(facts, routeFact{destination: destination, gateway: gateway, device: device, preferred: preferred, routeType: routeType})
+		if table != RoutingTable {
+			facts = append(facts, routeFact{destination: destination, gateway: gateway, device: device, preferred: preferred, routeType: routeType})
+		}
 	}
 	return states, facts, nil
 }

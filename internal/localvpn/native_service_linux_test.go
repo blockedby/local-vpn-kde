@@ -54,7 +54,7 @@ func newNativeServiceTestFixture(t *testing.T, states map[string][]byte) (*Nativ
 				}
 				return append([]byte(nil), data...), nil
 			case "start", "stop":
-				if len(args) != 2 || (args[1] != nativegateway.GatewayUnit && args[1] != nativegateway.NetworkUnit) {
+				if len(args) != 2 || (args[1] != nativegateway.GatewayUnit && args[1] != nativegateway.NetworkUnit && args[1] != nativegateway.EgressUnit) {
 					return nil, errors.New("unexpected lifecycle arguments")
 				}
 				return nil, nil
@@ -64,6 +64,17 @@ func newNativeServiceTestFixture(t *testing.T, states map[string][]byte) (*Nativ
 		},
 	}
 	return service, &calls
+}
+
+func TestRepairValidatesEgressUnitBeforeStartingIt(t *testing.T) {
+	for _, dropIns := range []string{"", "/etc/systemd/system/override.conf"} {
+		state := nativeServiceTestStateWithProperties("loaded", "inactive", "dead", "oneshot", dropIns, filepath.Join(nativeServiceUnitDirectory, nativegateway.EgressUnit), "no")
+		service, calls := newNativeServiceTestFixture(t, map[string][]byte{nativegateway.EgressUnit: state})
+		err := service.repairEgress(context.Background())
+		if (err == nil) != (dropIns == "") || (len(nativeServiceLifecycleTestCalls(*calls, "start")) == 1) != (dropIns == "") {
+			t.Fatalf("drop-ins %q: err=%v calls=%v", dropIns, err, *calls)
+		}
+	}
 }
 
 func nativeServiceTestState(load, active, sub, unitType, dropIns string) []byte {

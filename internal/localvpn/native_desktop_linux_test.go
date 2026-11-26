@@ -75,7 +75,7 @@ func installNativeDesktopFakes(t *testing.T, service nativeDesktopService, nm na
 	t.Helper()
 	old := newNativeDesktopDependencies
 	newNativeDesktopDependencies = func(string) nativeDesktopDependencies {
-		return nativeDesktopDependencies{service: service, nm: nm}
+		return nativeDesktopDependencies{service: service, nm: nm, egress: func(context.Context) (bool, error) { return true, nil }}
 	}
 	t.Cleanup(func() { newNativeDesktopDependencies = old })
 }
@@ -107,6 +107,26 @@ func TestRunNativeDesktopLifecycleOrdering(t *testing.T) {
 				t.Fatal("native lifecycle emitted a legacy runtime reference")
 			}
 		})
+	}
+}
+
+func TestReadyGatewayWithBrokenEgress(t *testing.T) {
+	events := []string{}
+	service := &fakeNativeDesktopService{events: &events, status: GatewayStatus{Ready: true, Network: "active"}}
+	nm := &fakeNativeDesktopNM{events: &events, status: "configured=yes\nactive=yes\n"}
+	old := newNativeDesktopDependencies
+	defer func() { newNativeDesktopDependencies = old }()
+	newNativeDesktopDependencies = func(string) nativeDesktopDependencies {
+		return nativeDesktopDependencies{service: service, nm: nm, egress: func(context.Context) (bool, error) { return false, nil }, repair: func(context.Context) error { events = append(events, "repair"); return nil }}
+	}
+	base := t.TempDir()
+	var output bytes.Buffer
+	if err := RunNativeDesktop(context.Background(), base, "status", false, &output); err != nil || !strings.Contains(output.String(), `"container":"egress-unavailable"`) {
+		t.Fatalf("status %s: %v", output.String(), err)
+	}
+	events = nil
+	if err := RunNativeDesktop(context.Background(), base, "start", true, io.Discard); err != nil || !reflect.DeepEqual(events, []string{"service-status", "repair", "service-start", "nm-connect"}) {
+		t.Fatalf("%v: %v", events, err)
 	}
 }
 

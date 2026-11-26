@@ -186,6 +186,9 @@ func runLab() (runErr error) {
 		return err
 	}
 	repairBefore := mutations.count
+	if ready, err := inspector.EgressReady(context.Background()); err != nil || ready {
+		return fmt.Errorf("missing routes not detected: ready=%t err=%v", ready, err)
+	}
 	if err := callController("recovered start", func(ctx context.Context) error {
 		return controller.Start(ctx, uplink)
 	}); err != nil {
@@ -193,6 +196,9 @@ func runLab() (runErr error) {
 	}
 	if mutations.count-repairBefore != 2 {
 		return errors.New("route repair mutated more than the two missing routes")
+	}
+	if ready, err := inspector.EgressReady(context.Background()); err != nil || !ready {
+		return fmt.Errorf("repaired routes not ready: %v", err)
 	}
 	if err := verifyControllerStatus("after missing-route recovery", controller, true); err != nil {
 		return err

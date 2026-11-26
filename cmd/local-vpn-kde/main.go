@@ -272,13 +272,19 @@ func run(args []string) error {
 		case "status":
 			opts, err = a.Status(ctx)
 		case "gateway", "connect", "off":
-			opts = localvpn.AutostartOptions{Gateway: *action != "off", Connect: *action == "connect"}
+			opts, err = a.Status(ctx)
+			if err != nil {
+				return err
+			}
+			opts.Gateway, opts.Connect = *action != "off", *action == "connect"
 			if *runtimeMode == "native" {
 				opts.Runtime = "native"
 			}
 			err = a.Configure(ctx, opts)
 		case "run":
 			return a.Run(ctx)
+		case "resume":
+			return a.Resume(ctx)
 		default:
 			return fmt.Errorf("invalid autostart action")
 		}

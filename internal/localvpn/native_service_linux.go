@@ -120,7 +120,7 @@ func nativeServiceCommandError(ctx context.Context, err error, message string) e
 
 func nativeServiceUnitPath(name string) (string, bool) {
 	switch name {
-	case nativegateway.GatewayUnit, nativegateway.NetworkUnit:
+	case nativegateway.GatewayUnit, nativegateway.NetworkUnit, nativegateway.EgressUnit:
 		return filepath.Join(nativeServiceUnitDirectory, name), true
 	default:
 		return "", false
@@ -272,9 +272,6 @@ func sameNativeServiceUnitStat(a, b unix.Stat_t) bool {
 }
 
 func nativeServiceExpectedUnit(name string) (string, bool) {
-	if name != nativegateway.GatewayUnit && name != nativegateway.NetworkUnit {
-		return "", false
-	}
 	contents, ok := nativegateway.UnitFiles()[name]
 	return contents, ok
 }
@@ -282,7 +279,11 @@ func nativeServiceExpectedUnit(name string) (string, bool) {
 func (s NativeService) verifyInstalledUnits(ctx context.Context) error {
 	// Verify every unit before issuing any lifecycle command. Network is first
 	// because the gateway's fixed unit Requires it, but neither is started here.
-	for _, name := range []string{nativegateway.NetworkUnit, nativegateway.GatewayUnit} {
+	return s.verifyUnits(ctx, nativegateway.NetworkUnit, nativegateway.GatewayUnit)
+}
+
+func (s NativeService) verifyUnits(ctx context.Context, names ...string) error {
+	for _, name := range names {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -359,7 +360,7 @@ func parseNativeSystemdUnitState(data []byte) (nativeSystemdUnitState, error) {
 
 func (s NativeService) queryUnit(ctx context.Context, name string) (nativeSystemdUnitState, error) {
 	var empty nativeSystemdUnitState
-	if name != nativegateway.GatewayUnit && name != nativegateway.NetworkUnit {
+	if _, ok := nativeServiceUnitPath(name); !ok {
 		return empty, errors.New("native systemd unit is not fixed")
 	}
 	data, err := s.call(ctx, "systemctl", "show", "--no-pager", "--plain", "--property="+nativeServiceShowProperties, name)
@@ -460,13 +461,28 @@ func validateNativeMutationState(name string, state nativeSystemdUnitState) erro
 	switch name {
 	case nativegateway.GatewayUnit:
 		expectedType = "notify"
-	case nativegateway.NetworkUnit:
+	case nativegateway.NetworkUnit, nativegateway.EgressUnit:
 		expectedType = "oneshot"
 	}
 	if state.Type != expectedType {
 		return errors.New("native systemd unit type is invalid")
 	}
 	return nil
+}
+
+func (s NativeService) repairEgress(ctx context.Context) error {
+	if err := s.verifyUnits(ctx, nativegateway.EgressUnit); err != nil {
+		return err
+	}
+	state, err := s.queryUnit(ctx, nativegateway.EgressUnit)
+	if err != nil {
+		return err
+	}
+	if err := validateNativeMutationState(nativegateway.EgressUnit, state); err != nil {
+		return err
+	}
+	_, err = s.call(ctx, "systemctl", "start", nativegateway.EgressUnit)
+	return err
 }
 
 func (s NativeService) mutationPreflight(ctx context.Context) error {

@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+export LC_ALL=C
+case ${2-} in up|down|dhcp4-change|reapply) ;; *) exit 0 ;; esac
+case ${1-} in ''|-*|*[!a-zA-Z0-9_.-]*) exit 0 ;; esac
+[ "$1" = "${DEVICE_IFACE-}" ] || exit 0
+case $(/usr/bin/nmcli -g GENERAL.TYPE device show "$1") in wifi|ethernet) ;; *) exit 0 ;; esac
+/usr/bin/systemctl is-active --quiet local-vpn-kde-network.service || exit 0
+exec /usr/bin/systemctl --no-block start local-vpn-kde-egress.service

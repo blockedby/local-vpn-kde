@@ -138,7 +138,7 @@ export function menuItems(state: AppState): MenuItem[] {
     if (state.screen === "home")
       return [
         ...(!state.ready()
-          ? [{ key: HOME_CONNECT_KEY, label: `Запустить ${state.serviceObject()}`, run: run("backend/start") }]
+          ? [state.status?.gateway_state === "egress-unavailable" ? { key: HOME_CONNECT_KEY, label: "Восстановить сеть и подключить VPN", run: run("start") } : { key: HOME_CONNECT_KEY, label: `Запустить ${state.serviceObject()}`, run: run("backend/start") }]
           : []),
         ...(state.ready()
           ? [
@@ -174,7 +174,7 @@ export function menuItems(state: AppState): MenuItem[] {
             else state.notify(`Смена режима доступна после запуска ${state.nativeMode() ? "сервиса" : "Docker"}.`);
           },
         },
-        ...(["healthy", "unhealthy", "running", "stopped", "starting"].includes(
+        ...(["healthy", "unhealthy", "egress-unavailable", "running", "stopped", "starting"].includes(
           state.status?.gateway_state ?? state.status?.vpn_state ?? "",
         )
           ? [
@@ -187,6 +187,7 @@ export function menuItems(state: AppState): MenuItem[] {
           : []),
       ];
     if (state.screen === "settings") return [
+      ...(state.nativeInstalled() ? [{ key: "w", label: `Автостарт после сна: ${state.autostart ? state.autostart.resume ? "да" : "нет" : "не проверен"}`, run: () => { const options = state.autostart; if (options) void state.perform("autostart/set", state.autostartValue(options.gateway, options.connect, !options.resume)); else void state.perform("autostart/read"); } }] : []),
       { key: "a", label: `Автозапуск: ${state.autostart ? `шлюз ${state.autostart.gateway ? "да" : "нет"}, VPN ${state.autostart.connect ? "да" : "нет"}` : "не проверен"} · служба ${state.serviceState ? `${state.activeServiceLabel(state.serviceState.active)}/${({ enabled: "вкл", disabled: "выкл", masked: "маска" } as Record<string, string>)[state.serviceState.enabled] ?? "неизвестно"}` : "неизвестно"}`, run: () => state.open("autostart") },
       { key: "m", label: `Режим: ${state.status?.routing_mode === "smart" ? "умный" : state.status?.routing_mode === "strict" ? "строгий" : "неизвестно"}`, run: () => void state.perform("toggle-mode") },
       { key: "c", label: "Профили и источники", run: () => state.open(state.nativeInstalled() && state.status?.subscription === "configured" ? "profiles" : "subscription") },
@@ -198,7 +199,7 @@ export function menuItems(state: AppState): MenuItem[] {
       }] : []),
       ...(state.updatedTo ? [{ key: "R", label: "Перезапустить интерфейс", run: () => state.relaunch() }] : []),
       ...(!state.ready() ? [{ key: "s", label: `Запустить ${state.serviceObject()}`, run: run("backend/start") }] : []),
-      ...(["healthy", "unhealthy", "running", "stopped", "starting"].includes(state.status?.gateway_state ?? state.status?.vpn_state ?? "") ? [{ key: "z", label: state.nativeMode() ? "Остановить сервис" : "Остановить Docker и VPN", run: () => state.confirm("stop") }] : []),
+      ...(["healthy", "unhealthy", "egress-unavailable", "running", "stopped", "starting"].includes(state.status?.gateway_state ?? state.status?.vpn_state ?? "") ? [{ key: "z", label: state.nativeMode() ? "Остановить сервис" : "Остановить Docker и VPN", run: () => state.confirm("stop") }] : []),
     ];
     if (state.screen === "autostart") {
       if (!state.autostart) return [{ key: "u", label: "Загрузить настройки", run: run("autostart/read") }];
@@ -214,6 +215,7 @@ export function menuItems(state: AppState): MenuItem[] {
     if (state.screen === "servers") {
       if (!state.ready())
         return [
+          ...(state.nativeInstalled() && state.status?.gateway_state === "egress-unavailable" ? [{ key: "r", label: "Восстановить сеть и обновить подписку", run: run("servers/refresh") }] : []),
           { key: "s", label: `Запустить ${state.serviceObject()}`, run: run("backend/start") },
         ];
       if (state.nativePreviewOnly())
@@ -284,7 +286,8 @@ export function defineMenuActions(state: AppState, items: MenuItem[]): ActionDef
       reason = "Смена режима доступна после запуска Docker.";
     } else {
       const request: Action | undefined = screen === "home" && item.key === "m" ? "toggle-mode"
-        : screen === "home" && item.key === HOME_CONNECT_KEY && (!state.ready() || state.status?.subscription === "configured") ? state.ready() ? "start" : "backend/start"
+        : screen === "home" && item.key === HOME_CONNECT_KEY && (!state.ready() || state.status?.subscription === "configured") ? state.ready() || state.status?.gateway_state === "egress-unavailable" ? "start" : "backend/start"
+        : screen === "settings" && item.key === "w" ? state.autostart ? "autostart/set" : "autostart/read"
         : screen === "autostart" && item.key === "u" ? "autostart/read"
         : screen === "autostart" && (item.key === "g" || item.key === "a") ? "autostart/set"
         : screen === "diagnostics" && item.key === "u" ? "diagnostics"

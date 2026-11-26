@@ -480,12 +480,14 @@ export class AppState {
     }
     return names[action] ?? "Операция";
   }
-  autostartValue(gateway: boolean, connect: boolean) {
+  autostartValue(gateway: boolean, connect: boolean, resume = this.autostart?.resume) {
     const value: {
       gateway: boolean;
       connect: boolean;
+      resume?: boolean;
       runtime?: "docker" | "native";
     } = { gateway, connect };
+    if (resume !== undefined) value.resume = resume;
     if (this.autostart?.runtime !== undefined)
       value.runtime = this.autostart.runtime;
     return JSON.stringify(value);
@@ -535,7 +537,7 @@ export class AppState {
         this.batch || this.homeTesting || [...this.tasks.values()].some(task => !compatible(action, task.action))) return;
     this.pendingScreenRead = undefined;
     if ((action === "profiles/list" && this.screen === "profiles") ||
-        (action === "autostart/read" && this.screen === "autostart")) await this.perform(action);
+        (action === "autostart/read" && (this.screen === "autostart" || this.screen === "settings"))) await this.perform(action);
   }
   notify(text: string, error = false) {
     this.noticeIdentity = undefined;
@@ -589,7 +591,7 @@ export class AppState {
     }
     if (loadScreen && screen === "profiles") { this.pendingScreenRead = "profiles/list"; void this.loadPendingScreenRead(); }
     if(screen==="profile-name" || screen==="profile-source") this.editorValue="";
-    if (loadScreen && screen === "autostart") { this.pendingScreenRead = "autostart/read"; void this.loadPendingScreenRead(); }
+    if (loadScreen && (screen === "autostart" || load && screen === "settings" && this.nativeInstalled())) { this.pendingScreenRead = "autostart/read"; void this.loadPendingScreenRead(); }
     if (screen === "target") this.editorValue = this.target;
     this.paint();
     if (load) this.loadCatalogIfShown();

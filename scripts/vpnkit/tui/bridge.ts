@@ -59,7 +59,7 @@ export interface Server {
   download_seconds?: number;
   downloaded_bytes?: number;
 }
-export interface AutostartOptions { gateway: boolean; connect: boolean; last_result?: string; runtime?: "docker" | "native" }
+export interface AutostartOptions { gateway: boolean; connect: boolean; resume?: boolean; last_result?: string; runtime?: "docker" | "native" }
 export interface AutostartServiceState { enabled: string; active: string }
 export interface Profile { id: string; name: string; kind: "subscription" | "server"; count: number; stale: boolean }
 export interface Reply {

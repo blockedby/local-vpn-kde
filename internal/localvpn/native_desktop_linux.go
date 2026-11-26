@@ -38,6 +38,8 @@ type nativeDesktopDependencies struct {
 	service nativeDesktopService
 	nm      nativeDesktopNetworkManager
 	policy  func(context.Context, io.Writer) error
+	egress  func(context.Context) (bool, error)
+	repair  func(context.Context) error
 }
 
 // This private factory is the dependency seam used by unit tests. Production
@@ -46,6 +48,10 @@ type nativeDesktopDependencies struct {
 var newNativeDesktopDependencies = func(base string) nativeDesktopDependencies {
 	return nativeDesktopDependencies{
 		service: NativeService{},
+		egress:  nativeEgressReady,
+		repair: func(ctx context.Context) error {
+			return NativeOperationsClient(ctx, []string{"repair-egress"}, io.Discard)
+		},
 		policy: func(ctx context.Context, out io.Writer) error {
 			return NativeOperationsClient(ctx, []string{"toggle-mode"}, out)
 		},
@@ -174,6 +180,12 @@ func runNativeDesktopStatus(ctx context.Context, base string, output io.Writer, 
 			}
 		}
 	}
+	state := nativeDesktopGatewayState(gateway)
+	if gateway.Ready {
+		if ok, _ := dependencies.egress(ctx); !ok {
+			state = "egress-unavailable"
+		}
+	}
 	status := struct {
 		Container                string `json:"container"`
 		NetworkManagerConfigured string `json:"networkmanager_configured"`
@@ -181,7 +193,7 @@ func runNativeDesktopStatus(ctx context.Context, base string, output io.Writer, 
 		Runtime                  string `json:"runtime"`
 		RoutingPolicy            string `json:"routing_policy"`
 	}{
-		Container:                nativeDesktopGatewayState(gateway),
+		Container:                state,
 		NetworkManagerConfigured: configured,
 		NetworkManagerActive:     active,
 		Runtime:                  "native",
@@ -197,6 +209,10 @@ func runNativeDesktopStatus(ctx context.Context, base string, output io.Writer, 
 // owned NetworkManager profile. Mutations require explicit authorization via
 // yes; action is one of status, backend-start, start, disconnect, or stop.
 func RunNativeDesktop(ctx context.Context, base string, action string, yes bool, output io.Writer) error {
+	return runNativeDesktop(ctx, base, action, yes, output, nil)
+}
+
+func runNativeDesktop(ctx context.Context, base string, action string, yes bool, output io.Writer, guard func(context.Context) error) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -239,8 +255,16 @@ func RunNativeDesktop(ctx context.Context, base string, action string, yes bool,
 		if err = nativeDesktopPhase(output, "gateway-start"); err != nil {
 			return err
 		}
-		return dependencies.service.Start(ctx)
+		if err := dependencies.service.Start(ctx); err != nil {
+			return err
+		}
+		return dependencies.ensureEgress(ctx)
 	case "start":
+		if guard != nil {
+			if err := guard(ctx); err != nil {
+				return err
+			}
+		}
 		if err = nativeDesktopPhase(output, "gateway-status"); err != nil {
 			return err
 		}
@@ -253,14 +277,29 @@ func RunNativeDesktop(ctx context.Context, base string, action string, yes bool,
 				return err
 			}
 		}
+		if before.Network == "active" {
+			if err = dependencies.ensureEgress(ctx); err != nil {
+				return err
+			}
+		}
 		if err = nativeDesktopPhase(output, "gateway-start"); err != nil {
 			return err
 		}
 		if err = dependencies.service.Start(ctx); err != nil {
 			return err
 		}
+		if before.Network != "active" {
+			if err = dependencies.ensureEgress(ctx); err != nil {
+				return err
+			}
+		}
 		// Only invalidate the old tunnel after service startup succeeded.
 		// A startup failure must preserve connection intent for explicit repair.
+		if guard != nil {
+			if err := guard(ctx); err != nil {
+				return err
+			}
+		}
 		if !before.Ready {
 			if err = nativeDesktopPhase(output, "networkmanager-disconnect-stale"); err != nil {
 				return err
@@ -304,6 +343,13 @@ func RunNativeDesktop(ctx context.Context, base string, action string, yes bool,
 		return dependencies.service.Stop(ctx)
 	}
 	return errors.New("invalid native desktop action")
+}
+
+func (d nativeDesktopDependencies) ensureEgress(ctx context.Context) error {
+	if ok, _ := d.egress(ctx); ok {
+		return nil
+	}
+	return d.repair(ctx)
 }
 
 // A gateway restart invalidates the existing OpenVPN session even if NM still
