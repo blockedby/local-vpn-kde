@@ -62,7 +62,7 @@ summary = []
 
 
 def cli(action, value=None):
-    result = subprocess.run(['/usr/bin/local-vpn-kde', 'bridge'], input=json.dumps({'id':'qa','action':action, 'value':value})+'\n',
+    result = subprocess.run(['/usr/bin/kvpn', 'bridge'], input=json.dumps({'id':'qa','action':action, 'value':value})+'\n',
                             capture_output=True, text=True, timeout=45, check=True)
     reply = next(json.loads(line) for line in result.stdout.splitlines() if '"ok"' in line)
     assert reply['ok'], 'installed CLI request failed: '+action
@@ -123,7 +123,7 @@ def setup():
     master, slave = pty.openpty()
     try:
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 140, 0, 0))
-        process = subprocess.Popen(['/usr/bin/local-vpn-kde','ui'], stdin=slave, stdout=slave, stderr=slave,
+        process = subprocess.Popen(['/usr/bin/kvpn','ui'], stdin=slave, stdout=slave, stderr=slave,
                                    env={**os.environ,'TERM':'xterm-256color','COLORTERM':'truecolor'}, start_new_session=True)
     finally:
         os.close(slave)

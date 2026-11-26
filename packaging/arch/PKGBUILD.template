@@ -95,9 +95,7 @@ package() {
   install -Dm644 packaging/arch/native-netns-resolv.conf \
     "$pkgdir/etc/netns/vpnkit-native/resolv.conf"
 
-  install -Dm755 packaging/arch/local-vpn-kde "$pkgdir/usr/bin/local-vpn-kde"
-  # Short alias for the same launcher.
-  ln -s local-vpn-kde "$pkgdir/usr/bin/kvpn"
+  install -Dm755 packaging/arch/local-vpn-kde "$pkgdir/usr/bin/kvpn"
   install -Dm644 build/units/*.service -t "$pkgdir/usr/lib/systemd/system"
   install -Dm644 packaging/arch/local-vpn-kde-native.sysusers \
     "$pkgdir/usr/lib/sysusers.d/local-vpn-kde-native.conf"

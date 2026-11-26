@@ -30,6 +30,10 @@ a release PR without explicit release authorization.
    worktree/PR workflow. Preserve unrelated edits.
 2. Update `VERSION` in the PR. Choose an unused stable version greater than all
    existing stable tags; do not infer stable approval from successful tests.
+   Add `docs/releases/<VERSION>.md` with the patch notes: what changed for users,
+   breaking changes and upgrade steps, written for this release. The workflow
+   publishes that file as the release body (plus a revision/checksum line) and
+   refuses to release without it.
 3. Validate locally: `go test -race ./...`, build the Go bridge, then locked Bun
    dependencies, `bun run check` and `bun test` in `scripts/vpnkit/tui` for a release
    candidate. Validate changed installer/network behavior in disposable labs.

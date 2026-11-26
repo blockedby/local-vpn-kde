@@ -23,7 +23,7 @@ info = source_path.lstat()
 assert stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o600, "private lab server file required"
 source = source_path.read_text().strip()
 assert source.startswith(("hy2://", "hysteria2://")), "Hysteria2 alternate source required"
-proc = subprocess.Popen(["/usr/bin/local-vpn-kde", "bridge"], stdin=subprocess.PIPE,
+proc = subprocess.Popen(["/usr/bin/kvpn", "bridge"], stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
 replies = queue.Queue()
 threading.Thread(target=lambda: [replies.put(json.loads(line)) for line in proc.stdout], daemon=True).start()

@@ -44,8 +44,6 @@ kvpn
 
 Run the installer once with sudo, then launch the interface as your regular user. No Go, Bun or Docker is needed on this computer. Installation does not connect the VPN.
 
-The old command `local-vpn-kde` still works throughout 0.4.x and will be removed in 0.5.0.
-
 [Build a bundle and see what it contains →](docs/portable-installer.md)
 
 ### Docker · Linux x86-64 with KDE

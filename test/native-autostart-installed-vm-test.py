@@ -34,7 +34,7 @@ if os.environ.get('VPNKIT_NATIVE_VM_LAB') != '1':
 ssh = os.path.abspath(args.ssh)
 unit = 'local-vpn-kde-native-autostart.service'
 session_unit = 'vpnkit-lab-graphical-session.target'
-cli = '/usr/bin/local-vpn-kde'
+cli = '/usr/bin/kvpn'
 
 
 def remote(command, timeout=180, check=True):
@@ -172,7 +172,7 @@ signals={name:bool(re.search(pattern,journal,re.I)) for name,pattern in {'dns':r
 _,routes=run(['ip','-4','route','show','table','all'])
 _,rules=run(['ip','-4','rule','show'])
 resolver=pathlib.Path('/etc/resolv.conf').read_text(errors='replace')
-_,status=run(['/usr/bin/local-vpn-kde','autostart','--runtime','native','--action','status'])
+_,status=run(['/usr/bin/kvpn','autostart','--runtime','native','--action','status'])
 try: result=json.loads(status)
 except ValueError: result={}
 safe_status={k:result.get(k) for k in ('last_result','last_reason','last_gateway_reason')}

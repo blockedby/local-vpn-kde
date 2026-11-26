@@ -45,7 +45,7 @@ def descendants(pid):
 for arguments in (['--demo'], []):
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 80, 0, 0))
-    child = subprocess.Popen(['runuser', '-u', 'builder', '--', '/usr/bin/local-vpn-kde', 'ui', *arguments],
+    child = subprocess.Popen(['runuser', '-u', 'builder', '--', '/usr/bin/kvpn', 'ui', *arguments],
                              stdin=slave, stdout=slave, stderr=slave,
                              env={**os.environ, 'TERM': 'xterm-256color'}, start_new_session=True)
     os.close(slave)

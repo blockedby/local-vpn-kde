@@ -20,7 +20,7 @@ import time
 assert os.environ.get("VPNKIT_NATIVE_VM_LAB") == "1", "disposable-lab opt-in required"
 assert pathlib.Path("/etc/hostname").read_text().strip() == "vpn-native-lab", "wrong lab"
 os.umask(0o077)
-proc = subprocess.Popen(["/usr/bin/local-vpn-kde", "bridge"], stdin=subprocess.PIPE,
+proc = subprocess.Popen(["/usr/bin/kvpn", "bridge"], stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
 replies = queue.Queue()
 threading.Thread(target=lambda: [replies.put(json.loads(line)) for line in proc.stdout], daemon=True).start()

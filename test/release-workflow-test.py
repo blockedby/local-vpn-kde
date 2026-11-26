@@ -24,6 +24,7 @@ EVENT = {'action':'closed','repository':{'full_name':REPO},'pull_request':{
     'base':{'ref':'main','repo':{'full_name':REPO}}, 'merge_commit_sha':COMMIT,
 }}
 FILES = [{'filename':'VERSION','status':'modified'}]
+NOTES = '## What changed\n\n- Fixture change.\n'
 
 
 def checksums(directory):
@@ -51,6 +52,12 @@ def fixtures(root):
 class ReleasePlanTest(unittest.TestCase):
     def validate(self,event=EVENT,files=FILES,version='0.2.0\n',tags=('v0.1.0',),head=COMMIT):
         return plan.validate(event,files,version,tags,head,REPO)
+
+    def test_release_notes_are_required(self):
+        for text in [None,'',' \n\n']:
+            with self.subTest(text=text),self.assertRaises(ValueError): plan.check_notes(text)
+        self.assertEqual(plan.check_notes('\n- Fix.\n\n'),'- Fix.\n')
+        self.assertEqual(plan.notes_path('0.2.0'),'docs/releases/0.2.0.md')
 
     def test_merged_labelled_pr_uses_exact_revision(self):
         self.assertEqual(self.validate(),{'version':'0.2.0','tag':'v0.2.0','commit':COMMIT,'pr':18})
@@ -125,7 +132,7 @@ class ReleaseArtifactsTest(unittest.TestCase):
                 if 'releases' in args[-1]: return json.dumps([[{'tag_name':'v0.2.0'}]] if existing=='release' else [[]])
                 return json.dumps([{'ref':'refs/tags/v0.2.0'}])
             with self.subTest(existing=existing),patch.object(publish,'gh',gh),self.assertRaises((ValueError,RuntimeError)):
-                publish.publish(self.output,'0.2.0',COMMIT,'18',REPO)
+                publish.publish(self.output,'0.2.0',COMMIT,'18',REPO,NOTES)
             self.assertFalse(any('POST' in args or args[:2]==('release','create') for args,_ in calls))
 
     def test_publish_downloads_and_verifies_before_making_draft_public(self):
@@ -146,13 +153,37 @@ class ReleaseArtifactsTest(unittest.TestCase):
                 return ''
             with self.subTest(corrupt=corrupt),patch.object(publish,'gh',gh):
                 if corrupt:
-                    with self.assertRaises(ValueError): publish.publish(self.output,'0.2.0',COMMIT,'18',REPO)
-                else: publish.publish(self.output,'0.2.0',COMMIT,'18',REPO)
+                    with self.assertRaises(ValueError): publish.publish(self.output,'0.2.0',COMMIT,'18',REPO,NOTES)
+                else: publish.publish(self.output,'0.2.0',COMMIT,'18',REPO,NOTES)
             edits=[args for args in calls if args[:2]==('release','edit')]
             self.assertEqual(len(edits),0 if corrupt else 1)
             creates=[args for args in calls if args[:2]==('release','create')]
             self.assertIn('--draft',creates[0]); self.assertIn('--verify-tag',creates[0])
             self.assertFalse(any('--clobber' in args or 'PATCH' in args for args in calls))
+
+    def test_publisher_refuses_missing_notes_before_any_write(self):
+        self.assemble()
+        calls=[]
+        with patch.object(publish,'gh',lambda *a,**k: calls.append(a) or '[]'),self.assertRaises(ValueError):
+            publish.publish(self.output,'0.2.0',COMMIT,'18',REPO,None)
+        self.assertEqual(calls,[])
+
+    def test_published_notes_are_the_committed_text(self):
+        self.assemble()
+        seen={}
+        def gh(*args,**kwargs):
+            if args[0]=='api':
+                if args[-1].endswith('/releases'): return '[[]]'
+                if 'matching-refs' in args[-1]: return '[]'
+                if args[-1].endswith('/git/tags'): return json.dumps({'sha':'d'*40})
+                if '/commits/' in args[-1]: return json.dumps({'sha':COMMIT})
+                return '{}'
+            if args[:2]==('release','create'): seen['notes']=Path(args[args.index('--notes-file')+1]).read_text()
+            if args[:2]==('release','download'): shutil.copytree(self.output,Path(args[args.index('--dir')+1]))
+            return ''
+        with patch.object(publish,'gh',gh): publish.publish(self.output,'0.2.0',COMMIT,'18',REPO,NOTES)
+        self.assertTrue(seen['notes'].startswith(NOTES))
+        self.assertIn(COMMIT,seen['notes']); self.assertNotIn('Native packages:',seen['notes'])
 
 if __name__ == '__main__':
     unittest.main()

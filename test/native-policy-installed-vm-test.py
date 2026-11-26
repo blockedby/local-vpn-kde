@@ -4,7 +4,7 @@ import json, os, pathlib, select, subprocess
 assert os.environ.get('VPNKIT_NATIVE_VM_LAB')=='1'
 assert pathlib.Path('/etc/hostname').read_text().strip()=='vpn-native-lab'
 os.umask(0o077)
-proc=subprocess.Popen(['/usr/bin/local-vpn-kde','bridge'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,bufsize=1)
+proc=subprocess.Popen(['/usr/bin/kvpn','bridge'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,bufsize=1)
 sequence=0
 
 def run(action,ok=True):
