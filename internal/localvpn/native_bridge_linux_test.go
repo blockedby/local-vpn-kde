@@ -67,21 +67,26 @@ func installedUpdateBridge(t *testing.T) *Bridge {
 
 func TestBridgeUpdateInstallReportsRunningGateway(t *testing.T) {
 	b := installedUpdateBridge(t)
-	for _, running := range []bool{true, false} {
+	for _, tc := range []struct {
+		running bool
+		err     error
+		want    bool
+	}{{true, nil, true}, {false, nil, false}, {false, errors.New("bus timeout"), true}} {
+		running := tc.running
 		installed := false
 		b.installUpdate = func(_ context.Context, version string, _ nativeupdate.InstallOptions, _ func(string)) (string, error) {
 			installed = true
 			return version, nil
 		}
-		b.updateHooks.Running = func(context.Context) bool {
+		b.updateHooks.Running = func(context.Context) (bool, error) {
 			if !installed {
 				t.Fatal("checked the gateway before installation")
 			}
-			return running
+			return running, tc.err
 		}
 		reply, err := b.request(context.Background(), []byte(`{"action":"update/install","value":"0.4.4"}`), nil, nil)
 		update, ok := reply["update"].(map[string]any)
-		if err != nil || reply["ok"] != true || !ok || update["installed"] != "0.4.4" || update["gateway_running"] != running {
+		if err != nil || reply["ok"] != true || !ok || update["installed"] != "0.4.4" || update["gateway_running"] != tc.want {
 			t.Fatalf("running=%v: reply=%v err=%v", running, reply, err)
 		}
 	}
@@ -91,12 +96,12 @@ func TestBridgeGatewayRestartUsesExclusiveInstalledHook(t *testing.T) {
 	b := installedUpdateBridge(t)
 	for _, restartErr := range []error{nil, errors.New("service failed")} {
 		calls := 0
-		b.updateHooks.Restart = func(context.Context) error {
+		b.updateHooks.Restart = func(context.Context) (bool, error) {
 			calls++
 			if !b.mutationMu.writer || !b.operationMu.writer {
 				t.Fatal("restart must hold both exclusive lifecycle gates")
 			}
-			return restartErr
+			return restartErr == nil, restartErr
 		}
 		var output bytes.Buffer
 		if err := b.Serve(context.Background(), strings.NewReader(`{"action":"gateway/restart","progress":true}`+"\n"), &output); err != nil {
@@ -106,6 +111,9 @@ func TestBridgeGatewayRestartUsesExclusiveInstalledHook(t *testing.T) {
 		var event, reply map[string]any
 		if decoder.Decode(&event) != nil || event["phase"] != "gateway-restart" || decoder.Decode(&reply) != nil || calls != 1 || reply["ok"] != (restartErr == nil) {
 			t.Fatalf("restart: calls=%d event=%v reply=%v", calls, event, reply)
+		}
+		if restartErr == nil && reply["gateway_restarted"] != true {
+			t.Fatalf("missing restart result: %v", reply)
 		}
 		if restartErr != nil && (reply["reason"] != "gateway-restart-failed" || reply["error"] != restartErr.Error()) {
 			t.Fatalf("missing restart error: %v", reply)

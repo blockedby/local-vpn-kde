@@ -13,7 +13,8 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
-	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // HelperPath is the fixed executable behind the org.local-vpn-kde.update action.
@@ -159,71 +160,88 @@ func StartInstall(ctx context.Context, version string, options InstallOptions, p
 // Restart move a running VPN gateway onto the newly installed version; OpenApp
 // replaces the process with the new interface. Nil hooks are never offered.
 type Hooks struct {
-	Running func(ctx context.Context) bool
-	Restart func(ctx context.Context) error
+	// Running reports an error when the state is unknown.
+	Running func(ctx context.Context) (bool, error)
+	// Restart reports false when the gateway turned out not to be running.
+	Restart func(ctx context.Context) (bool, error)
 	OpenApp func() error
 }
 
-const (
-	gatewayUnit    = "local-vpn-kde-gateway.service"
-	restartTimeout = 3 * time.Minute
-)
+const gatewayUnit = "local-vpn-kde-gateway.service"
 
 // InstalledHooks act through the newly installed executables, so the new
 // version's own lifecycle code and unit expectations do the work.
 func InstalledHooks() Hooks {
-	return Hooks{
-		Running: func(ctx context.Context) bool {
-			_, err := ExecRunner(ctx, "/usr/bin/systemctl", "is-active", "--quiet", gatewayUnit)
-			return err == nil
+	hooks := Hooks{
+		Running: func(ctx context.Context) (bool, error) {
+			out, err := ExecRunner(ctx, "/usr/bin/systemctl", "show", "--property=ActiveState", "--value", gatewayUnit)
+			if err != nil {
+				return false, fmt.Errorf("check the VPN gateway: %w", err)
+			}
+			switch state := strings.TrimSpace(string(out)); state {
+			case "inactive", "":
+				return false, nil
+			default:
+				return true, nil
+			}
 		},
-		Restart: func(ctx context.Context) error {
-			// Once started, a restart must finish: killing it between stop and
-			// start would leave the gateway down and the VPN disconnected.
-			ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), restartTimeout)
-			defer cancel()
-			cmd := exec.CommandContext(ctx, HelperPath, "native-desktop", "--action", "restart", "--yes")
-			var stderr limitedOutput
-			cmd.Stdout, cmd.Stderr = io.Discard, &stderr
+		Restart: func(context.Context) (bool, error) {
+			// The helper owns the transaction: it checks everything before
+			// disconnecting, bounds each step and compensates on failure. It
+			// runs in its own process group so a terminal Ctrl+C cannot stop it
+			// between stopping and starting the gateway, and it is never killed.
+			cmd := exec.Command(HelperPath, "native-desktop", "--action", "restart", "--yes")
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			var stdout, stderr limitedOutput
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
 			if err := cmd.Run(); err != nil {
 				if message := lastLine(stderr.Bytes()); message != "" {
-					return errors.New(message)
+					return false, errors.New(message)
 				}
-				return err
+				return false, err
 			}
-			return nil
-		},
-		OpenApp: func() error {
-			return syscall.Exec(Launcher, []string{"kvpn"}, os.Environ())
+			return !strings.Contains(string(stdout.Bytes()), "phase=gateway-not-running"), nil
 		},
 	}
+	if _, err := unix.IoctlGetTermios(int(os.Stdin.Fd()), unix.TCGETS); err == nil {
+		hooks.OpenApp = func() error { return syscall.Exec(Launcher, []string{"kvpn"}, os.Environ()) }
+	}
+	return hooks
 }
 
 // Launcher opens the interface when started without arguments.
 const Launcher = "/usr/bin/kvpn"
 
 // lineReader lets a prompt give up on Ctrl+C even though the read itself
-// cannot be interrupted: the reading goroutine just stays parked on stdin.
-type lineReader struct{ lines chan string }
+// cannot be interrupted: the reading goroutine just stays parked on stdin. It
+// starts on the first prompt, so runs without prompts never touch stdin.
+type lineReader struct {
+	input io.Reader
+	lines chan string
+}
 
-func newLineReader(input io.Reader) *lineReader {
-	r := &lineReader{lines: make(chan string)}
+func (r *lineReader) start() {
+	r.lines = make(chan string)
 	go func() {
 		defer close(r.lines)
-		reader := bufio.NewReader(input)
+		reader := bufio.NewReader(r.input)
 		for {
 			line, err := reader.ReadString('\n')
+			if line != "" {
+				r.lines <- line
+			}
 			if err != nil {
 				return
 			}
-			r.lines <- line
 		}
 	}()
-	return r
 }
 
 // read returns false at end of input or when ctx is cancelled.
 func (r *lineReader) read(ctx context.Context) (string, bool) {
+	if r.lines == nil {
+		r.start()
+	}
 	select {
 	case line, ok := <-r.lines:
 		return line, ok
@@ -243,13 +261,17 @@ func RestartCommand(ctx context.Context, stdout io.Writer, gateway Hooks) error 
 	if os.Geteuid() == 0 {
 		return errors.New("run the restart as your desktop user, not root")
 	}
-	if gateway.Running == nil || gateway.Restart == nil || !gateway.Running(ctx) {
-		fmt.Fprintln(stdout, "The VPN gateway is not running. Nothing to restart; it starts on the installed version.")
-		return nil
+	if gateway.Restart == nil {
+		return errors.New("restart is available only in the installed package")
 	}
 	fmt.Fprintln(stdout, "Restarting the VPN gateway (the VPN drops for a few seconds)…")
-	if err := gateway.Restart(ctx); err != nil {
+	restarted, err := gateway.Restart(ctx)
+	if err != nil {
 		return fmt.Errorf("restarting the VPN gateway failed: %w", err)
+	}
+	if !restarted {
+		fmt.Fprintln(stdout, "The VPN gateway is not running. Nothing to restart; it starts on the installed version.")
+		return nil
 	}
 	fmt.Fprintln(stdout, "Restarted the VPN gateway.")
 	return nil
@@ -304,7 +326,7 @@ func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.W
 		fmt.Fprintln(stdout, "An update is available. Install it with: kvpn update")
 		return nil
 	}
-	answers := newLineReader(stdin)
+	answers := &lineReader{input: stdin}
 	ask := func(question string) bool {
 		fmt.Fprintf(stdout, "%s [y/N] ", question)
 		answer, ok := answers.read(ctx)
@@ -321,8 +343,12 @@ func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.W
 			return nil
 		}
 		fmt.Fprint(stdout, "Press Enter to open kvpn, or Ctrl+C to quit. ")
-		if _, ok := answers.read(ctx); !ok {
+		line, ok := answers.read(ctx)
+		if !ok {
 			fmt.Fprintln(stdout)
+			return nil
+		}
+		if strings.TrimSpace(line) != "" {
 			return nil
 		}
 		return gateway.OpenApp()
@@ -335,7 +361,16 @@ func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.W
 	if err != nil {
 		return fmt.Errorf("update failed: %w", err)
 	}
-	if gateway.Running == nil || gateway.Restart == nil || !gateway.Running(ctx) {
+	running := false
+	if gateway.Running != nil && gateway.Restart != nil {
+		var err error
+		if running, err = gateway.Running(ctx); err != nil {
+			// Unknown is not "stopped": offer the restart; the helper decides.
+			fmt.Fprintf(stdout, "Could not check the VPN gateway (%v).\n", err)
+			running = true
+		}
+	}
+	if !running {
 		fmt.Fprintf(stdout, "Updated to %s.\n", installed)
 		return offerApp()
 	}
@@ -347,8 +382,13 @@ func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.W
 		return offerApp()
 	}
 	fmt.Fprintln(stdout, "Restarting the VPN gateway…")
-	if err := gateway.Restart(ctx); err != nil {
-		return fmt.Errorf("updated to %s, but restarting the VPN gateway failed: %w; retry with kvpn restart or reboot", installed, err)
+	restarted, err := gateway.Restart(ctx)
+	if err != nil {
+		return fmt.Errorf("updated to %s, but restarting the VPN gateway failed: %w", installed, err)
+	}
+	if !restarted {
+		fmt.Fprintf(stdout, "Updated to %s. The VPN gateway is not running; it starts on the new version.\n", installed)
+		return offerApp()
 	}
 	fmt.Fprintf(stdout, "Updated to %s and restarted the VPN gateway.\n", installed)
 	return offerApp()

@@ -429,7 +429,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, localvpn.NativeGatewayFailureMessage(err))
 		} else if len(os.Args) > 1 && os.Args[1] == "autostart" {
 			fmt.Fprintln(os.Stderr, localvpn.AutostartFailureMessage(err))
-		} else if len(os.Args) > 1 && (os.Args[1] == "host-smoke" || os.Args[1] == "update" || os.Args[1] == "--update" || os.Args[1] == "native-network" || os.Args[1] == "native-desktop") {
+		} else if len(os.Args) > 1 && (os.Args[1] == "host-smoke" || os.Args[1] == "update" || os.Args[1] == "--update" || os.Args[1] == "restart" || os.Args[1] == "--restart" || os.Args[1] == "native-network" || os.Args[1] == "native-desktop") {
 			// Preserve network preflight and lifecycle reasons in the service
 			// journal; these commands never include subscription configuration.
 			fmt.Fprintln(os.Stderr, err)

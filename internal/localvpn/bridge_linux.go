@@ -472,8 +472,11 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 		if progress != nil {
 			progress("gateway-restart")
 		}
-		if err := b.updateHooks.Restart(ctx); err != nil {
+		restarted, err := b.updateHooks.Restart(ctx)
+		if err != nil {
 			reply["ok"], reply["reason"], reply["error"] = false, "gateway-restart-failed", err.Error()
+		} else {
+			reply["gateway_restarted"] = restarted
 		}
 		b.refresh(ctx)
 	case "update/check", "update/install":
@@ -504,7 +507,10 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 			reply["ok"], reply["reason"], reply["error"] = false, "update-failed", err.Error()
 			break
 		}
-		reply["update"] = map[string]any{"installed": installed, "latest": installed, "available": false, "gateway_running": b.updateHooks.Running(ctx)}
+		// An unknown state still offers the restart; the helper decides.
+		gatewayRunning, runningErr := b.updateHooks.Running(ctx)
+		gatewayRunning = gatewayRunning || runningErr != nil
+		reply["update"] = map[string]any{"installed": installed, "latest": installed, "available": false, "gateway_running": gatewayRunning}
 	case "subscription/read":
 		text, err := ReadSubscription(b.options.Base)
 		if err != nil {

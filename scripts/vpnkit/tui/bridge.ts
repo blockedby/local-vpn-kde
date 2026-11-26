@@ -67,6 +67,8 @@ export interface Profile { id: string; name: string; kind: "subscription" | "ser
 export interface Reply {
  profiles?: { active: string; items: Profile[] };
   autostart?: AutostartOptions;
+  /** gateway/restart: false when the gateway turned out not to be running. */
+  gateway_restarted?: boolean;
   autostart_service?: AutostartServiceState;
   ok: boolean;
   reason: string;

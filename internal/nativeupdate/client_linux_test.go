@@ -58,6 +58,8 @@ func TestRunCommandOffersGatewayRestart(t *testing.T) {
 		name, input  string
 		args         []string
 		running      bool
+		runningErr   error
+		notRunning   bool
 		restartErr   error
 		wantRestart  bool
 		wantOutput   string
@@ -70,7 +72,9 @@ func TestRunCommandOffersGatewayRestart(t *testing.T) {
 		{name: "no answer", input: "y\n", running: true, wantQuestion: true, wantOutput: "switches to the new version at its next restart (kvpn restart) or reboot"},
 		{name: "yes keeps gateway", args: []string{"--yes"}, running: true, wantOutput: "switches to the new version at its next restart (kvpn restart) or reboot"},
 		{name: "restart flag", args: []string{"--yes", "--restart"}, running: true, wantRestart: true, wantOutput: "restarted the VPN gateway"},
-		{name: "restart fails", args: []string{"--yes", "--restart"}, running: true, restartErr: errors.New("gateway start failed"), wantRestart: true, wantErr: "restarting the VPN gateway failed: gateway start failed; retry with kvpn restart"},
+		{name: "restart fails", args: []string{"--yes", "--restart"}, running: true, restartErr: errors.New("gateway start failed"), wantRestart: true, wantErr: "restarting the VPN gateway failed: gateway start failed"},
+		{name: "unknown state still offers", input: "y\ny\n", runningErr: errors.New("bus timeout"), wantRestart: true, wantQuestion: true, wantOutput: "Could not check the VPN gateway (bus timeout)"},
+		{name: "stopped before restart", args: []string{"--yes", "--restart"}, running: true, notRunning: true, wantRestart: true, wantOutput: "The VPN gateway is not running; it starts on the new version."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t, "pacman")
@@ -78,8 +82,8 @@ func TestRunCommandOffersGatewayRestart(t *testing.T) {
 			install := func(_ context.Context, version string, _ func(string)) (string, error) { return version, nil }
 			restarted := false
 			gateway := Hooks{
-				Running: func(context.Context) bool { return tc.running },
-				Restart: func(context.Context) error { restarted = true; return tc.restartErr },
+				Running: func(context.Context) (bool, error) { return tc.running, tc.runningErr },
+				Restart: func(context.Context) (bool, error) { restarted = true; return !tc.notRunning, tc.restartErr },
 			}
 			var out bytes.Buffer
 			err := RunCommand(context.Background(), tc.args, strings.NewReader(tc.input), &out, checkerFor(f), install, gateway)
@@ -107,6 +111,8 @@ func TestRunCommandOffersToOpenApp(t *testing.T) {
 		wantPrompt  bool
 	}{
 		{name: "enter opens", input: "y\n\n", wantOpen: true, wantPrompt: true},
+		{name: "other text quits", input: "y\nn\n", wantPrompt: true},
+		{name: "unterminated answer counts", input: "y", wantPrompt: true},
 		{name: "end of input quits", input: "y\n", wantPrompt: true},
 		{name: "yes never asks", input: "\n", args: []string{"--yes"}},
 		{name: "ctrl+c quits", input: "y\n", interrupt: true, wantPrompt: true},
@@ -131,7 +137,7 @@ func TestRunCommandOffersToOpenApp(t *testing.T) {
 				return version, nil
 			}
 			opened := false
-			hooks := Hooks{Running: func(context.Context) bool { return false }, Restart: func(context.Context) error { return nil }, OpenApp: func() error { opened = true; return nil }}
+			hooks := Hooks{Running: func(context.Context) (bool, error) { return false, nil }, Restart: func(context.Context) (bool, error) { return true, nil }, OpenApp: func() error { opened = true; return nil }}
 			var out bytes.Buffer
 			if err := RunCommand(ctx, tc.args, input, &out, checkerFor(f), install, hooks); err != nil {
 				t.Fatal(err)
@@ -151,13 +157,13 @@ func TestRestartCommand(t *testing.T) {
 		want       string
 		wantCalled bool
 	}{
-		{"not running", false, nil, "Nothing to restart", false},
+		{"not running", false, nil, "Nothing to restart", true},
 		{"restarted", true, nil, "Restarted the VPN gateway.", true},
 		{"fails", true, errors.New("start failed"), "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			called := false
-			gateway := Hooks{Running: func(context.Context) bool { return tc.running }, Restart: func(context.Context) error { called = true; return tc.err }}
+			gateway := Hooks{Restart: func(context.Context) (bool, error) { called = true; return tc.running, tc.err }}
 			var out bytes.Buffer
 			err := RestartCommand(context.Background(), &out, gateway)
 			if tc.err != nil {
@@ -169,6 +175,17 @@ func TestRestartCommand(t *testing.T) {
 				t.Fatalf("called %v output %q", called, out.String())
 			}
 		})
+	}
+}
+
+func TestYesNeverReadsStdin(t *testing.T) {
+	f := newFixture(t, "pacman")
+	f.installed = "0.4.3"
+	install := func(_ context.Context, version string, _ func(string)) (string, error) { return version, nil }
+	input := strings.NewReader("keep\n")
+	hooks := Hooks{OpenApp: func() error { t.Fatal("must not open"); return nil }}
+	if err := RunCommand(context.Background(), []string{"--yes"}, input, &bytes.Buffer{}, checkerFor(f), install, hooks); err != nil || input.Len() != len("keep\n") {
+		t.Fatalf("stdin consumed: %v, %d left", err, input.Len())
 	}
 }
 
