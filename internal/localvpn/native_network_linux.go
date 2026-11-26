@@ -51,8 +51,16 @@ func RunNativeNetwork(ctx context.Context, action string, output io.Writer) erro
 	reads := nativeReadCommands{}
 	inspector := nativegateway.NewLinuxNetworkInspector(reads)
 	if action == "repair" {
-		if ready, err := inspector.EgressReady(ctx); err != nil || ready {
-			return err
+		ready, err := inspector.EgressReady(ctx)
+		if err != nil {
+			// No usable physical uplink (e.g. Wi-Fi went down for sleep): there
+			// is nothing to rebuild yet. The next uplink event repairs, and
+			// callers needing egress re-check and report it as unavailable.
+			fmt.Fprintln(output, "native egress repair skipped: no usable physical uplink")
+			return nil
+		}
+		if ready {
+			return nil
 		}
 	}
 	if action == "check" {
