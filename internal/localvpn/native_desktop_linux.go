@@ -207,7 +207,8 @@ func runNativeDesktopStatus(ctx context.Context, base string, output io.Writer, 
 
 // RunNativeDesktop coordinates the fixed native gateway lifecycle with the
 // owned NetworkManager profile. Mutations require explicit authorization via
-// yes; action is one of status, backend-start, start, disconnect, or stop.
+// yes; action is one of status, backend-start, start, disconnect, stop, toggle-mode,
+// reapply-network, or restart.
 func RunNativeDesktop(ctx context.Context, base string, action string, yes bool, output io.Writer) error {
 	return runNativeDesktop(ctx, base, action, yes, output, nil)
 }
@@ -221,7 +222,7 @@ func runNativeDesktop(ctx context.Context, base string, action string, yes bool,
 	}
 	switch action {
 	case "status":
-	case "backend-start", "start", "disconnect", "stop", "toggle-mode", "reapply-network":
+	case "backend-start", "start", "disconnect", "stop", "toggle-mode", "reapply-network", "restart":
 		if !yes {
 			return errors.New("native desktop mutation requires explicit authorization (--yes)")
 		}
@@ -249,6 +250,8 @@ func runNativeDesktop(ctx context.Context, base string, action string, yes bool,
 		return runNativeDesktopStatus(ctx, base, output, dependencies, baseMissing)
 	case "reapply-network":
 		return reapplyNativeDesktopNetwork(ctx, output, dependencies)
+	case "restart":
+		return restartNativeDesktop(ctx, output, dependencies)
 	case "toggle-mode":
 		return runNativeDesktopPolicy(ctx, output, dependencies)
 	case "backend-start":
@@ -387,6 +390,59 @@ func runNativeDesktopPolicy(ctx context.Context, output io.Writer, d nativeDeskt
 		return errors.Join(operationErr, errors.New("native gateway unavailable after policy change"))
 	}
 	return errors.Join(operationErr, d.nm.Run(cleanup, "connect", true, io.Discard))
+}
+
+// restartNativeDesktop moves a running gateway onto the installed version after
+// an update. A stopped gateway is left alone: it starts on the new version
+// anyway. The owned profile is reconnected only if it was active, because the
+// restart ends the existing OpenVPN session.
+func restartNativeDesktop(ctx context.Context, output io.Writer, d nativeDesktopDependencies) error {
+	before, err := d.service.Status(ctx)
+	if err != nil && before.Gateway == "" {
+		return fmt.Errorf("native gateway status failed: %w", err)
+	}
+	if before.Gateway == "absent" || before.Gateway == "inactive" || before.Gateway == "" {
+		return nativeDesktopPhase(output, "gateway-not-running")
+	}
+	capture := &nativeDesktopLimitWriter{remain: nativeDesktopStatusLimit}
+	if err := d.nm.Run(ctx, "connection-state", true, capture); err != nil {
+		return err
+	}
+	_, active, err := parseNativeDesktopNMStatus(capture.buffer.Bytes())
+	if err != nil {
+		return err
+	}
+	connected := active == "yes"
+	if connected {
+		if err := nativeDesktopPhase(output, "networkmanager-disconnect"); err != nil {
+			return err
+		}
+		if err := d.nm.Run(ctx, "disconnect", true, io.Discard); err != nil {
+			return err
+		}
+	}
+	if err := nativeDesktopPhase(output, "gateway-stop"); err != nil {
+		return err
+	}
+	if err := d.service.Stop(ctx); err != nil {
+		return err
+	}
+	if err := nativeDesktopPhase(output, "gateway-start"); err != nil {
+		return err
+	}
+	if err := d.service.Start(ctx); err != nil {
+		return err
+	}
+	if err := d.ensureEgress(ctx); err != nil {
+		return err
+	}
+	if !connected {
+		return nil
+	}
+	if err := nativeDesktopPhase(output, "networkmanager-connect"); err != nil {
+		return err
+	}
+	return d.nm.Run(ctx, "connect", true, io.Discard)
 }
 
 // Reapplication is an explicit user action. Capture the actual owned connection

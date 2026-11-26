@@ -406,3 +406,38 @@ func TestNativeNetworkReapplyRequiresAuthorization(t *testing.T) {
 		t.Fatalf("unauthorized reapply: err=%v events=%v", err, events)
 	}
 }
+
+func TestRunNativeDesktopRestart(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		gateway string
+		active  string
+		want    []string
+		phase   string
+	}{
+		{"stopped gateway is left alone", "inactive", "no", []string{"service-status"}, "phase=gateway-not-running"},
+		{"missing gateway is left alone", "absent", "no", []string{"service-status"}, "phase=gateway-not-running"},
+		{"connected", "active", "yes", []string{"service-status", "nm-connection-state", "nm-disconnect", "service-stop", "service-start", "nm-connect"}, "phase=networkmanager-connect"},
+		{"gateway only", "active", "no", []string{"service-status", "nm-connection-state", "service-stop", "service-start"}, "phase=gateway-start"},
+		{"failed gateway", "failed", "no", []string{"service-status", "nm-connection-state", "service-stop", "service-start"}, "phase=gateway-start"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			events := []string{}
+			service := &fakeNativeDesktopService{events: &events, status: GatewayStatus{Gateway: tc.gateway, Network: "active", Ready: tc.gateway == "active"}}
+			nm := &fakeNativeDesktopNM{events: &events, status: "configured=yes\nactive=" + tc.active + "\n", errors: map[string]error{}}
+			installNativeDesktopFakes(t, service, nm)
+			var output bytes.Buffer
+			if err := RunNativeDesktop(context.Background(), t.TempDir(), "restart", true, &output); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(events, tc.want) || !strings.Contains(output.String(), tc.phase) {
+				t.Fatalf("events %v output %q", events, output.String())
+			}
+		})
+	}
+	events := []string{}
+	installNativeDesktopFakes(t, &fakeNativeDesktopService{events: &events}, &fakeNativeDesktopNM{events: &events})
+	if err := RunNativeDesktop(context.Background(), t.TempDir(), "restart", false, io.Discard); err == nil || len(events) != 0 {
+		t.Fatalf("unauthorized restart: %v %v", err, events)
+	}
+}
