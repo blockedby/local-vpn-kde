@@ -15,6 +15,7 @@ const (
 	LoopbackPort   = 31194
 	GatewayPort    = 1194
 	NetworkUnit    = "local-vpn-kde-network.service"
+	EgressUnit     = "local-vpn-kde-egress.service"
 	GatewayUnit    = "local-vpn-kde-gateway.service"
 	ServiceUser    = "local-vpn-kde"
 	LibexecDir     = "/usr/libexec/local-vpn-kde"

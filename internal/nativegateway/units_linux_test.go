@@ -50,8 +50,8 @@ func assertNoInstallSection(t *testing.T, unit string) {
 
 func TestUnitFilesAreFixedPureArtifacts(t *testing.T) {
 	got := UnitFiles()
-	if len(got) != 2 {
-		t.Fatalf("got %d unit files, want 2", len(got))
+	if len(got) != 3 || !strings.Contains(got[EgressUnit], "Requisite="+NetworkUnit+"\n") {
+		t.Fatal("expected three units including active-network-only repair")
 	}
 	if _, ok := got[NetworkUnit]; !ok {
 		t.Fatalf("missing %s", NetworkUnit)
@@ -70,7 +70,7 @@ func TestUnitFilesAreFixedPureArtifacts(t *testing.T) {
 		t.Fatal("UnitFiles did not return fixed contents")
 	}
 
-	all := strings.ToLower(second[NetworkUnit] + "\n" + second[GatewayUnit])
+	all := strings.ToLower(second[NetworkUnit] + "\n" + second[GatewayUnit] + "\n" + second[EgressUnit])
 	for _, forbidden := range []string{
 		"docker",
 		"systemctl",
@@ -89,7 +89,7 @@ func TestUnitFilesAreFixedPureArtifacts(t *testing.T) {
 			t.Fatalf("rendered units contain forbidden %q", forbidden)
 		}
 	}
-	for _, unit := range []string{second[NetworkUnit], second[GatewayUnit]} {
+	for _, unit := range second {
 		if strings.Contains(unit, "$") || strings.Contains(unit, "%") {
 			t.Fatalf("rendered unit contains interpolation syntax: %q", unit)
 		}

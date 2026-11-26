@@ -65,6 +65,17 @@ ReadOnlyPaths=` + ConfigDir + `
 ReadWritePaths=` + StateDir + ` /run/local-vpn-kde /var/lib/local-vpn-kde-runtime
 `
 
+const egressUnitContents = `[Unit]
+Description=Restore local VPN gateway egress on the current uplink
+Requisite=` + NetworkUnit + `
+After=` + NetworkUnit + `
+
+[Service]
+Type=oneshot
+ExecStart=` + LibexecDir + `/local-vpn-kde.bin native-network --action repair
+TimeoutStartSec=3min
+`
+
 // UnitFiles returns the fixed native service artifacts. Callers may decide
 // when and where to install them; this function has no installation side
 // effects and does not interpolate caller-controlled values.
@@ -72,5 +83,6 @@ func UnitFiles() map[string]string {
 	return map[string]string{
 		NetworkUnit: networkUnitContents,
 		GatewayUnit: gatewayUnitContents,
+		EgressUnit:  egressUnitContents,
 	}
 }

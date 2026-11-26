@@ -211,7 +211,7 @@ func RunNativeOperation(parent context.Context, input io.Reader, output io.Write
 	}
 	if args[0] == "repair-egress" || (args[0] == "servers" && args[1] == "refresh") {
 		if ready, err := nativeEgressReady(ctx); err != nil || !ready {
-			if _, err := service.call(ctx, "systemctl", "start", "local-vpn-kde-egress.service"); err != nil {
+			if err := service.repairEgress(ctx); err != nil {
 				return errors.New("native egress repair failed")
 			}
 			if ready, err := nativeEgressReady(ctx); err != nil || !ready {

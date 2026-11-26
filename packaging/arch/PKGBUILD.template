@@ -98,7 +98,6 @@ package() {
   install -Dm755 packaging/arch/local-vpn-kde "$pkgdir/usr/bin/kvpn"
   install -Dm755 packaging/arch/local-vpn-kde-resume "$pkgdir/usr/lib/systemd/system-sleep/local-vpn-kde-resume"
   install -Dm755 packaging/arch/90-local-vpn-kde-egress "$pkgdir/usr/lib/NetworkManager/dispatcher.d/90-local-vpn-kde-egress"
-  install -Dm644 packaging/arch/local-vpn-kde-egress.service -t "$pkgdir/usr/lib/systemd/system"
   install -Dm644 build/units/*.service -t "$pkgdir/usr/lib/systemd/system"
   install -Dm644 packaging/arch/local-vpn-kde-native.sysusers \
     "$pkgdir/usr/lib/sysusers.d/local-vpn-kde-native.conf"
