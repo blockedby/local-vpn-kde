@@ -254,7 +254,7 @@ func TestRunNativeDesktopRejectsUnknownAndUnauthorizedActions(t *testing.T) {
 		action string
 		yes    bool
 	}{
-		{action: "restart", yes: true},
+		{action: "reboot", yes: true},
 		{action: "start", yes: false},
 	} {
 		if err := RunNativeDesktop(context.Background(), t.TempDir(), test.action, test.yes, io.Discard); err == nil {
