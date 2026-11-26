@@ -110,8 +110,14 @@ func (w *attemptOutput) Write(p []byte) (int, error) {
 	return n, nil
 }
 func (b *Bridge) lifecycle(ctx context.Context, action string, args []string, progress func(string)) (ProcessResult, string) {
+	return recordLifecycle(b.options.Base, action, progress, func(output *attemptOutput) ProcessResult {
+		return runProcess(ctx, b.options.Executable, args, append(b.environment(), "VPNKIT_TUI_DIAGNOSTICS=1"), output, output, b.options.Grace, !b.options.keepTerminal)
+	})
+}
+
+func recordLifecycle(basePath, action string, progress func(string), run func(*attemptOutput) ProcessResult) (ProcessResult, string) {
 	failure := ProcessResult{Reason: "diagnostics-unavailable"}
-	base, err := directory(b.options.Base, false, true)
+	base, err := directory(basePath, false, true)
 	if err != nil {
 		return failure, ""
 	}
@@ -153,7 +159,7 @@ func (b *Bridge) lifecycle(ctx context.Context, action string, args []string, pr
 	if err = metadata("running", ProcessResult{}); err != nil {
 		return failure, ""
 	}
-	result := runProcess(ctx, b.options.Executable, args, append(b.environment(), "VPNKIT_TUI_DIAGNOSTICS=1"), output, output, b.options.Grace, !b.options.keepTerminal)
+	result := run(output)
 	if output.truncated {
 		if _, err = file.Write(output.tail); err != nil {
 			output.captureError = true

@@ -21,6 +21,7 @@ const autostartMarker = "# Managed by local-vpn-kde autostart\n"
 type AutostartOptions struct {
 	Gateway           bool   `json:"gateway"`
 	Connect           bool   `json:"connect"`
+	Resume            bool   `json:"resume,omitempty"`
 	Runtime           string `json:"runtime,omitempty"`
 	LastResult        string `json:"last_result,omitempty"`
 	LastReason        string `json:"last_reason,omitempty"`
@@ -136,7 +137,7 @@ func (a Autostart) Status(ctx context.Context) (AutostartOptions, error) {
 	if runtimeErr != nil {
 		return options, runtimeErr
 	}
-	if options.Gateway && saved != requested {
+	if (options.Gateway || options.Resume) && saved != requested {
 		return options, errors.New("enabled autostart runtime does not match requested runtime")
 	}
 	if !options.Gateway {
@@ -226,6 +227,10 @@ func (a Autostart) marker() string {
 }
 
 func (a Autostart) unit() (string, error) {
+	return a.actionUnit(false)
+}
+
+func (a Autostart) actionUnit(resume bool) (string, error) {
 	if !filepath.IsAbs(a.Repo) || filepath.Clean(a.Repo) != a.Repo || a.Repo == "/" || strings.ContainsAny(a.Repo, "\n\r\x00") {
 		return "", errors.New("invalid repository path")
 	}
@@ -249,20 +254,24 @@ func (a Autostart) unit() (string, error) {
 		// Environment= expands specifiers, but unlike ExecStart not dollar signs.
 		stateEnvironment = "Environment=" + strconv.Quote(strings.ReplaceAll("XDG_STATE_HOME="+filepath.Dir(layout.State), "%", "%%")) + "\n"
 	}
+	description, action, remain := "at desktop login", "run", "yes"
+	if resume {
+		description, action, remain = "after system resume", "resume", "no"
+	}
 	return a.marker() + fmt.Sprintf(`[Unit]
-Description=Local VPN at desktop login
+Description=Local VPN %s
 %s
 [Service]
 Type=oneshot
-%sExecStart=%s autostart --repo %s%s --action run
+%sExecStart=%s autostart --repo %s%s --action %s
 TimeoutStartSec=6min
-RemainAfterExit=yes
+RemainAfterExit=%s
 StandardOutput=null
 StandardError=journal
 
 [Install]
 WantedBy=%s
-`, session, stateEnvironment, systemdArg(executable), systemdArg(a.Repo), extra, target), nil
+`, description, session, stateEnvironment, systemdArg(executable), systemdArg(a.Repo), extra, action, remain, target), nil
 }
 func (a Autostart) Configure(ctx context.Context, options AutostartOptions) error {
 	requested, err := a.runtime()
@@ -275,6 +284,9 @@ func (a Autostart) Configure(ctx context.Context, options AutostartOptions) erro
 	}
 	if selected != requested {
 		return errors.New("autostart runtime does not match requested runtime")
+	}
+	if options.Resume && (!a.Installed || requested != "native") {
+		return errors.New("resume autostart requires the installed native runtime")
 	}
 	if options.Runtime == "" {
 		options.Runtime = a.Runtime
@@ -329,6 +341,13 @@ func (a Autostart) Configure(ctx context.Context, options AutostartOptions) erro
 	if err = atomicWrite(dir, a.unitName(), []byte(unit)); err != nil {
 		return err
 	}
+	manageResume := false
+	if a.Installed && requested == "native" {
+		manageResume, err = a.prepareResumeUnits(dir, options.Resume)
+		if err != nil {
+			return err
+		}
+	}
 	if _, err = a.call(ctx, "systemctl", "--user", "daemon-reload"); err != nil {
 		return errors.New("user service manager unavailable")
 	}
@@ -338,6 +357,15 @@ func (a Autostart) Configure(ctx context.Context, options AutostartOptions) erro
 	}
 	if _, err = a.call(ctx, "systemctl", "--user", action, a.unitName()); err != nil {
 		return errors.New("could not configure login autostart")
+	}
+	if manageResume {
+		action := "disable"
+		if options.Resume {
+			action = "enable"
+		}
+		if _, err = a.call(ctx, "systemctl", "--user", action, "--now", resumePathUnit); err != nil {
+			return errors.New("could not configure resume autostart")
+		}
 	}
 	data, _ = json.Marshal(options)
 	return atomicWrite(fd, "autostart.json", data)

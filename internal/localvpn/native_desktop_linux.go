@@ -209,6 +209,10 @@ func runNativeDesktopStatus(ctx context.Context, base string, output io.Writer, 
 // owned NetworkManager profile. Mutations require explicit authorization via
 // yes; action is one of status, backend-start, start, disconnect, or stop.
 func RunNativeDesktop(ctx context.Context, base string, action string, yes bool, output io.Writer) error {
+	return runNativeDesktop(ctx, base, action, yes, output, nil)
+}
+
+func runNativeDesktop(ctx context.Context, base string, action string, yes bool, output io.Writer, guard func(context.Context) error) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -256,6 +260,11 @@ func RunNativeDesktop(ctx context.Context, base string, action string, yes bool,
 		}
 		return dependencies.ensureEgress(ctx)
 	case "start":
+		if guard != nil {
+			if err := guard(ctx); err != nil {
+				return err
+			}
+		}
 		if err = nativeDesktopPhase(output, "gateway-status"); err != nil {
 			return err
 		}
@@ -286,6 +295,11 @@ func RunNativeDesktop(ctx context.Context, base string, action string, yes bool,
 		}
 		// Only invalidate the old tunnel after service startup succeeded.
 		// A startup failure must preserve connection intent for explicit repair.
+		if guard != nil {
+			if err := guard(ctx); err != nil {
+				return err
+			}
+		}
 		if !before.Ready {
 			if err = nativeDesktopPhase(output, "networkmanager-disconnect-stale"); err != nil {
 				return err

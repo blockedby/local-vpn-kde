@@ -193,6 +193,28 @@ test("native setup failures never echo the private editor value", async () => {
   }
 });
 
+test("Settings toggles resume independently without connecting", async () => {
+  const b = new FakeBackend();
+  b.status = { ...b.status, runtime: "native", installed: true };
+  const original = b.request.bind(b);
+  let options = { runtime: "native" as const, gateway: false, connect: false, resume: false };
+  b.request = async (action, value) => {
+    const result = await original(action, value);
+    if (action === "autostart/set") options = JSON.parse(value!);
+    if (action.startsWith("autostart/")) result.autostart = { ...options };
+    return result;
+  };
+  const app = new AppState(b);
+  try {
+    await app.perform("status"); app.open("settings"); await settle();
+    expect(app.items().find(item => item.key === "w")?.label).toBe("Автостарт после сна: нет");
+    app.onKey({ name: "w", preventDefault() {} }); await settle();
+    expect(options).toEqual({ gateway: false, connect: false, runtime: "native", resume: true });
+    expect(app.items().find(item => item.key === "w")?.label).toBe("Автостарт после сна: да");
+    expect(b.calls.some(call => ["start", "backend/start"].includes(call.action))).toBe(false);
+  } finally { await app.close(); }
+});
+
 test("native autostart edits retain the returned runtime and do not connect immediately", async () => {
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native" };

@@ -32,6 +32,7 @@ fi
 install -Dm755 packaging/arch/local-vpn-kde "$stage/usr/bin/kvpn"
 install -Dm755 scripts/vpnkit/vpnkit-native.sh "$stage/usr/share/local-vpn-kde/scripts/vpnkit/vpnkit-native.sh"
 install -Dm644 packaging/arch/native-netns-resolv.conf "$stage/etc/netns/vpnkit-native/resolv.conf"
+install -Dm755 packaging/arch/local-vpn-kde-resume "$stage/usr/lib/systemd/system-sleep/local-vpn-kde-resume"
 install -Dm755 packaging/arch/90-local-vpn-kde-egress "$stage/usr/lib/NetworkManager/dispatcher.d/90-local-vpn-kde-egress"
 install -Dm644 packaging/arch/local-vpn-kde-egress.service -t "$stage/usr/lib/systemd/system"
 install -Dm644 packaging/arch/local-vpn-kde-native.sysusers "$stage/usr/lib/sysusers.d/local-vpn-kde-native.conf"

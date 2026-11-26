@@ -14,6 +14,14 @@ HERE = Path(__file__).resolve().parent
 
 
 class PackagingTests(unittest.TestCase):
+    def test_sleep_hook_only_signals_after_wake(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "wake"
+            script = (HERE / "local-vpn-kde-resume").read_text().replace("/run/local-vpn-kde-resumed", str(marker))
+            for action, expected in [("pre", False), ("post", True)]:
+                subprocess.run(["/bin/sh", "-c", script, "hook", action, "suspend"], check=True)
+                self.assertEqual(marker.is_file(), expected)
+
     def test_dispatcher_filters_and_queues_only_fixed_repair(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

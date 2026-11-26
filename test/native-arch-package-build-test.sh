@@ -61,6 +61,7 @@ id -nG builder | tr " " "\n" | grep -qx local-vpn-kde-users
 printf "portable_single_download_install=passed\n"
 test -f /usr/lib/systemd/system/local-vpn-kde-network.service
 test -f /usr/lib/systemd/system/local-vpn-kde-egress.service
+[[ $(stat -c "%u:%g:%a" /usr/lib/systemd/system-sleep/local-vpn-kde-resume) == 0:0:755 ]]
 [[ $(stat -c "%u:%g:%a" /usr/lib/NetworkManager/dispatcher.d/90-local-vpn-kde-egress) == 0:0:755 ]]
 test -f /usr/share/polkit-1/actions/org.local-vpn-kde.configure.policy
 test -f /etc/netns/vpnkit-native/resolv.conf

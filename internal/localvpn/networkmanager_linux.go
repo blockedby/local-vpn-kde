@@ -949,8 +949,17 @@ func (n NetworkManager) checkOtherVPN(ctx context.Context, owned string) error {
 		return err
 	}
 	for _, row := range rows {
-		if row.UUID != owned && row.Type == "vpn" {
+		if row.UUID != owned && (row.Type == "vpn" || row.Type == "wireguard") {
 			return ErrOtherVPNActive
+		}
+		if row.Type == "tun" || row.Type == "ip-tunnel" {
+			if owned == "" {
+				return ErrOtherVPNActive
+			}
+			device, err := n.activeDevice(ctx, owned)
+			if err != nil || device != row.Device {
+				return ErrOtherVPNActive
+			}
 		}
 	}
 	return nil
