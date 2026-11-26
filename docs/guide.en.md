@@ -126,6 +126,12 @@ Native can run alongside another VPN. Connecting native gives its routes priorit
 
 A missing application-owned NetworkManager profile is created automatically. Foreign or modified profiles are not overwritten. See [VPN coexistence and profile protection](native-coinstall.md).
 
+### Wi-Fi works after sleep but the VPN carries no traffic
+
+If the native TUI shows **Шлюз без выхода в сеть**, first check that Wi-Fi or Ethernet has an IPv4 lease. A running native gateway repairs its private routes on uplink changes; **Connect** and **Refresh subscription and list** also check them. You do not need to disconnect another VPN or flush any host routes. If repair fails, inspect `journalctl -b -u local-vpn-kde-egress.service`.
+
+Route repair is always on. To also connect the VPN after waking, enable **Settings → Автостарт после сна** in your desktop session. This separate option is off by default. It makes at most one connection attempt per wake, skipping competing tunnels. The result is recorded as `resume-connect` in the user's private `local-vpn-kde/diagnostics` state directory (including `other-vpn-active` for a skipped attempt).
+
 ## Updates
 
 **Native (Arch or Debian package):** self-update is available from 0.4.4. Since 0.5.0 the command is only `kvpn`. On 0.4.4, which predates `kvpn`, update with `local-vpn-kde update`.
