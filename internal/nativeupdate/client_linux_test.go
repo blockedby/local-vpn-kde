@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os/exec"
 	"strings"
 	"testing"
@@ -39,7 +40,7 @@ func TestRunCommand(t *testing.T) {
 				return version, nil
 			}
 			var out bytes.Buffer
-			if err := RunCommand(context.Background(), tc.args, strings.NewReader(tc.input), &out, checkerFor(f), install, Gateway{}); err != nil {
+			if err := RunCommand(context.Background(), tc.args, strings.NewReader(tc.input), &out, checkerFor(f), install, Hooks{}); err != nil {
 				t.Fatal(err)
 			}
 			if (requested != "") != tc.wantInstall || tc.wantInstall && requested != "0.4.4" {
@@ -63,7 +64,7 @@ func TestRunCommandOffersGatewayRestart(t *testing.T) {
 		wantErr      string
 		wantQuestion bool
 	}{
-		{name: "gateway stopped", input: "y\n", running: false, wantOutput: "Updated to 0.4.4. Reopen the app to use it.\n"},
+		{name: "gateway stopped", input: "y\n", running: false, wantOutput: "Updated to 0.4.4.\n"},
 		{name: "restart accepted", input: "y\ny\n", running: true, wantRestart: true, wantQuestion: true, wantOutput: "Updated to 0.4.4 and restarted the VPN gateway."},
 		{name: "restart declined", input: "y\nn\n", running: true, wantQuestion: true, wantOutput: "switches to the new version at its next restart (kvpn restart) or reboot"},
 		{name: "no answer", input: "y\n", running: true, wantQuestion: true, wantOutput: "switches to the new version at its next restart (kvpn restart) or reboot"},
@@ -76,7 +77,7 @@ func TestRunCommandOffersGatewayRestart(t *testing.T) {
 			f.installed = "0.4.3"
 			install := func(_ context.Context, version string, _ func(string)) (string, error) { return version, nil }
 			restarted := false
-			gateway := Gateway{
+			gateway := Hooks{
 				Running: func(context.Context) bool { return tc.running },
 				Restart: func(context.Context) error { restarted = true; return tc.restartErr },
 			}
@@ -97,6 +98,51 @@ func TestRunCommandOffersGatewayRestart(t *testing.T) {
 	}
 }
 
+func TestRunCommandOffersToOpenApp(t *testing.T) {
+	for _, tc := range []struct {
+		name, input string
+		args        []string
+		interrupt   bool
+		wantOpen    bool
+		wantPrompt  bool
+	}{
+		{name: "enter opens", input: "y\n\n", wantOpen: true, wantPrompt: true},
+		{name: "end of input quits", input: "y\n", wantPrompt: true},
+		{name: "yes never asks", input: "\n", args: []string{"--yes"}},
+		{name: "ctrl+c quits", input: "y\n", interrupt: true, wantPrompt: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, "pacman")
+			f.installed = "0.4.3"
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var input io.Reader = strings.NewReader(tc.input)
+			if tc.interrupt {
+				// Stdin stays open, as in a terminal; Ctrl+C cancels the context.
+				reader, writer := io.Pipe()
+				defer writer.Close()
+				go func() { _, _ = io.WriteString(writer, tc.input) }()
+				input = reader
+			}
+			install := func(_ context.Context, version string, _ func(string)) (string, error) {
+				if tc.interrupt {
+					cancel()
+				}
+				return version, nil
+			}
+			opened := false
+			hooks := Hooks{Running: func(context.Context) bool { return false }, Restart: func(context.Context) error { return nil }, OpenApp: func() error { opened = true; return nil }}
+			var out bytes.Buffer
+			if err := RunCommand(ctx, tc.args, input, &out, checkerFor(f), install, hooks); err != nil {
+				t.Fatal(err)
+			}
+			if opened != tc.wantOpen || strings.Contains(out.String(), "Press Enter to open kvpn") != tc.wantPrompt {
+				t.Fatalf("opened %v output %q", opened, out.String())
+			}
+		})
+	}
+}
+
 func TestRestartCommand(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -111,7 +157,7 @@ func TestRestartCommand(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			called := false
-			gateway := Gateway{Running: func(context.Context) bool { return tc.running }, Restart: func(context.Context) error { called = true; return tc.err }}
+			gateway := Hooks{Running: func(context.Context) bool { return tc.running }, Restart: func(context.Context) error { called = true; return tc.err }}
 			var out bytes.Buffer
 			err := RestartCommand(context.Background(), &out, gateway)
 			if tc.err != nil {
@@ -132,20 +178,20 @@ func TestRunCommandErrors(t *testing.T) {
 		t.Fatal("install must not run")
 		return "", nil
 	}
-	err := RunCommand(context.Background(), []string{"--force"}, strings.NewReader(""), &bytes.Buffer{}, checkerFor(f), never, Gateway{})
+	err := RunCommand(context.Background(), []string{"--force"}, strings.NewReader(""), &bytes.Buffer{}, checkerFor(f), never, Hooks{})
 	expectError(t, err, "only --check, --yes and --restart")
 
 	f.installed = "0.0.0.r278.gabc"
-	err = RunCommand(context.Background(), nil, strings.NewReader(""), &bytes.Buffer{}, checkerFor(f), never, Gateway{})
+	err = RunCommand(context.Background(), nil, strings.NewReader(""), &bytes.Buffer{}, checkerFor(f), never, Hooks{})
 	expectError(t, err, "development build")
 
 	checker := &Checker{Client: f.installer.Client, Run: f.run, Exists: func(string) bool { return false }}
-	err = RunCommand(context.Background(), nil, strings.NewReader(""), &bytes.Buffer{}, checker, never, Gateway{})
+	err = RunCommand(context.Background(), nil, strings.NewReader(""), &bytes.Buffer{}, checker, never, Hooks{})
 	expectError(t, err, "not from the Arch or Debian package")
 
 	failing := func(context.Context, string, func(string)) (string, error) { return "", errors.New("offline") }
 	f.installed = "0.4.3"
-	err = RunCommand(context.Background(), []string{"--yes"}, strings.NewReader(""), &bytes.Buffer{}, checkerFor(f), failing, Gateway{})
+	err = RunCommand(context.Background(), []string{"--yes"}, strings.NewReader(""), &bytes.Buffer{}, checkerFor(f), failing, Hooks{})
 	expectError(t, err, "update failed: offline")
 }
 

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 )
 
 // HelperPath is the fixed executable behind the org.local-vpn-kde.update action.
@@ -153,19 +154,21 @@ func StartInstall(ctx context.Context, version string, options InstallOptions, p
 	return "", errors.New("update helper ended without a result")
 }
 
-// Gateway lets the update command move a running VPN gateway onto the newly
-// installed version. A zero Gateway never offers a restart.
-type Gateway struct {
+// Hooks connect the update command to the installed system. Running and
+// Restart move a running VPN gateway onto the newly installed version; OpenApp
+// replaces the process with the new interface. Nil hooks are never offered.
+type Hooks struct {
 	Running func(ctx context.Context) bool
 	Restart func(ctx context.Context) error
+	OpenApp func() error
 }
 
 const gatewayUnit = "local-vpn-kde-gateway.service"
 
-// InstalledGateway restarts through the newly installed executable, so the new
+// InstalledHooks act through the newly installed executables, so the new
 // version's own lifecycle code and unit expectations do the work.
-func InstalledGateway() Gateway {
-	return Gateway{
+func InstalledHooks() Hooks {
+	return Hooks{
 		Running: func(ctx context.Context) bool {
 			_, err := ExecRunner(ctx, "/usr/bin/systemctl", "is-active", "--quiet", gatewayUnit)
 			return err == nil
@@ -182,6 +185,42 @@ func InstalledGateway() Gateway {
 			}
 			return nil
 		},
+		OpenApp: func() error {
+			return syscall.Exec(Launcher, []string{"kvpn"}, os.Environ())
+		},
+	}
+}
+
+// Launcher opens the interface when started without arguments.
+const Launcher = "/usr/bin/kvpn"
+
+// lineReader lets a prompt give up on Ctrl+C even though the read itself
+// cannot be interrupted: the reading goroutine just stays parked on stdin.
+type lineReader struct{ lines chan string }
+
+func newLineReader(input io.Reader) *lineReader {
+	r := &lineReader{lines: make(chan string)}
+	go func() {
+		defer close(r.lines)
+		reader := bufio.NewReader(input)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			r.lines <- line
+		}
+	}()
+	return r
+}
+
+// read returns false at end of input or when ctx is cancelled.
+func (r *lineReader) read(ctx context.Context) (string, bool) {
+	select {
+	case line, ok := <-r.lines:
+		return line, ok
+	case <-ctx.Done():
+		return "", false
 	}
 }
 
@@ -192,7 +231,7 @@ func lastLine(data []byte) string {
 
 // RestartCommand implements `kvpn restart`: it moves a running gateway onto the
 // installed version and reconnects the VPN if it was connected.
-func RestartCommand(ctx context.Context, stdout io.Writer, gateway Gateway) error {
+func RestartCommand(ctx context.Context, stdout io.Writer, gateway Hooks) error {
 	if os.Geteuid() == 0 {
 		return errors.New("run the restart as your desktop user, not root")
 	}
@@ -218,7 +257,7 @@ the VPN then drops for a few seconds and reconnects.
   --restart  restart a running gateway after installing, without asking`
 
 // RunCommand implements `kvpn update [--check] [--yes] [--restart]`.
-func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, checker *Checker, install func(ctx context.Context, version string, progress func(string)) (string, error), gateway Gateway) error {
+func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, checker *Checker, install func(ctx context.Context, version string, progress func(string)) (string, error), gateway Hooks) error {
 	checkOnly, yes, restart := false, false, false
 	for _, arg := range args {
 		switch arg {
@@ -257,12 +296,28 @@ func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.W
 		fmt.Fprintln(stdout, "An update is available. Install it with: kvpn update")
 		return nil
 	}
-	answers := bufio.NewReader(stdin)
+	answers := newLineReader(stdin)
 	ask := func(question string) bool {
 		fmt.Fprintf(stdout, "%s [y/N] ", question)
-		answer, _ := answers.ReadString('\n')
+		answer, ok := answers.read(ctx)
+		if !ok {
+			fmt.Fprintln(stdout)
+		}
 		answer = strings.ToLower(strings.TrimSpace(answer))
 		return answer == "y" || answer == "yes"
+	}
+	// Interactive runs end by offering the new interface; Ctrl+C or end of
+	// input simply quits.
+	offerApp := func() error {
+		if yes || gateway.OpenApp == nil {
+			return nil
+		}
+		fmt.Fprint(stdout, "Press Enter to open kvpn, or Ctrl+C to quit. ")
+		if _, ok := answers.read(ctx); !ok {
+			fmt.Fprintln(stdout)
+			return nil
+		}
+		return gateway.OpenApp()
 	}
 	if !yes && !ask(fmt.Sprintf("Install %s now? The VPN stays connected.", result.Latest)) {
 		fmt.Fprintln(stdout, "Not installed.")
@@ -273,20 +328,20 @@ func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.W
 		return fmt.Errorf("update failed: %w", err)
 	}
 	if gateway.Running == nil || gateway.Restart == nil || !gateway.Running(ctx) {
-		fmt.Fprintf(stdout, "Updated to %s. Reopen the app to use it.\n", installed)
-		return nil
+		fmt.Fprintf(stdout, "Updated to %s.\n", installed)
+		return offerApp()
 	}
 	if !restart && !yes {
 		restart = ask(fmt.Sprintf("Updated to %s. The running VPN gateway is still the old version.\nRestart it now? The VPN drops for a few seconds and reconnects.", installed))
 	}
 	if !restart {
-		fmt.Fprintf(stdout, "Updated to %s. Reopen the app to use it. The VPN gateway switches to the new version at its next restart (kvpn restart) or reboot.\n", installed)
-		return nil
+		fmt.Fprintf(stdout, "Updated to %s. The VPN gateway switches to the new version at its next restart (kvpn restart) or reboot.\n", installed)
+		return offerApp()
 	}
 	fmt.Fprintln(stdout, "Restarting the VPN gateway…")
 	if err := gateway.Restart(ctx); err != nil {
 		return fmt.Errorf("updated to %s, but restarting the VPN gateway failed: %w; retry with kvpn restart or reboot", installed, err)
 	}
-	fmt.Fprintf(stdout, "Updated to %s and restarted the VPN gateway. Reopen the app to use it.\n", installed)
-	return nil
+	fmt.Fprintf(stdout, "Updated to %s and restarted the VPN gateway.\n", installed)
+	return offerApp()
 }
