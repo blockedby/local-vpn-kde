@@ -591,7 +591,7 @@ export class AppState {
     }
     if (loadScreen && screen === "profiles") { this.pendingScreenRead = "profiles/list"; void this.loadPendingScreenRead(); }
     if(screen==="profile-name" || screen==="profile-source") this.editorValue="";
-    if (loadScreen && (screen === "autostart" || screen === "settings" && this.nativeInstalled())) { this.pendingScreenRead = "autostart/read"; void this.loadPendingScreenRead(); }
+    if (loadScreen && (screen === "autostart" || load && screen === "settings" && this.nativeInstalled())) { this.pendingScreenRead = "autostart/read"; void this.loadPendingScreenRead(); }
     if (screen === "target") this.editorValue = this.target;
     this.paint();
     if (load) this.loadCatalogIfShown();

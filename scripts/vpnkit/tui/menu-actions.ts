@@ -174,7 +174,7 @@ export function menuItems(state: AppState): MenuItem[] {
             else state.notify(`Смена режима доступна после запуска ${state.nativeMode() ? "сервиса" : "Docker"}.`);
           },
         },
-        ...(["healthy", "unhealthy", "running", "stopped", "starting"].includes(
+        ...(["healthy", "unhealthy", "egress-unavailable", "running", "stopped", "starting"].includes(
           state.status?.gateway_state ?? state.status?.vpn_state ?? "",
         )
           ? [
@@ -199,7 +199,7 @@ export function menuItems(state: AppState): MenuItem[] {
       }] : []),
       ...(state.updatedTo ? [{ key: "R", label: "Перезапустить интерфейс", run: () => state.relaunch() }] : []),
       ...(!state.ready() ? [{ key: "s", label: `Запустить ${state.serviceObject()}`, run: run("backend/start") }] : []),
-      ...(["healthy", "unhealthy", "running", "stopped", "starting"].includes(state.status?.gateway_state ?? state.status?.vpn_state ?? "") ? [{ key: "z", label: state.nativeMode() ? "Остановить сервис" : "Остановить Docker и VPN", run: () => state.confirm("stop") }] : []),
+      ...(["healthy", "unhealthy", "egress-unavailable", "running", "stopped", "starting"].includes(state.status?.gateway_state ?? state.status?.vpn_state ?? "") ? [{ key: "z", label: state.nativeMode() ? "Остановить сервис" : "Остановить Docker и VPN", run: () => state.confirm("stop") }] : []),
     ];
     if (state.screen === "autostart") {
       if (!state.autostart) return [{ key: "u", label: "Загрузить настройки", run: run("autostart/read") }];
