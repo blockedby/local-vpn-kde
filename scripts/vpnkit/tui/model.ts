@@ -21,6 +21,8 @@ export function connection(status?: Status) {
   const service = native ? "native-служба" : "Docker";
   if (!status || gateway === "unknown")
     return { title: "Статус недоступен", detail: "", color: palette.amber };
+  if (gateway === "egress-unavailable")
+    return { title: "Шлюз без выхода в сеть", detail: "Проверьте Wi-Fi или Ethernet и повторите подключение", color: palette.red };
   if (gateway === "unhealthy")
     return {
       title: "Нужна проверка",

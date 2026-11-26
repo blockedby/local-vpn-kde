@@ -1,0 +1,9 @@
+[Unit]
+Description=Restore local VPN gateway egress on the current uplink
+Requisite=local-vpn-kde-network.service
+After=local-vpn-kde-network.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/local-vpn-kde/local-vpn-kde.bin native-network --action repair
+TimeoutStartSec=3min

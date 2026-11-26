@@ -15,6 +15,9 @@ def run(*args, **kwargs):
     return subprocess.run(args, check=True, **kwargs)
 cli = "/usr/libexec/local-vpn-kde/local-vpn-kde.bin"
 run("dpkg", "-i", package)
+hook = Path("/usr/lib/NetworkManager/dispatcher.d/90-local-vpn-kde-egress").stat()
+assert hook.st_uid == hook.st_gid == 0 and hook.st_mode & 0o777 == 0o755
+assert Path("/usr/lib/systemd/system/local-vpn-kde-egress.service").is_file()
 for command in ("ip", "nft", "iptables", "sysctl", "nmcli", "openvpn", "pkexec", "setpriv", "usermod", "systemd-run"):
     assert shutil.which(command), command
 assert Path("/etc/ssl/certs/ca-certificates.crt").is_file()

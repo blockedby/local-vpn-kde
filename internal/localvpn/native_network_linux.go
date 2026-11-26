@@ -20,14 +20,14 @@ import (
 // it. No paths, interfaces, addresses, or commands are accepted from callers.
 func RunNativeNetwork(ctx context.Context, action string, output io.Writer) error {
 	switch action {
-	case "check", "start", "stop", "status":
+	case "check", "start", "stop", "status", "repair":
 	default:
 		return errors.New("invalid native network action")
 	}
 	if os.Geteuid() != 0 {
 		return errors.New("native networking requires the installed privileged service")
 	}
-	if action == "start" {
+	if action == "start" || action == "repair" {
 		release, err := acquireNativeConfigurationLock(ctx, false)
 		if err != nil {
 			return err
@@ -49,6 +49,12 @@ func RunNativeNetwork(ctx context.Context, action string, output io.Writer) erro
 		}
 	}
 	reads := nativeReadCommands{}
+	inspector := nativegateway.NewLinuxNetworkInspector(reads)
+	if action == "repair" {
+		if ready, err := inspector.EgressReady(ctx); err != nil || ready {
+			return err
+		}
+	}
 	if action == "check" {
 		uplink, snapshot, err := nativegateway.ProbeNetwork(ctx, reads)
 		if err != nil {
@@ -64,7 +70,7 @@ func RunNativeNetwork(ctx context.Context, action string, output io.Writer) erro
 		return err
 	}
 	defer journal.Close()
-	controller := nativegateway.Controller{Runner: nativeMutationCommands{}, Journal: journal, Inspector: nativegateway.NewLinuxNetworkInspector(reads)}
+	controller := nativegateway.Controller{Runner: nativeMutationCommands{}, Journal: journal, Inspector: inspector}
 	if action == "status" {
 		ready, err := controller.Status(ctx)
 		if err != nil {
@@ -82,7 +88,17 @@ func RunNativeNetwork(ctx context.Context, action string, output io.Writer) erro
 		}
 		return stopNativeNetwork(ctx, controller, reads, nativeNamespacePresent)
 	}
-	return startNativeNetwork(ctx, controller, exists,
+	service := NativeService{}
+	restoreGateway := false
+	if action == "repair" {
+		if !exists {
+			return errors.New("cannot repair network without ownership journal")
+		}
+		if err := service.mutationPreflight(ctx); err != nil {
+			return err
+		}
+	}
+	err = startNativeNetwork(ctx, controller, exists,
 		func(ctx context.Context) (nativegateway.Uplink, error) {
 			// Discover the current physical underlay even when an obsolete
 			// journal exists (DHCP/interface changes are common across boots).
@@ -94,8 +110,31 @@ func RunNativeNetwork(ctx context.Context, action string, output io.Writer) erro
 		func(ctx context.Context) error {
 			return (nativeMutationCommands{}).Run(ctx, nativegateway.Command{Program: "ip", Args: []string{"netns", "exec", nativegateway.Namespace, nativegateway.LibexecDir + "/local-vpn-kde.bin", "native-namespace-init"}})
 		}, func(ctx context.Context) error {
+			err := stopNativeNetwork(ctx, controller, reads, nativeNamespacePresent)
+			if action != "repair" || !errors.Is(err, ErrNativeNetworkBusy) {
+				return err
+			}
+			status, err := service.Status(ctx)
+			if err != nil {
+				return err
+			}
+			if !status.Ready {
+				return ErrNativeNetworkBusy
+			}
+			if _, err = service.call(ctx, "systemctl", "stop", nativegateway.GatewayUnit); err != nil {
+				return err
+			}
+			restoreGateway = true
 			return stopNativeNetwork(ctx, controller, reads, nativeNamespacePresent)
 		})
+	if restoreGateway && (err == nil || errors.Is(err, ErrNativeNetworkBusy)) {
+		err = errors.Join(err, service.Start(ctx))
+	}
+	return err
+}
+
+func nativeEgressReady(ctx context.Context) (bool, error) {
+	return nativegateway.NewLinuxNetworkInspector(nativeReadCommands{}).EgressReady(ctx)
 }
 
 type nativeNetworkLifecycleController interface {

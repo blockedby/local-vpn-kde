@@ -45,7 +45,7 @@ export class HomeView {
     const best = state.catalogLoaded && !state.catalogStale ? state.servers.filter(s => s.ping_status === "ready" && s.latency_ms !== undefined && Number.isFinite(s.latency_ms)).sort((a, b) => a.latency_ms! - b.latency_ms!)[0] : undefined;
     const profile = state.profiles?.items.find(item => item.id === state.profiles?.active);
     const gateway = state.status?.gateway_state ?? state.status?.vpn_state;
-    const health: Record<string, string> = { healthy: "готов", unhealthy: "ошибка", absent: "не запущен", inactive: "не запущен", stopped: "остановлен", starting: "запускается", running: "проверяется" };
+    const health: Record<string, string> = { healthy: "готов", "egress-unavailable": "нет выхода в сеть", unhealthy: "ошибка", absent: "не запущен", inactive: "не запущен", stopped: "остановлен", starting: "запускается", running: "проверяется" };
     const mode = state.status?.routing_mode === "smart" ? "умный" : state.status?.routing_mode === "strict" ? "строгий" : "—";
     const actions = state.actions();
     const lifecycle = actions.find(a => ["home:connect", "home:start-service", "home:x"].includes(a.id));

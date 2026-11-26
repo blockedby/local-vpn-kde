@@ -35,7 +35,7 @@ export class SummaryView {
   hide() { this.summary.visible = false; this.summary.height = 0; }
   update(state: AppState) {
     const gateway = state.status?.gateway_state ?? state.status?.vpn_state;
-    const gatewayNames: Record<string, string> = { healthy: "готов", absent: "не запущен", inactive: "не запущен", stopped: "остановлен", starting: "запускается", unhealthy: "ошибка", running: "проверяется" };
+    const gatewayNames: Record<string, string> = { healthy: "готов", "egress-unavailable": "нет выхода в сеть", absent: "не запущен", inactive: "не запущен", stopped: "остановлен", starting: "запускается", unhealthy: "ошибка", running: "проверяется" };
     this.summary.height = state.screen === "diagnostics" ? 6 : 2;
     if (state.screen === "details") this.summary.content = detailsLines(state).join("\n");
     if (state.screen === "tasks") this.summary.content = state.tasks.size || state.queue.length || state.history.length ? "Состояние        Операция               Этап      Время" : "Нет выполняющихся задач";

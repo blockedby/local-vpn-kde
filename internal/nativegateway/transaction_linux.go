@@ -234,7 +234,10 @@ func (c Controller) Start(ctx context.Context, uplink Uplink) error {
 	}
 	if exists {
 		if journal.Uplink != uplink {
-			return errors.New("network journal belongs to a different uplink")
+			if err := c.preflightStop(ctx, journal, kinds); err != nil {
+				return err
+			}
+			return fmt.Errorf("network journal belongs to a different uplink: %w", ErrNetworkNeedsCleanup)
 		}
 		if err := c.reconcile(ctx, &journal, kinds); err != nil {
 			if !errors.Is(err, ErrNetworkNeedsCleanup) {
@@ -245,6 +248,9 @@ func (c Controller) Start(ctx context.Context, uplink Uplink) error {
 				return repairErr
 			}
 			if !repaired {
+				if proofErr := c.preflightStop(ctx, journal, kinds); proofErr != nil {
+					return proofErr
+				}
 				return err
 			}
 			if err := c.reconcile(ctx, &journal, kinds); err != nil {

@@ -14,6 +14,21 @@ HERE = Path(__file__).resolve().parent
 
 
 class PackagingTests(unittest.TestCase):
+    def test_dispatcher_filters_and_queues_only_fixed_repair(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = (HERE / "90-local-vpn-kde-egress").read_text().replace("/usr/bin/", tmp + "/")
+            for name, body in {"nmcli": 'echo "$TYPE"', "systemctl": 'echo "$*" >> "$LOG"; exit "$ACTIVE"'}.items():
+                tool = root / name
+                tool.write_text("#!/bin/sh\n" + body)
+                tool.chmod(0o755)
+            log = root / "log"
+            for event, kind, active, queue in [("up", "wifi", 0, True), ("dhcp4-change", "ethernet", 0, True), ("up", "tun", 0, False), ("vpn-up", "wifi", 0, False), ("up", "wifi", 3, False)]:
+                log.write_text("")
+                subprocess.run(["/bin/sh", "-c", script, "dispatcher", "fixture0", event], check=True,
+                               env={"DEVICE_IFACE": "fixture0", "TYPE": kind, "LOG": str(log), "ACTIVE": str(active)})
+                self.assertEqual("--no-block start local-vpn-kde-egress.service" in log.read_text(), queue)
+
     def fixture(self, base: Path) -> Path:
         root = base / "repo"
         (root / "packaging").mkdir(parents=True)

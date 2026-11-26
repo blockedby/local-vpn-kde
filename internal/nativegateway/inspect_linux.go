@@ -396,6 +396,10 @@ func (i *LinuxNetworkInspector) readInspectRoutes(ctx context.Context, program s
 	if !ok {
 		return nil, false, nil
 	}
+	return decodeInspectRoutes(data, args)
+}
+
+func decodeInspectRoutes(data []byte, args []string) ([]inspectRoute, bool, error) {
 	var rows []map[string]json.RawMessage
 	if err := decodeJSON(data, &rows, "ip route"); err != nil {
 		return nil, false, err
@@ -455,6 +459,65 @@ func (i *LinuxNetworkInspector) readInspectRoutes(ctx context.Context, program s
 		result = append(result, inspectRoute{Dst: dst, Gateway: gateway, Dev: dev, Preferred: preferred, Scope: scope, Type: typeName, Table: table, Protocol: protocol, raw: raw})
 	}
 	return result, true, nil
+}
+
+// EgressReady compares the two reserved routes and rules to the current
+// NM-proven physical uplink without reading privileged namespace or nft state.
+func (i *LinuxNetworkInspector) EgressReady(ctx context.Context) (bool, error) {
+	read := func(program string, args ...string) ([]byte, error) {
+		data, ok := i.run(ctx, program, args...)
+		if !ok {
+			return nil, errors.New("cannot inspect native egress")
+		}
+		return data, nil
+	}
+	addr, err := read("ip", "-json", "address", "show")
+	if err != nil {
+		return false, err
+	}
+	interfaces, addresses, err := parseInterfaces(addr, addr)
+	if err != nil {
+		return false, err
+	}
+	args := []string{"-json", "-4", "route", "show", "table", "all"}
+	data, err := read("ip", args...)
+	if err != nil {
+		return false, err
+	}
+	_, routes, err := parseRoutes(data, interfaces)
+	if err != nil {
+		return false, err
+	}
+	nm, err := read("nmcli", "-t", "--escape", "yes", "--fields", "DEVICE,TYPE,STATE", "device", "status")
+	if err != nil {
+		return false, err
+	}
+	devices, err := parseNMDevices(nm)
+	if err != nil {
+		return false, err
+	}
+	uplink, err := selectUplink(routes, addresses, devices)
+	if err != nil {
+		return false, err
+	}
+	if _, _, _, err = validateUplink(uplink); err != nil {
+		return false, err
+	}
+	facts := inspectFacts{}
+	facts.routes, facts.routesOK, err = decodeInspectRoutes(data, args)
+	if err != nil {
+		return false, err
+	}
+	facts.rules, facts.rulesOK, err = i.readInspectRules(ctx, "ip", "-json", "-4", "rule", "show")
+	if err != nil || !facts.rulesOK {
+		return false, errors.New("cannot inspect native policy rules")
+	}
+	for _, kind := range []EffectKind{EffectConnectedRoute, EffectDefaultUplinkRoute, EffectUnreachableRule, EffectEgressRule} {
+		if observeEffect(kind, uplink, facts).State != ObservationExact {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (i *LinuxNetworkInspector) readInspectRules(ctx context.Context, program string, args ...string) ([]inspectRule, bool, error) {

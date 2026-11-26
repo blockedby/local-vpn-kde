@@ -71,7 +71,7 @@ func validateNativeOperation(args []string) error {
 	}
 	if len(args) == 1 {
 		switch args[0] {
-		case "diagnostics", "policy-status", "toggle-mode":
+		case "diagnostics", "policy-status", "toggle-mode", "repair-egress":
 			return nil
 		}
 	}
@@ -208,6 +208,19 @@ func RunNativeOperation(parent context.Context, input io.Reader, output io.Write
 	service := NativeService{}
 	if err = service.mutationPreflight(ctx); err != nil {
 		return err
+	}
+	if args[0] == "repair-egress" || (args[0] == "servers" && args[1] == "refresh") {
+		if ready, err := nativeEgressReady(ctx); err != nil || !ready {
+			if _, err := service.call(ctx, "systemctl", "start", "local-vpn-kde-egress.service"); err != nil {
+				return errors.New("native egress repair failed")
+			}
+			if ready, err := nativeEgressReady(ctx); err != nil || !ready {
+				return errors.New("native egress is unavailable after repair")
+			}
+		}
+		if args[0] == "repair-egress" {
+			return nil
+		}
 	}
 	status, err := service.Status(ctx)
 	if err != nil {

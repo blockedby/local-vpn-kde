@@ -679,7 +679,7 @@ func (b *Bridge) refresh(parent context.Context) {
 	}
 	container, _ := raw["container"].(string)
 	switch container {
-	case "absent", "stopped", "starting", "healthy", "unhealthy", "running", "inactive", "unknown":
+	case "absent", "stopped", "starting", "healthy", "unhealthy", "egress-unavailable", "running", "inactive", "unknown":
 		status["gateway_state"] = container
 	default:
 		container = "unknown"
