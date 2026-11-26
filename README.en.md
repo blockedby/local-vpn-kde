@@ -30,21 +30,20 @@ Keep your own VPS alongside multiple subscriptions. Selecting a profile changes 
 
 ## Install
 
-Arch / Debian packaging for `v0.2.0`: [candidates and manual CI](docs/native-packages.md). Packages are not published yet.
+### Native · Arch / CachyOS or Debian 13, x86_64
 
-### Native · Arch / CachyOS x86_64
-
-From a trusted local bundle directory containing `vpnkit-portable`, its checksum and `install-native.sh`:
+Download the package from the [latest release](https://github.com/blockedby/local-vpn-kde/releases/latest) together with `SHA256SUMS`, verify and install it:
 
 ```bash
-sha256sum -c vpnkit-portable.sha256
-sudo bash ./install-native.sh
+sha256sum -c --ignore-missing SHA256SUMS
+sudo pacman -U ./local-vpn-kde-native-*-x86_64.pkg.tar.zst   # Arch / CachyOS
+sudo apt install ./local-vpn-kde-native_*_amd64.deb          # Debian 13
 kvpn
 ```
 
-Run the installer once with sudo, then launch the interface as your regular user. No Go, Bun or Docker is needed on this computer. Installation does not connect the VPN.
+Launch the interface as your regular user. No Docker is needed on this computer. Installation does not connect the VPN.
 
-[Build a bundle and see what it contains →](docs/portable-installer.md)
+Without a package manager: [portable bundle](docs/portable-installer.md).
 
 ### Docker · Linux x86-64 with KDE
 
@@ -72,6 +71,15 @@ The table shows name, two-letter country code, ping, speed, website access and s
 Choose Rename from the row menu: `Enter` saves, `Esc` cancels, and an empty line restores the subscription name. A name can be up to 60 characters; surrounding and repeated spaces are removed. You can save up to 500 renamed servers. The local state file `server-names.json` holds server IDs and the chosen names; they survive subscription refresh and restart and are not removed when a profile is deleted. Details show the renamed server's original name.
 
 Country lookup is offline, using the embedded [server-country](https://github.com/sapics/ip-location-db) dataset (public domain, PDDL 1.0); no server address is sent to a country lookup service. A known IP's code is available immediately; for a hostname it may appear after a successful ping, check or speed measurement. TCP ping uses the connected address; a proxy lookup with ambiguous or unknown addresses supplies no new code, and a previously determined code may remain. The embedded database is a snapshot, so a code can become outdated.
+
+## Updates
+
+```bash
+kvpn update    # install the new version; the VPN stays connected
+kvpn restart   # move a running gateway onto the new version
+```
+
+After installing, `kvpn update` offers to restart the gateway (the VPN drops for a few seconds) and to open the interface. The TUI has the same in **Settings → [u]**. See the [guide](docs/guide.en.md#updates).
 
 ## Learn more
 
