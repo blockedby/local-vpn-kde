@@ -406,3 +406,78 @@ func TestNativeNetworkReapplyRequiresAuthorization(t *testing.T) {
 		t.Fatalf("unauthorized reapply: err=%v events=%v", err, events)
 	}
 }
+
+func TestRunNativeDesktopRestart(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		gateway string
+		active  string
+		want    []string
+		phase   string
+	}{
+		{"stopped gateway is left alone", "inactive", "no", []string{"service-status"}, "phase=gateway-not-running"},
+		{"missing gateway is left alone", "absent", "no", []string{"service-status"}, "phase=gateway-not-running"},
+		{"connected", "active", "yes", []string{"service-status", "nm-connection-state", "nm-disconnect", "service-stop", "service-start", "nm-connect"}, "phase=networkmanager-connect"},
+		{"gateway only", "active", "no", []string{"service-status", "nm-connection-state", "service-stop", "service-start"}, "phase=gateway-start"},
+		{"failed gateway", "failed", "no", []string{"service-status", "nm-connection-state", "service-stop", "service-start"}, "phase=gateway-start"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			events := []string{}
+			service := &fakeNativeDesktopService{events: &events, status: GatewayStatus{Gateway: tc.gateway, Network: "active", Ready: tc.gateway == "active"}}
+			nm := &fakeNativeDesktopNM{events: &events, status: "configured=yes\nactive=" + tc.active + "\n", errors: map[string]error{}}
+			installNativeDesktopFakes(t, service, nm)
+			var output bytes.Buffer
+			if err := RunNativeDesktop(context.Background(), t.TempDir(), "restart", true, &output); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(events, tc.want) || !strings.Contains(output.String(), tc.phase) {
+				t.Fatalf("events %v output %q", events, output.String())
+			}
+		})
+	}
+	events := []string{}
+	installNativeDesktopFakes(t, &fakeNativeDesktopService{events: &events}, &fakeNativeDesktopNM{events: &events})
+	if err := RunNativeDesktop(context.Background(), t.TempDir(), "restart", false, io.Discard); err == nil || len(events) != 0 {
+		t.Fatalf("unauthorized restart: %v %v", err, events)
+	}
+}
+
+func TestRunNativeDesktopRestartFailureBoundaries(t *testing.T) {
+	boom := errors.New("boom")
+	for _, tc := range []struct {
+		name      string
+		statusErr error
+		preflight error
+		stopErr   error
+		startErr  error
+		connect   error
+		want      []string
+		wantErr   string
+	}{
+		{name: "status error with partial state mutates nothing", statusErr: boom, want: []string{"service-status"}, wantErr: "native gateway status failed"},
+		{name: "preflight refusal mutates nothing", preflight: errNativePackageTransaction, want: []string{"service-status", "preflight"}, wantErr: "package update is in progress"},
+		{name: "stop refusal reconnects on the old gateway", stopErr: boom, want: []string{"service-status", "preflight", "nm-connection-state", "nm-disconnect", "service-stop", "nm-connect"}, wantErr: "the old gateway keeps running"},
+		{name: "start failure says what is down", startErr: boom, want: []string{"service-status", "preflight", "nm-connection-state", "nm-disconnect", "service-stop", "service-start"}, wantErr: "the gateway is stopped (start it in kvpn); the VPN is disconnected"},
+		{name: "reconnect failure says how to recover", connect: boom, want: []string{"service-status", "preflight", "nm-connection-state", "nm-disconnect", "service-stop", "service-start", "nm-connect"}, wantErr: "reconnecting the VPN failed (connect it in kvpn)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			events := []string{}
+			service := &fakeNativeDesktopService{events: &events, status: GatewayStatus{Gateway: "active", Network: "active"}, statusErr: tc.statusErr, stopErr: tc.stopErr, startErr: tc.startErr}
+			nm := &fakeNativeDesktopNM{events: &events, status: "configured=yes\nactive=yes\n", errors: map[string]error{"connect": tc.connect}}
+			old := newNativeDesktopDependencies
+			t.Cleanup(func() { newNativeDesktopDependencies = old })
+			newNativeDesktopDependencies = func(string) nativeDesktopDependencies {
+				return nativeDesktopDependencies{service: service, nm: nm,
+					egress:           func(context.Context) (bool, error) { return true, nil },
+					restartPreflight: func(context.Context) error { events = append(events, "preflight"); return tc.preflight }}
+			}
+			err := RunNativeDesktop(context.Background(), t.TempDir(), "restart", true, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error %v, want %q", err, tc.wantErr)
+			}
+			if !reflect.DeepEqual(events, tc.want) {
+				t.Fatalf("events %v want %v", events, tc.want)
+			}
+		})
+	}
+}

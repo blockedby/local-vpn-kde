@@ -128,7 +128,15 @@ func run(args []string) error {
 		install := func(ctx context.Context, version string, progress func(string)) (string, error) {
 			return nativeupdate.StartInstall(ctx, version, nativeupdate.InstallOptions{TextAgent: true}, progress)
 		}
-		return nativeupdate.RunCommand(ctx, args[1:], os.Stdin, os.Stdout, &nativeupdate.Checker{}, install)
+		return nativeupdate.RunCommand(ctx, args[1:], os.Stdin, os.Stdout, &nativeupdate.Checker{}, install, nativeupdate.InstalledHooks())
+	}
+	if len(args) > 0 && (args[0] == "restart" || args[0] == "--restart") {
+		if len(args) != 1 {
+			return fmt.Errorf("restart takes no arguments")
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer cancel()
+		return nativeupdate.RestartCommand(ctx, os.Stdout, nativeupdate.InstalledHooks())
 	}
 	if len(args) > 0 && args[0] == "ui" {
 		binary, err := os.Executable()
@@ -157,7 +165,7 @@ func run(args []string) error {
 		switch args[0] {
 		case "--help", "-h":
 			if len(args) == 1 {
-				fmt.Fprintln(os.Stdout, "Usage: kvpn [command]\n\nRun kvpn without arguments to open the interface.\nRun kvpn update --help for update options.")
+				fmt.Fprintln(os.Stdout, "Usage: kvpn [command]\n\nRun kvpn without arguments to open the interface.\nRun kvpn update --help for update options.\nRun kvpn restart to restart the VPN gateway (for example after an update).")
 				return nil
 			}
 		case "container", "routing", "health", "dns-switch":
@@ -165,7 +173,7 @@ func run(args []string) error {
 		}
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: kvpn render|assets|prepare|bridge|update")
+		return fmt.Errorf("usage: kvpn render|assets|prepare|bridge|update|restart")
 	}
 	flags := flag.NewFlagSet("kvpn", flag.ContinueOnError)
 	action := flags.String("action", "status", "NetworkManager action")
@@ -421,7 +429,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, localvpn.NativeGatewayFailureMessage(err))
 		} else if len(os.Args) > 1 && os.Args[1] == "autostart" {
 			fmt.Fprintln(os.Stderr, localvpn.AutostartFailureMessage(err))
-		} else if len(os.Args) > 1 && (os.Args[1] == "host-smoke" || os.Args[1] == "update" || os.Args[1] == "--update" || os.Args[1] == "native-network" || os.Args[1] == "native-desktop") {
+		} else if len(os.Args) > 1 && (os.Args[1] == "host-smoke" || os.Args[1] == "update" || os.Args[1] == "--update" || os.Args[1] == "restart" || os.Args[1] == "--restart" || os.Args[1] == "native-network" || os.Args[1] == "native-desktop") {
 			// Preserve network preflight and lifecycle reasons in the service
 			// journal; these commands never include subscription configuration.
 			fmt.Fprintln(os.Stderr, err)

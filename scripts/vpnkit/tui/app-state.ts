@@ -43,6 +43,7 @@ const phases: Record<string, string> = {
   "update-verifying": "Проверка пакета",
   "update-installing": "Установка",
   "update-done": "Установлено",
+  "gateway-restart": "Переход на новую версию",
   compensating: "Восстановление состояния",
 };
 const nativeSupportedActions: readonly Action[] = [
@@ -237,11 +238,12 @@ export class AppState {
   renameTarget?: { id: string; original: string };
   selectTarget?: { id: string; name: string };
   confirmationSnapshot?: string;
-  confirmation: "disconnect" | "stop" | "subscription" | "fastest" | "select" | "update" = "disconnect";
+  confirmation: "disconnect" | "stop" | "gateway/restart" | "subscription" | "fastest" | "select" | "update" = "disconnect";
   /** Latest update check or install result; shown in Settings. */
   updateInfo?: import("./bridge").UpdateInfo;
   /** Version installed by this session; offers relaunching the interface. */
   updatedTo?: string;
+  gatewayRestartOffered = false;
   /** Set when the user asks to restart the interface after an update. */
   relaunchRequested = false;
   fastestCandidate?: { id: string; name: string; speed: number; measuredAt: number };
@@ -713,7 +715,7 @@ export class AppState {
       active: this.status?.networkmanager_active, profile: this.profiles?.active,
       server: this.servers.find(server => server.selected)?.server_id });
   }
-  confirm(action: "disconnect" | "stop") {
+  confirm(action: "disconnect" | "stop" | "gateway/restart") {
     this.confirmationSnapshot = this.confirmationContext();
     this.confirmation = action;
     this.open("confirm");

@@ -40,6 +40,8 @@ type nativeDesktopDependencies struct {
 	policy  func(context.Context, io.Writer) error
 	egress  func(context.Context) (bool, error)
 	repair  func(context.Context) error
+	// restartPreflight refuses a restart before anything is disconnected.
+	restartPreflight func(context.Context) error
 }
 
 // This private factory is the dependency seam used by unit tests. Production
@@ -47,8 +49,9 @@ type nativeDesktopDependencies struct {
 // NetworkManager adapter.
 var newNativeDesktopDependencies = func(base string) nativeDesktopDependencies {
 	return nativeDesktopDependencies{
-		service: NativeService{},
-		egress:  nativeEgressReady,
+		service:          NativeService{},
+		egress:           nativeEgressReady,
+		restartPreflight: nativeRestartPreflight,
 		repair: func(ctx context.Context) error {
 			return NativeOperationsClient(ctx, []string{"repair-egress"}, io.Discard)
 		},
@@ -207,7 +210,8 @@ func runNativeDesktopStatus(ctx context.Context, base string, output io.Writer, 
 
 // RunNativeDesktop coordinates the fixed native gateway lifecycle with the
 // owned NetworkManager profile. Mutations require explicit authorization via
-// yes; action is one of status, backend-start, start, disconnect, or stop.
+// yes; action is one of status, backend-start, start, disconnect, stop, toggle-mode,
+// reapply-network, or restart.
 func RunNativeDesktop(ctx context.Context, base string, action string, yes bool, output io.Writer) error {
 	return runNativeDesktop(ctx, base, action, yes, output, nil)
 }
@@ -221,7 +225,7 @@ func runNativeDesktop(ctx context.Context, base string, action string, yes bool,
 	}
 	switch action {
 	case "status":
-	case "backend-start", "start", "disconnect", "stop", "toggle-mode", "reapply-network":
+	case "backend-start", "start", "disconnect", "stop", "toggle-mode", "reapply-network", "restart":
 		if !yes {
 			return errors.New("native desktop mutation requires explicit authorization (--yes)")
 		}
@@ -249,6 +253,8 @@ func runNativeDesktop(ctx context.Context, base string, action string, yes bool,
 		return runNativeDesktopStatus(ctx, base, output, dependencies, baseMissing)
 	case "reapply-network":
 		return reapplyNativeDesktopNetwork(ctx, output, dependencies)
+	case "restart":
+		return restartNativeDesktop(ctx, output, dependencies)
 	case "toggle-mode":
 		return runNativeDesktopPolicy(ctx, output, dependencies)
 	case "backend-start":
@@ -387,6 +393,91 @@ func runNativeDesktopPolicy(ctx context.Context, output io.Writer, d nativeDeskt
 		return errors.Join(operationErr, errors.New("native gateway unavailable after policy change"))
 	}
 	return errors.Join(operationErr, d.nm.Run(cleanup, "connect", true, io.Discard))
+}
+
+var errNativePackageTransaction = errors.New("a package update is in progress; restart the gateway after it finishes")
+
+// nativeRestartPreflight runs the same unit checks Stop and Start make, and
+// refuses during a package transaction (its hooks would refuse the start), so a
+// restart that cannot complete fails before the VPN is disconnected.
+func nativeRestartPreflight(parent context.Context) error {
+	if blocked, err := nativePackageBlocked(); err != nil || blocked {
+		return errors.Join(errNativePackageTransaction, err)
+	}
+	ctx, cancel := nativeServiceContext(parent)
+	defer cancel()
+	return NativeService{}.mutationPreflight(ctx)
+}
+
+// restartNativeDesktop moves a running gateway onto the installed version after
+// an update. A stopped gateway is left alone: it starts on the new version
+// anyway. The owned profile is reconnected only if it was active, because the
+// restart ends the existing OpenVPN session. Every failure after the
+// disconnect says what is left down and how to recover.
+func restartNativeDesktop(ctx context.Context, output io.Writer, d nativeDesktopDependencies) error {
+	before, err := d.service.Status(ctx)
+	if err != nil {
+		return fmt.Errorf("native gateway status failed: %w", err)
+	}
+	if before.Gateway == "absent" || before.Gateway == "inactive" || before.Gateway == "" {
+		return nativeDesktopPhase(output, "gateway-not-running")
+	}
+	if d.restartPreflight != nil {
+		if err := d.restartPreflight(ctx); err != nil {
+			return err
+		}
+	}
+	capture := &nativeDesktopLimitWriter{remain: nativeDesktopStatusLimit}
+	if err := d.nm.Run(ctx, "connection-state", true, capture); err != nil {
+		return err
+	}
+	_, active, err := parseNativeDesktopNMStatus(capture.buffer.Bytes())
+	if err != nil {
+		return err
+	}
+	connected := active == "yes"
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// From here on the transaction finishes or compensates even if cancelled.
+	ctx = context.WithoutCancel(ctx)
+	if connected {
+		if err := nativeDesktopPhase(output, "networkmanager-disconnect"); err != nil {
+			return err
+		}
+		if err := d.nm.Run(ctx, "disconnect", true, io.Discard); err != nil {
+			return err
+		}
+	}
+	reconnectHint := ""
+	if connected {
+		reconnectHint = "; the VPN is disconnected: connect it in kvpn"
+	}
+	_ = nativeDesktopPhase(output, "gateway-stop")
+	if err := d.service.Stop(ctx); err != nil {
+		if connected {
+			// The old gateway is still running: restore the connection on it.
+			if connectErr := d.nm.Run(ctx, "connect", true, io.Discard); connectErr != nil {
+				return fmt.Errorf("native gateway stop failed: %w%s", errors.Join(err, connectErr), reconnectHint)
+			}
+		}
+		return fmt.Errorf("native gateway stop failed, the old gateway keeps running: %w", err)
+	}
+	_ = nativeDesktopPhase(output, "gateway-start")
+	if err := d.service.Start(ctx); err != nil {
+		return fmt.Errorf("native gateway start failed, the gateway is stopped (start it in kvpn)%s: %w", reconnectHint, err)
+	}
+	if err := d.ensureEgress(ctx); err != nil {
+		return fmt.Errorf("the gateway restarted but has no network egress%s: %w", reconnectHint, err)
+	}
+	if !connected {
+		return nativeDesktopPhase(output, "gateway-restarted")
+	}
+	_ = nativeDesktopPhase(output, "networkmanager-connect")
+	if err := d.nm.Run(ctx, "connect", true, io.Discard); err != nil {
+		return fmt.Errorf("the gateway restarted but reconnecting the VPN failed (connect it in kvpn): %w", err)
+	}
+	return nativeDesktopPhase(output, "gateway-restarted")
 }
 
 // Reapplication is an explicit user action. Capture the actual owned connection

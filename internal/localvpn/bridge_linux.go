@@ -29,16 +29,18 @@ type BridgeOptions struct {
 	keepTerminal                          bool
 }
 type Bridge struct {
-	options     BridgeOptions
-	status      map[string]any
-	mu          sync.Mutex
-	active      map[string]context.CancelFunc
-	statusMu    sync.RWMutex
-	refreshMu   bridgeGate
-	mutationMu  bridgeGate
-	operationMu bridgeGate
-	namesMu     sync.RWMutex
-	serverNames map[string]string
+	options       BridgeOptions
+	status        map[string]any
+	mu            sync.Mutex
+	active        map[string]context.CancelFunc
+	statusMu      sync.RWMutex
+	refreshMu     bridgeGate
+	mutationMu    bridgeGate
+	operationMu   bridgeGate
+	updateHooks   nativeupdate.Hooks
+	installUpdate func(context.Context, string, nativeupdate.InstallOptions, func(string)) (string, error)
+	namesMu       sync.RWMutex
+	serverNames   map[string]string
 }
 
 // bridgeGate is a cancellable read/write gate. Waiting never owns a worker's
@@ -143,6 +145,8 @@ func NewBridge(o BridgeOptions) (*Bridge, error) {
 	}
 	b := &Bridge{options: o, active: make(map[string]context.CancelFunc), status: map[string]any{"schema": 1, "vpn_state": "unknown", "gateway_state": "unknown", "subscription": "not configured", "endpoint": "redacted", "routing_mode": o.Mode, "selection": "redacted", "diagnostics": "not-run", "last_action": "none", "last_result": "not-run", "last_attempt": "", "networkmanager_configured": "unknown", "networkmanager_active": "unknown", "runner": kind}}
 	if o.Runtime == "native" {
+		b.updateHooks = nativeupdate.InstalledHooks()
+		b.installUpdate = nativeupdate.StartInstall
 		b.status["runtime"] = "native"
 		b.status["installed"] = o.Repo == InstalledAssetRoot
 		if o.Repo == InstalledAssetRoot {
@@ -367,7 +371,7 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 	if b.options.Runtime == "native" {
 		switch request.Action {
 		case "status", "backend/start", "network/reapply", "start", "disconnect", "stop", "autostart/read", "autostart/set", "servers/rename":
-		case "profiles/list", "profiles/add", "profiles/open", "profiles/remove", "subscription", "subscription/read", "servers/list", "servers/refresh", "servers/current", "servers/select", "servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch", "toggle-mode", "diagnostics", "update/check", "update/install":
+		case "profiles/list", "profiles/add", "profiles/open", "profiles/remove", "subscription", "subscription/read", "servers/list", "servers/refresh", "servers/current", "servers/select", "servers/ping", "servers/speed", "servers/availability", "servers/check-batch", "servers/speed-batch", "toggle-mode", "diagnostics", "update/check", "update/install", "gateway/restart":
 			if b.options.Repo != InstalledAssetRoot {
 				reply["ok"], reply["reason"], reply["status"] = false, "unsupported-native-action", b.Status()
 				return reply, nil
@@ -460,6 +464,21 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 			break
 		}
 		reply["profiles"] = result
+	case "gateway/restart":
+		if b.options.Runtime != "native" || b.options.Mock || value != "" {
+			invalid()
+			break
+		}
+		if progress != nil {
+			progress("gateway-restart")
+		}
+		restarted, err := b.updateHooks.Restart(ctx)
+		if err != nil {
+			reply["ok"], reply["reason"], reply["error"] = false, "gateway-restart-failed", err.Error()
+		} else {
+			reply["gateway_restarted"] = restarted
+		}
+		b.refresh(ctx)
 	case "update/check", "update/install":
 		if b.options.Runtime != "native" || b.options.Mock {
 			invalid()
@@ -483,12 +502,15 @@ func (b *Bridge) request(parent context.Context, line []byte, progress func(stri
 				progress("update-" + phase)
 			}
 		}
-		installed, err := nativeupdate.StartInstall(ctx, value, nativeupdate.InstallOptions{}, report)
+		installed, err := b.installUpdate(ctx, value, nativeupdate.InstallOptions{}, report)
 		if err != nil {
 			reply["ok"], reply["reason"], reply["error"] = false, "update-failed", err.Error()
 			break
 		}
-		reply["update"] = map[string]any{"installed": installed, "latest": installed, "available": false}
+		// An unknown state still offers the restart; the helper decides.
+		gatewayRunning, runningErr := b.updateHooks.Running(ctx)
+		gatewayRunning = gatewayRunning || runningErr != nil
+		reply["update"] = map[string]any{"installed": installed, "latest": installed, "available": false, "gateway_running": gatewayRunning}
 	case "subscription/read":
 		text, err := ReadSubscription(b.options.Base)
 		if err != nil {

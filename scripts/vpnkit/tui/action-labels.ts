@@ -27,4 +27,5 @@ export const names: Partial<Record<Action, string>> = {
   "servers/availability": "Доступность сайта",
   "update/check": "Проверяем обновления",
   "update/install": "Устанавливаем обновление",
+  "gateway/restart": "Перезапускаем шлюз",
 };

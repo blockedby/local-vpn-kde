@@ -19,7 +19,8 @@ const profiles: NonNullable<Reply["profiles"]> = { active:"demo-subscription", i
 ] };
 const backend: Backend = {
   async request(action) { return {ok:true,reason:"ok",code:0,status, profiles,
-    ...(action.startsWith("servers/") ? {catalog:{status:"ok",servers}} : {})}; },
+    ...(action.startsWith("servers/") ? {catalog:{status:"ok",servers}} : {}),
+    ...(action.startsWith("autostart/") ? {autostart:{gateway:true,connect:true,resume:true,runtime:"native"},autostart_service:{enabled:"enabled",active:"inactive"}} : {})}; },
   async close() {},
 };
 const t = await createTestRenderer({width:100,height:20});
@@ -29,11 +30,12 @@ try {
   await app.perform("status");
   await app.perform("profiles/list");
   await app.perform("servers/list");
+  await app.perform("autostart/read");
   for (const server of app.servers) Object.assign(server, servers.find(item => item.server_id === server.server_id));
   app.notice = "";
   app.paint();
-  for (const [name, key] of [["home", ""], ["servers", "v"], ["server-menu", ""], ["profiles", "c"]]) {
-    if (name === "profiles") { t.mockInput.pressEscape(); await Bun.sleep(30); }
+  for (const [name, key] of [["home", ""], ["servers", "v"], ["server-menu", ""], ["profiles", "c"], ["settings", "i"]]) {
+    if (name === "profiles" || name === "settings") { t.mockInput.pressEscape(); await Bun.sleep(30); }
     if (key) { t.resize(100, 24); t.mockInput.pressKey(key); }
     await Bun.sleep(40);
     if (name === "server-menu") { t.mockInput.pressEnter(); await Bun.sleep(40); }
@@ -43,13 +45,13 @@ try {
   }
 } finally { await app.close(); }
 
-// Reuse the repository's captureSpans rasterizer for all four frames.
+// Reuse the repository's captureSpans rasterizer for all five frames.
 const rasterizer = await readFile(resolve(import.meta.dir, "../../../docs/render-tui-captures.py"), "utf8");
-const script = rasterizer.replace('("home", "servers", "profiles")', '("home", "servers", "server-menu", "profiles")');
+const script = rasterizer.replace('("home", "servers", "profiles")', '("home", "servers", "server-menu", "profiles", "settings")');
 const result = Bun.spawnSync(["python3", "-c", script, output, "/usr/share/fonts/noto/NotoSansMono-Regular.ttf"], { stdout: "inherit", stderr: "inherit" });
 if (result.exitCode !== 0) throw new Error(`Capture rasterizer failed: ${result.exitCode}`);
 if (process.argv[3]) {
   await mkdir(process.argv[3], { recursive: true });
-  for (const name of ["home", "servers", "server-menu", "profiles"])
+  for (const name of ["home", "servers", "server-menu", "profiles", "settings"])
     await copyFile(`${output}/${name}.png`, `${process.argv[3]}/${name}.png`);
 }
