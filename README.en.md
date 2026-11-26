@@ -79,6 +79,8 @@ kvpn update    # install the new version; the VPN stays connected
 kvpn restart   # move a running gateway onto the new version
 ```
 
+![Settings: reconnect after sleep, autostart and updates](docs/images/settings.png)
+
 After installing, `kvpn update` offers to restart the gateway (the VPN drops for a few seconds) and to open the interface. The TUI has the same in **Settings → [u]**. See the [guide](docs/guide.en.md#updates).
 
 ## Learn more
