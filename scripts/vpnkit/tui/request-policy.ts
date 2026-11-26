@@ -11,7 +11,7 @@ export const requestClasses: Record<Action, "read" | "measurement" | "selection"
   "servers/select": "selection",
   "profiles/list": "exclusive", "profiles/add": "exclusive", "profiles/open": "exclusive", "profiles/remove": "exclusive",
   "autostart/read": "exclusive", "autostart/set": "exclusive", subscription: "exclusive",
-  "backend/start": "exclusive", "network/reapply": "exclusive", disconnect: "exclusive", start: "exclusive", stop: "exclusive",
+  "backend/start": "exclusive", "gateway/restart": "exclusive", "network/reapply": "exclusive", disconnect: "exclusive", start: "exclusive", stop: "exclusive",
   "retest/select": "exclusive", "toggle-mode": "exclusive", diagnostics: "exclusive", "servers/refresh": "exclusive",
 };
 

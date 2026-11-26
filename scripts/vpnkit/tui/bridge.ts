@@ -9,6 +9,7 @@ export type Action =
   | "subscription"
   | "subscription/read"
   | "backend/start"
+  | "gateway/restart"
   | "network/reapply"
   | "disconnect"
   | "start"
@@ -31,6 +32,7 @@ export interface UpdateInfo {
   installed: string;
   latest: string;
   available: boolean;
+  gateway_running?: boolean;
 }
 export interface Status {
   runtime?: "docker" | "native";

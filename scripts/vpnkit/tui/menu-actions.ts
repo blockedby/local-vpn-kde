@@ -127,7 +127,7 @@ export function menuItems(state: AppState): MenuItem[] {
               return;
             }
             const action = state.confirmation;
-            const valid = state.confirmationSnapshot === state.confirmationContext();
+            const valid = state.confirmationSnapshot === state.confirmationContext() && (action !== "gateway/restart" || state.gatewayRestartOffered);
             state.open(state.overlayBase, false);
             if (valid) void state.perform(action);
             else state.notify("Состояние изменилось. Подтвердите действие заново.", true);
@@ -197,6 +197,7 @@ export function menuItems(state: AppState): MenuItem[] {
         label: state.updatedTo ? `Обновлено до ${state.updatedTo}` : state.updateInfo?.available ? `Обновление: ${state.updateInfo.installed} → ${state.updateInfo.latest} · установить` : state.updateInfo ? `Версия ${state.updateInfo.installed} · последняя · проверить снова` : "Проверить обновления",
         run: () => { if (state.updateInfo?.available && !state.updatedTo) state.confirmUpdate(); else void state.perform("update/check"); },
       }] : []),
+      ...(state.nativeInstalled() && state.gatewayRestartOffered ? [{ key: "g", label: "Перезапустить шлюз", run: () => state.confirm("gateway/restart") }] : []),
       ...(state.updatedTo ? [{ key: "R", label: "Перезапустить интерфейс", run: () => state.relaunch() }] : []),
       ...(!state.ready() ? [{ key: "s", label: `Запустить ${state.serviceObject()}`, run: run("backend/start") }] : []),
       ...(["healthy", "unhealthy", "egress-unavailable", "running", "stopped", "starting"].includes(state.status?.gateway_state ?? state.status?.vpn_state ?? "") ? [{ key: "z", label: state.nativeMode() ? "Остановить сервис" : "Остановить Docker и VPN", run: () => state.confirm("stop") }] : []),
@@ -288,6 +289,7 @@ export function defineMenuActions(state: AppState, items: MenuItem[]): ActionDef
       const request: Action | undefined = screen === "home" && item.key === "m" ? "toggle-mode"
         : screen === "home" && item.key === HOME_CONNECT_KEY && (!state.ready() || state.status?.subscription === "configured") ? state.ready() || state.status?.gateway_state === "egress-unavailable" ? "start" : "backend/start"
         : screen === "settings" && item.key === "w" ? state.autostart ? "autostart/set" : "autostart/read"
+        : screen === "settings" && item.key === "g" ? "gateway/restart"
         : screen === "autostart" && item.key === "u" ? "autostart/read"
         : screen === "autostart" && (item.key === "g" || item.key === "a") ? "autostart/set"
         : screen === "diagnostics" && item.key === "u" ? "diagnostics"

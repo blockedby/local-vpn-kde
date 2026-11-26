@@ -55,7 +55,10 @@ export class SummaryView {
         this.summary.content = `${candidate.name} · ${candidate.speed.toFixed(1)} Мбит/с · ${age} с назад${state.filter ? " · среди показанных" : ""}\nПереключение прервёт текущие соединения. Выбрать сервер?`;
       } else if (state.confirmation === "update" && state.updateInfo) {
         this.summary.height = 3;
-        this.summary.content = `Установить версию ${state.updateInfo.latest} (сейчас ${state.updateInfo.installed})?\nVPN останется подключён. Интерфейс можно будет перезапустить;\nшлюз перейдёт на новую версию при следующем перезапуске.`;
+        this.summary.content = `Установить версию ${state.updateInfo.latest} (сейчас ${state.updateInfo.installed})?\nVPN останется подключён. Если шлюз работает,\nпосле установки можно будет его перезапустить.`;
+      } else if (state.confirmation === "gateway/restart") {
+        this.summary.height = 3;
+        this.summary.content = "Перезапустить шлюз на новой версии?\nЕсли VPN подключён, он отключится на несколько секунд\nи подключится снова.";
       } else if (state.confirmation === "subscription") {
         this.summary.height = 4;
         this.summary.content =
