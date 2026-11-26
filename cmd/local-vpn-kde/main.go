@@ -128,7 +128,7 @@ func run(args []string) error {
 		install := func(ctx context.Context, version string, progress func(string)) (string, error) {
 			return nativeupdate.StartInstall(ctx, version, nativeupdate.InstallOptions{TextAgent: true}, progress)
 		}
-		return nativeupdate.RunCommand(ctx, args[1:], os.Stdin, os.Stdout, &nativeupdate.Checker{}, install)
+		return nativeupdate.RunCommand(ctx, args[1:], os.Stdin, os.Stdout, &nativeupdate.Checker{}, install, nativeupdate.InstalledGateway())
 	}
 	if len(args) > 0 && args[0] == "ui" {
 		binary, err := os.Executable()

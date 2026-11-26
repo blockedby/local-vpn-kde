@@ -153,20 +153,68 @@ func StartInstall(ctx context.Context, version string, options InstallOptions, p
 	return "", errors.New("update helper ended without a result")
 }
 
-// RunCommand implements `kvpn update [--check] [--yes]`.
-func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, checker *Checker, install func(ctx context.Context, version string, progress func(string)) (string, error)) error {
-	checkOnly, yes := false, false
+// Gateway lets the update command move a running VPN gateway onto the newly
+// installed version. A zero Gateway never offers a restart.
+type Gateway struct {
+	Running func(ctx context.Context) bool
+	Restart func(ctx context.Context) error
+}
+
+const gatewayUnit = "local-vpn-kde-gateway.service"
+
+// InstalledGateway restarts through the newly installed executable, so the new
+// version's own lifecycle code and unit expectations do the work.
+func InstalledGateway() Gateway {
+	return Gateway{
+		Running: func(ctx context.Context) bool {
+			_, err := ExecRunner(ctx, "/usr/bin/systemctl", "is-active", "--quiet", gatewayUnit)
+			return err == nil
+		},
+		Restart: func(ctx context.Context) error {
+			cmd := exec.CommandContext(ctx, HelperPath, "native-desktop", "--action", "restart", "--yes")
+			var stderr limitedOutput
+			cmd.Stdout, cmd.Stderr = io.Discard, &stderr
+			if err := cmd.Run(); err != nil {
+				if message := lastLine(stderr.Bytes()); message != "" {
+					return errors.New(message)
+				}
+				return err
+			}
+			return nil
+		},
+	}
+}
+
+func lastLine(data []byte) string {
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
+}
+
+const usage = `Usage: kvpn update [--check] [--yes] [--restart]
+
+Installs the latest release of the native package. The VPN stays connected.
+If the VPN gateway is running, it offers to restart it on the new version;
+the VPN then drops for a few seconds and reconnects.
+  --check    only report whether an update is available
+  --yes      install without asking (the gateway is not restarted)
+  --restart  restart a running gateway after installing, without asking`
+
+// RunCommand implements `kvpn update [--check] [--yes] [--restart]`.
+func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, checker *Checker, install func(ctx context.Context, version string, progress func(string)) (string, error), gateway Gateway) error {
+	checkOnly, yes, restart := false, false, false
 	for _, arg := range args {
 		switch arg {
 		case "--check":
 			checkOnly = true
 		case "--yes", "-y":
 			yes = true
+		case "--restart":
+			restart = true
 		case "--help", "-h":
-			fmt.Fprintln(stdout, "Usage: kvpn update [--check] [--yes]\n\nInstalls the latest release of the native package. The VPN stays connected.\n  --check  only report whether an update is available\n  --yes    install without asking")
+			fmt.Fprintln(stdout, usage)
 			return nil
 		default:
-			return fmt.Errorf("update accepts only --check and --yes, not %q", arg)
+			return fmt.Errorf("update accepts only --check, --yes and --restart, not %q", arg)
 		}
 	}
 	if os.Geteuid() == 0 {
@@ -191,18 +239,36 @@ func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.W
 		fmt.Fprintln(stdout, "An update is available. Install it with: kvpn update")
 		return nil
 	}
-	if !yes {
-		fmt.Fprintf(stdout, "Install %s now? The VPN stays connected. [y/N] ", result.Latest)
-		answer, _ := bufio.NewReader(stdin).ReadString('\n')
-		if answer = strings.ToLower(strings.TrimSpace(answer)); answer != "y" && answer != "yes" {
-			fmt.Fprintln(stdout, "Not installed.")
-			return nil
-		}
+	answers := bufio.NewReader(stdin)
+	ask := func(question string) bool {
+		fmt.Fprintf(stdout, "%s [y/N] ", question)
+		answer, _ := answers.ReadString('\n')
+		answer = strings.ToLower(strings.TrimSpace(answer))
+		return answer == "y" || answer == "yes"
+	}
+	if !yes && !ask(fmt.Sprintf("Install %s now? The VPN stays connected.", result.Latest)) {
+		fmt.Fprintln(stdout, "Not installed.")
+		return nil
 	}
 	installed, err := install(ctx, result.Latest.String(), func(phase string) { fmt.Fprintln(stdout, PhaseText(phase)) })
 	if err != nil {
 		return fmt.Errorf("update failed: %w", err)
 	}
-	fmt.Fprintf(stdout, "Updated to %s. Reopen the app to use it. The VPN gateway switches to the new version at its next restart or reboot.\n", installed)
+	if gateway.Running == nil || gateway.Restart == nil || !gateway.Running(ctx) {
+		fmt.Fprintf(stdout, "Updated to %s. Reopen the app to use it.\n", installed)
+		return nil
+	}
+	if !restart && !yes {
+		restart = ask(fmt.Sprintf("Updated to %s. The running VPN gateway is still the old version.\nRestart it now? The VPN drops for a few seconds and reconnects.", installed))
+	}
+	if !restart {
+		fmt.Fprintf(stdout, "Updated to %s. Reopen the app to use it. The VPN gateway switches to the new version at its next restart or reboot.\n", installed)
+		return nil
+	}
+	fmt.Fprintln(stdout, "Restarting the VPN gateway…")
+	if err := gateway.Restart(ctx); err != nil {
+		return fmt.Errorf("updated to %s, but restarting the VPN gateway failed: %w; it switches to the new version at the next reboot", installed, err)
+	}
+	fmt.Fprintf(stdout, "Updated to %s and restarted the VPN gateway. Reopen the app to use it.\n", installed)
 	return nil
 }

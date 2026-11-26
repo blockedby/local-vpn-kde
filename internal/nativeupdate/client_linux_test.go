@@ -39,7 +39,7 @@ func TestRunCommand(t *testing.T) {
 				return version, nil
 			}
 			var out bytes.Buffer
-			if err := RunCommand(context.Background(), tc.args, strings.NewReader(tc.input), &out, checkerFor(f), install); err != nil {
+			if err := RunCommand(context.Background(), tc.args, strings.NewReader(tc.input), &out, checkerFor(f), install, Gateway{}); err != nil {
 				t.Fatal(err)
 			}
 			if (requested != "") != tc.wantInstall || tc.wantInstall && requested != "0.4.4" {
@@ -52,26 +52,71 @@ func TestRunCommand(t *testing.T) {
 	}
 }
 
+func TestRunCommandOffersGatewayRestart(t *testing.T) {
+	for _, tc := range []struct {
+		name, input  string
+		args         []string
+		running      bool
+		restartErr   error
+		wantRestart  bool
+		wantOutput   string
+		wantErr      string
+		wantQuestion bool
+	}{
+		{name: "gateway stopped", input: "y\n", running: false, wantOutput: "Updated to 0.4.4. Reopen the app to use it.\n"},
+		{name: "restart accepted", input: "y\ny\n", running: true, wantRestart: true, wantQuestion: true, wantOutput: "Updated to 0.4.4 and restarted the VPN gateway."},
+		{name: "restart declined", input: "y\nn\n", running: true, wantQuestion: true, wantOutput: "switches to the new version at its next restart or reboot"},
+		{name: "no answer", input: "y\n", running: true, wantQuestion: true, wantOutput: "switches to the new version at its next restart or reboot"},
+		{name: "yes keeps gateway", args: []string{"--yes"}, running: true, wantOutput: "switches to the new version at its next restart or reboot"},
+		{name: "restart flag", args: []string{"--yes", "--restart"}, running: true, wantRestart: true, wantOutput: "restarted the VPN gateway"},
+		{name: "restart fails", args: []string{"--yes", "--restart"}, running: true, restartErr: errors.New("gateway start failed"), wantRestart: true, wantErr: "updated to 0.4.4, but restarting the VPN gateway failed: gateway start failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, "pacman")
+			f.installed = "0.4.3"
+			install := func(_ context.Context, version string, _ func(string)) (string, error) { return version, nil }
+			restarted := false
+			gateway := Gateway{
+				Running: func(context.Context) bool { return tc.running },
+				Restart: func(context.Context) error { restarted = true; return tc.restartErr },
+			}
+			var out bytes.Buffer
+			err := RunCommand(context.Background(), tc.args, strings.NewReader(tc.input), &out, checkerFor(f), install, gateway)
+			if tc.wantErr != "" {
+				expectError(t, err, tc.wantErr)
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if restarted != tc.wantRestart {
+				t.Fatalf("restarted %v, output %q", restarted, out.String())
+			}
+			if strings.Contains(out.String(), "Restart it now?") != tc.wantQuestion || !strings.Contains(out.String(), tc.wantOutput) {
+				t.Fatalf("output %q", out.String())
+			}
+		})
+	}
+}
+
 func TestRunCommandErrors(t *testing.T) {
 	f := newFixture(t, "pacman")
 	never := func(context.Context, string, func(string)) (string, error) {
 		t.Fatal("install must not run")
 		return "", nil
 	}
-	err := RunCommand(context.Background(), []string{"--force"}, strings.NewReader(""), &bytes.Buffer{}, checkerFor(f), never)
-	expectError(t, err, "only --check and --yes")
+	err := RunCommand(context.Background(), []string{"--force"}, strings.NewReader(""), &bytes.Buffer{}, checkerFor(f), never, Gateway{})
+	expectError(t, err, "only --check, --yes and --restart")
 
 	f.installed = "0.0.0.r278.gabc"
-	err = RunCommand(context.Background(), nil, strings.NewReader(""), &bytes.Buffer{}, checkerFor(f), never)
+	err = RunCommand(context.Background(), nil, strings.NewReader(""), &bytes.Buffer{}, checkerFor(f), never, Gateway{})
 	expectError(t, err, "development build")
 
 	checker := &Checker{Client: f.installer.Client, Run: f.run, Exists: func(string) bool { return false }}
-	err = RunCommand(context.Background(), nil, strings.NewReader(""), &bytes.Buffer{}, checker, never)
+	err = RunCommand(context.Background(), nil, strings.NewReader(""), &bytes.Buffer{}, checker, never, Gateway{})
 	expectError(t, err, "not from the Arch or Debian package")
 
 	failing := func(context.Context, string, func(string)) (string, error) { return "", errors.New("offline") }
 	f.installed = "0.4.3"
-	err = RunCommand(context.Background(), []string{"--yes"}, strings.NewReader(""), &bytes.Buffer{}, checkerFor(f), failing)
+	err = RunCommand(context.Background(), []string{"--yes"}, strings.NewReader(""), &bytes.Buffer{}, checkerFor(f), failing, Gateway{})
 	expectError(t, err, "update failed: offline")
 }
 
