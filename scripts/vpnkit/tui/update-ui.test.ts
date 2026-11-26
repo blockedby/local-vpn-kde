@@ -72,7 +72,7 @@ test("a running gateway gets a separate, default-No restart after installation",
     expect(backend.calls.filter(call => call.action === "gateway/restart")).toHaveLength(1);
     restart.resolve(reply(backend.status)); await settle(); await t.renderOnce();
     frame = t.captureCharFrame();
-    expect(frame).toContain("Перезапуск шлюза завершён");
+    expect(frame).toContain("Шлюз перезапущен на новой версии");
     expect(frame).not.toContain("Перезапустить шлюз");
     expect(frame).toContain("Перезапустить интерфейс");
   } finally { restart.resolve(reply(backend.status)); await app.close(); }

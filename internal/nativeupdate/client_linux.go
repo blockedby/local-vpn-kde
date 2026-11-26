@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // HelperPath is the fixed executable behind the org.local-vpn-kde.update action.
@@ -163,7 +164,10 @@ type Hooks struct {
 	OpenApp func() error
 }
 
-const gatewayUnit = "local-vpn-kde-gateway.service"
+const (
+	gatewayUnit    = "local-vpn-kde-gateway.service"
+	restartTimeout = 3 * time.Minute
+)
 
 // InstalledHooks act through the newly installed executables, so the new
 // version's own lifecycle code and unit expectations do the work.
@@ -174,6 +178,10 @@ func InstalledHooks() Hooks {
 			return err == nil
 		},
 		Restart: func(ctx context.Context) error {
+			// Once started, a restart must finish: killing it between stop and
+			// start would leave the gateway down and the VPN disconnected.
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), restartTimeout)
+			defer cancel()
 			cmd := exec.CommandContext(ctx, HelperPath, "native-desktop", "--action", "restart", "--yes")
 			var stderr limitedOutput
 			cmd.Stdout, cmd.Stderr = io.Discard, &stderr

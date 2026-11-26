@@ -236,8 +236,8 @@ export async function perform(
           "update/check": reply.update?.available
             ? `Доступна версия ${reply.update.latest}. Установить: [u] в настройках.`
             : `Установлена последняя версия ${reply.update?.installed ?? ""}.`,
-          "update/install": `Обновлено до ${reply.update?.installed ?? ""}, VPN не отключался.${state.gatewayRestartOffered ? " Шлюз пока работает на старой версии." : ""} [R] — перезапустить интерфейс.`,
-          "gateway/restart": ["absent", "inactive", "stopped"].includes(reply.status.gateway_state ?? "") ? "Шлюз не запущен." : "Перезапуск шлюза завершён.",
+          "update/install": `Обновлено до ${reply.update?.installed ?? ""}, VPN не отключался.${state.gatewayRestartOffered ? " Шлюз пока работает на старой версии: [g] — перезапустить шлюз." : ""} [R] — перезапустить интерфейс.`,
+          "gateway/restart": ["absent", "inactive", "stopped"].includes(reply.status.gateway_state ?? "") ? "Шлюз не запущен." : "Шлюз перезапущен на новой версии. [R] — перезапустить интерфейс.",
         };
         state.noticeIdentity = { action, reason: reply.reason, ok: true };
         state.notice = done[action] ?? "Готово.";
