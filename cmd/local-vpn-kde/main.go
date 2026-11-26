@@ -130,6 +130,14 @@ func run(args []string) error {
 		}
 		return nativeupdate.RunCommand(ctx, args[1:], os.Stdin, os.Stdout, &nativeupdate.Checker{}, install, nativeupdate.InstalledGateway())
 	}
+	if len(args) > 0 && (args[0] == "restart" || args[0] == "--restart") {
+		if len(args) != 1 {
+			return fmt.Errorf("restart takes no arguments")
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		defer cancel()
+		return nativeupdate.RestartCommand(ctx, os.Stdout, nativeupdate.InstalledGateway())
+	}
 	if len(args) > 0 && args[0] == "ui" {
 		binary, err := os.Executable()
 		if err != nil {
@@ -157,7 +165,7 @@ func run(args []string) error {
 		switch args[0] {
 		case "--help", "-h":
 			if len(args) == 1 {
-				fmt.Fprintln(os.Stdout, "Usage: kvpn [command]\n\nRun kvpn without arguments to open the interface.\nRun kvpn update --help for update options.")
+				fmt.Fprintln(os.Stdout, "Usage: kvpn [command]\n\nRun kvpn without arguments to open the interface.\nRun kvpn update --help for update options.\nRun kvpn restart to restart the VPN gateway (for example after an update).")
 				return nil
 			}
 		case "container", "routing", "health", "dns-switch":
@@ -165,7 +173,7 @@ func run(args []string) error {
 		}
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: kvpn render|assets|prepare|bridge|update")
+		return fmt.Errorf("usage: kvpn render|assets|prepare|bridge|update|restart")
 	}
 	flags := flag.NewFlagSet("kvpn", flag.ContinueOnError)
 	action := flags.String("action", "status", "NetworkManager action")

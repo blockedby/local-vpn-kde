@@ -65,11 +65,11 @@ func TestRunCommandOffersGatewayRestart(t *testing.T) {
 	}{
 		{name: "gateway stopped", input: "y\n", running: false, wantOutput: "Updated to 0.4.4. Reopen the app to use it.\n"},
 		{name: "restart accepted", input: "y\ny\n", running: true, wantRestart: true, wantQuestion: true, wantOutput: "Updated to 0.4.4 and restarted the VPN gateway."},
-		{name: "restart declined", input: "y\nn\n", running: true, wantQuestion: true, wantOutput: "switches to the new version at its next restart or reboot"},
-		{name: "no answer", input: "y\n", running: true, wantQuestion: true, wantOutput: "switches to the new version at its next restart or reboot"},
-		{name: "yes keeps gateway", args: []string{"--yes"}, running: true, wantOutput: "switches to the new version at its next restart or reboot"},
+		{name: "restart declined", input: "y\nn\n", running: true, wantQuestion: true, wantOutput: "switches to the new version at its next restart (kvpn restart) or reboot"},
+		{name: "no answer", input: "y\n", running: true, wantQuestion: true, wantOutput: "switches to the new version at its next restart (kvpn restart) or reboot"},
+		{name: "yes keeps gateway", args: []string{"--yes"}, running: true, wantOutput: "switches to the new version at its next restart (kvpn restart) or reboot"},
 		{name: "restart flag", args: []string{"--yes", "--restart"}, running: true, wantRestart: true, wantOutput: "restarted the VPN gateway"},
-		{name: "restart fails", args: []string{"--yes", "--restart"}, running: true, restartErr: errors.New("gateway start failed"), wantRestart: true, wantErr: "updated to 0.4.4, but restarting the VPN gateway failed: gateway start failed"},
+		{name: "restart fails", args: []string{"--yes", "--restart"}, running: true, restartErr: errors.New("gateway start failed"), wantRestart: true, wantErr: "restarting the VPN gateway failed: gateway start failed; retry with kvpn restart"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t, "pacman")
@@ -92,6 +92,35 @@ func TestRunCommandOffersGatewayRestart(t *testing.T) {
 			}
 			if strings.Contains(out.String(), "Restart it now?") != tc.wantQuestion || !strings.Contains(out.String(), tc.wantOutput) {
 				t.Fatalf("output %q", out.String())
+			}
+		})
+	}
+}
+
+func TestRestartCommand(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		running    bool
+		err        error
+		want       string
+		wantCalled bool
+	}{
+		{"not running", false, nil, "Nothing to restart", false},
+		{"restarted", true, nil, "Restarted the VPN gateway.", true},
+		{"fails", true, errors.New("start failed"), "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			gateway := Gateway{Running: func(context.Context) bool { return tc.running }, Restart: func(context.Context) error { called = true; return tc.err }}
+			var out bytes.Buffer
+			err := RestartCommand(context.Background(), &out, gateway)
+			if tc.err != nil {
+				expectError(t, err, "restarting the VPN gateway failed: start failed")
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if called != tc.wantCalled || !strings.Contains(out.String(), tc.want) {
+				t.Fatalf("called %v output %q", called, out.String())
 			}
 		})
 	}

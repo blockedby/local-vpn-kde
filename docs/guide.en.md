@@ -140,9 +140,10 @@ Route repair is always on. To also connect the VPN after waking, enable **Settin
 kvpn update                   # asks before installing, then offers to restart a running gateway
 kvpn update --check           # only check
 kvpn update --yes --restart   # install and restart a running gateway without asking
+kvpn restart                  # restart the gateway later
 ```
 
-The installation itself keeps the VPN connected. If the gateway is running, `kvpn update` then asks whether to restart it on the new version: the VPN drops for a few seconds and reconnects if it was connected. Declining (or `--yes` alone) keeps the old gateway running until its next restart or reboot.
+The installation itself keeps the VPN connected. If the gateway is running, `kvpn update` then asks whether to restart it on the new version: the VPN drops for a few seconds and reconnects if it was connected. Declining (or `--yes` alone) keeps the old gateway running until you run `kvpn restart` or reboot.
 
 The TUI has the same in **Settings → [u] Check for updates**. It takes the latest GitHub release, verifies the `SHA256SUMS` checksum and the package name, version and architecture, and installs it only if no other package changes. Members of `local-vpn-kde-users` need no password. Releases are not signed yet: the check catches corrupted or mixed-up downloads, not a replaced release on GitHub. Before 0.4.4, upgrade once by hand (`sudo pacman -U` with the release package).
 

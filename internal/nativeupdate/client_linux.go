@@ -190,6 +190,24 @@ func lastLine(data []byte) string {
 	return strings.TrimSpace(lines[len(lines)-1])
 }
 
+// RestartCommand implements `kvpn restart`: it moves a running gateway onto the
+// installed version and reconnects the VPN if it was connected.
+func RestartCommand(ctx context.Context, stdout io.Writer, gateway Gateway) error {
+	if os.Geteuid() == 0 {
+		return errors.New("run the restart as your desktop user, not root")
+	}
+	if gateway.Running == nil || gateway.Restart == nil || !gateway.Running(ctx) {
+		fmt.Fprintln(stdout, "The VPN gateway is not running. Nothing to restart; it starts on the installed version.")
+		return nil
+	}
+	fmt.Fprintln(stdout, "Restarting the VPN gateway (the VPN drops for a few seconds)…")
+	if err := gateway.Restart(ctx); err != nil {
+		return fmt.Errorf("restarting the VPN gateway failed: %w", err)
+	}
+	fmt.Fprintln(stdout, "Restarted the VPN gateway.")
+	return nil
+}
+
 const usage = `Usage: kvpn update [--check] [--yes] [--restart]
 
 Installs the latest release of the native package. The VPN stays connected.
@@ -262,12 +280,12 @@ func RunCommand(ctx context.Context, args []string, stdin io.Reader, stdout io.W
 		restart = ask(fmt.Sprintf("Updated to %s. The running VPN gateway is still the old version.\nRestart it now? The VPN drops for a few seconds and reconnects.", installed))
 	}
 	if !restart {
-		fmt.Fprintf(stdout, "Updated to %s. Reopen the app to use it. The VPN gateway switches to the new version at its next restart or reboot.\n", installed)
+		fmt.Fprintf(stdout, "Updated to %s. Reopen the app to use it. The VPN gateway switches to the new version at its next restart (kvpn restart) or reboot.\n", installed)
 		return nil
 	}
 	fmt.Fprintln(stdout, "Restarting the VPN gateway…")
 	if err := gateway.Restart(ctx); err != nil {
-		return fmt.Errorf("updated to %s, but restarting the VPN gateway failed: %w; it switches to the new version at the next reboot", installed, err)
+		return fmt.Errorf("updated to %s, but restarting the VPN gateway failed: %w; retry with kvpn restart or reboot", installed, err)
 	}
 	fmt.Fprintf(stdout, "Updated to %s and restarted the VPN gateway. Reopen the app to use it.\n", installed)
 	return nil
