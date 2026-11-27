@@ -4,13 +4,24 @@ import { FakeBackend, initial } from "./app-test-fixtures";
 const key = (state: AppState, name: string) => state.onKey({ name, preventDefault() {} });
 
 for (const [width, height, steps] of [
-  [100, 24, [["left",0],["up",0],["right",1],["right",2],["right",2],["down",2],["left",1],["down",4],["right",4],["up",1],["home",0],["end",4]]] as const,
-  [60, 24, [["left",0],["up",0],["right",1],["right",1],["down",3],["down",3],["left",2],["down",4],["right",4],["up",2],["home",0],["end",4]]] as const,
+  [100, 24, [["left",0],["up",0],["right",1],["right",2],["right",2],["down",4],["left",3],["down",3],["right",4],["up",2],["home",0],["end",4]]] as const,
+  [60, 24, [["left",0],["up",0],["right",1],["right",1],["down",3],["down",4],["left",4],["down",4],["right",4],["up",3],["home",0],["end",4]]] as const,
   [50, 30, [["left",0],["up",0],["right",0],["down",1],["down",2],["right",2],["end",4],["down",4],["up",3],["home",0],["end",4]]] as const,
 ] as const) test(`home navigation clamps in two dimensions at ${width}x${height}`, async () => {
   const state = new AppState(new FakeBackend());
   state.viewport = () => ({ width, height, terminalHeight: height });
   try { expect(state.screen).toBe("home"); for (const [name, index] of steps) { key(state, name); expect(state.homeIndex).toBe(index); } key(state, "escape"); expect(state.screen).toBe("home"); expect(state.homeIndex).toBe(4); }
+  finally { await state.close(); }
+});
+
+for (const [width, keys, screen] of [
+  [80, ["home", "right", "down", "down"], "settings"],
+  [100, ["home", "right", "right", "down"], "settings"],
+  [100, ["end", "up"], "profiles"],
+] as const) test(`vertical tile navigation at ${width} opens ${screen} after ${keys.join(" ")}`, async () => {
+  const state = new AppState(new FakeBackend()); state.status = { ...initial };
+  state.viewport = () => ({ width, height: 24, terminalHeight: 24 });
+  try { for (const name of keys) key(state, name); key(state, "return"); expect(state.screen).toBe(screen); }
   finally { await state.close(); }
 });
 

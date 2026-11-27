@@ -649,16 +649,18 @@ export class AppState {
     return width >= 90 ? 3 : width < 56 ? 1 : 2;
   }
 
-  moveHome(key: string) {
+  homeDestination(key: string) {
     const columns = this.homeColumns();
-    const row = Math.floor(this.homeIndex / columns), col = this.homeIndex % columns;
-    if (key === "home") this.homeIndex = 0;
-    else if (key === "end") this.homeIndex = HOME_TILES.length - 1;
-    else if (key === "left" && col > 0) this.homeIndex--;
-    else if (key === "right" && col < columns - 1 && this.homeIndex < HOME_TILES.length - 1) this.homeIndex++;
-    else if (key === "up" && row > 0) this.homeIndex -= columns;
-    else if (key === "down" && this.homeIndex + columns < HOME_TILES.length) this.homeIndex += columns;
-    this.paint();
+    const column = this.homeIndex % columns, first = this.homeIndex - column;
+    const count = Math.min(columns, HOME_TILES.length - first);
+    if (key === "home") return 0;
+    if (key === "end") return HOME_TILES.length - 1;
+    if (key === "left") return first + Math.max(0, column - 1);
+    if (key === "right") return first + Math.min(count - 1, column + 1);
+    const next = first + (key === "down" ? columns : -columns);
+    if (next < 0 || next >= HOME_TILES.length) return this.homeIndex;
+    const nextCount = Math.min(columns, HOME_TILES.length - next);
+    return next + Math.floor((column + 0.5) * nextCount / count);
   }
   activateHome() {
     if (this.homeIndex) { this.open(HOME_TILES[this.homeIndex] as Screen); return; }
