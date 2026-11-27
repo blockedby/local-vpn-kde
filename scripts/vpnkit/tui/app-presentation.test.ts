@@ -5,6 +5,22 @@ import { connection } from "./model";
 import type { Action, CheckProgress, Reply } from "./bridge";
 import { FakeBackend, settle, reply, rows, initial } from "./app-test-fixtures";
 
+for (const editor of ["subscription", "profile-source"] as const) test(`minimum-size ${editor} editor shows the typed source`, async () => {
+  const terminal = await createTestRenderer({ width: 40, height: 10 });
+  const backend = new FakeBackend(); backend.status = { ...initial, runtime: "native", installed: true, subscription: editor === "subscription" ? "not configured" : "configured" };
+  const app = new App(terminal.renderer, backend), input = terminal.mockInput;
+  try {
+    await app.perform("status"); input.pressKey("c"); await settle();
+    if (editor === "profile-source") { input.pressKey("n"); await input.typeText("Z".repeat(60)); input.pressEnter(); }
+    expect(app.screen).toBe(editor); await terminal.renderOnce();
+    input.pressKey("u", { ctrl: true }); await input.typeText("https://source.invalid"); await terminal.renderOnce();
+    expect(app.editorValue).toBe("https://source.invalid"); expect(terminal.captureCharFrame()).toContain("source.invalid");
+    input.pressEnter(); await settle();
+    if (editor === "subscription") expect(app.screen).toBe("confirm");
+    else expect(backend.calls.some(call => call.action === "profiles/add" && call.value?.includes("https://source.invalid"))).toBe(true);
+  } finally { await app.close(); }
+});
+
 test("legacy status without runtime keeps Docker lifecycle wording", async () => {
   const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
