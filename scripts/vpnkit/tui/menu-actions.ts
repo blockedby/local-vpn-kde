@@ -5,7 +5,20 @@ import { frames } from "./animation-frames";
 import { compatible, queueable } from "./request-policy";
 import { cell, displayCheckAddress } from "./formatting";
 
-export interface MenuItem { key: string; label: string; run: () => void }
+type RowKind = "toggle" | "open" | "action";
+export interface MenuItem {
+  key: string; label: string; run: () => void;
+  title?: string; value?: string; kind?: RowKind; dividerBefore?: true | string;
+}
+function row(kind: RowKind, key: string, title: string, run: () => void, value?: string): MenuItem {
+  return { kind, key, title, value, label: value === undefined ? title : `${title}: ${value}`, run };
+}
+function dangerGroup([first, ...rest]: MenuItem[]): MenuItem[] {
+  return first ? [{ ...first, dividerBefore: true }, ...rest] : [];
+}
+export function isListMenu(screen: AppState["screen"]) {
+  return ["settings", "profiles", "diagnostics", "autostart", "tasks", "recovery", "confirm", "profile-remove", "retry-confirm", "cancel-confirm"].includes(screen);
+}
 export type ActionScope = AppState["screen"] | "global" | "server-table" | "menu" | "editor" | "confirmation";
 export interface ActionDefinition extends MenuItem {
   id: string;
@@ -39,13 +52,14 @@ export function menuItems(state: AppState): MenuItem[] {
         ...state.queue.map(entry => ({ id: entry.id, action: entry.action, label: columns("В очереди", taskLabel(entry.action, entry.kind === "batch" ? (entry.value ? (JSON.parse(entry.value) as {ids: string[]}).ids.length : state.servers.length) : undefined), "—", Math.floor((Date.now() - entry.started) / 1000)), direct: true })),
       ];
       return [
-        ...entries.map((entry, i) => ({ key: String(i + 1), label: entry.label, run: () => { if (entry.direct) state.cancelTask(entry.id); else { state.cancelTaskID = entry.id; state.open("cancel-confirm"); } } })),
-        ...state.history.map((entry, i) => ({ key: String(entries.length + i + 1), label: columns(entry.outcome, taskLabel(entry.action, entry.count), entry.phase || "—", Math.floor((Date.now() - entry.ended) / 1000)), run: () => {} })),
+        ...entries.map((entry, i) => ({ key: String(i + 1), label: entry.label, dividerBefore: i === running.length ? "В очереди" : i === 0 ? "Выполняются" : undefined, run: () => { if (entry.direct) state.cancelTask(entry.id); else { state.cancelTaskID = entry.id; state.open("cancel-confirm"); } } })),
+        ...state.history.map((entry, i) => ({ key: String(entries.length + i + 1), dividerBefore: i === 0 ? "Завершены" : undefined, label: columns(entry.outcome, taskLabel(entry.action, entry.count), entry.phase || "—", Math.floor((Date.now() - entry.ended) / 1000)), run: () => {} })),
       ];
     }
     if (state.screen === "recovery") {
       if (state.backendOffline) return [{ key: "u", label: state.reconnecting ? "Восстанавливаем связь…" : "Восстановить связь", run: () => void state.reconnectBackend() }];
       return (state.recovery?.actions ?? ["status", "diagnostics"]).map(choice => ({
+        kind: choice === "servers" || choice === "diagnostics" ? "open" : "action",
         key: { status: "u", diagnostics: "d", servers: "v", retry: "r", reapply: "f" }[choice],
         label: { status: "Проверить состояние", diagnostics: "Открыть диагностику", servers: "Выбрать другой сервер", retry: "Повторить действие", reapply: "Применить сетевые настройки VPN" }[choice],
         run: () => {
@@ -62,18 +76,18 @@ export function menuItems(state: AppState): MenuItem[] {
       }));
     }
     if(state.screen==="profile-remove") return [
-      {key:"y",label:"Удалить профиль из приложения",run:()=>void state.removeProfile()},
       {key:"n",label:"Отмена",run:()=>state.open("profiles")},
+      {key:"y",label:"Удалить профиль из приложения",dividerBefore:true,run:()=>void state.removeProfile()},
     ];
     if(state.screen==="profiles") {
       const profiles=state.profiles?.items ?? [];
       const pageSize=state.profilePageSize();
       const pages=Math.max(1,Math.ceil(profiles.length/pageSize));state.profilePage=Math.min(state.profilePage,pages-1);
       return [
-        ...profiles.slice(state.profilePage*pageSize,state.profilePage*pageSize+pageSize).map((profile,i)=>({key:String(i+1),label:`${profile.id===state.profiles?.active?"● ":""}${profile.name} · ${profile.kind==="server"?"сервер":"подписка"} · серверов: ${profile.count} · ${profile.stale ? "сохранённый список" : "актуален"}`,run:()=>void state.browseProfile(profile.id)})),
-        {key:"n",label:"Добавить профиль",run:()=>state.open("profile-name")},
-        ...(state.profiles?.active?[{key:"X",label:"Удалить активный профиль",run:()=>state.open("profile-remove")}]:[]),
+        ...profiles.slice(state.profilePage*pageSize,state.profilePage*pageSize+pageSize).map((profile,i)=>row("open", String(i+1), `${profile.id===state.profiles?.active?"● ":""}${profile.name}`, ()=>void state.browseProfile(profile.id), `${profile.kind==="server"?"сервер":"подписка"} · серверов: ${profile.count} · ${profile.stale ? "сохранённый список" : "актуален"}`)),
+        row("open", "n", "Добавить профиль", ()=>state.open("profile-name")),
         ...(pages>1?[{key:"[",label:"Предыдущие профили",run:()=>{state.profilePage=(state.profilePage+pages-1)%pages;state.selected=0;state.paint()}},{key:"]",label:"Следующие профили",run:()=>{state.profilePage=(state.profilePage+1)%pages;state.selected=0;state.paint()}}]:[]),
+        ...dangerGroup(state.profiles?.active ? [row("open", "X", "Удалить активный профиль", () => state.open("profile-remove"))] : []),
       ];
     }
     if (state.screen === "confirm")
@@ -187,26 +201,26 @@ export function menuItems(state: AppState): MenuItem[] {
           : []),
       ];
     if (state.screen === "settings") return [
-      ...(state.nativeInstalled() ? [{ key: "w", label: `Автостарт после сна: ${state.autostart ? state.autostart.resume ? "да" : "нет" : "не проверен"}`, run: () => { const options = state.autostart; if (options) void state.perform("autostart/set", state.autostartValue(options.gateway, options.connect, !options.resume)); else void state.perform("autostart/read"); } }] : []),
-      { key: "a", label: `Автозапуск: ${state.autostart ? `шлюз ${state.autostart.gateway ? "да" : "нет"}, VPN ${state.autostart.connect ? "да" : "нет"}` : "не проверен"} · служба ${state.serviceState ? `${state.activeServiceLabel(state.serviceState.active)}/${({ enabled: "вкл", disabled: "выкл", masked: "маска" } as Record<string, string>)[state.serviceState.enabled] ?? "неизвестно"}` : "неизвестно"}`, run: () => state.open("autostart") },
-      { key: "m", label: `Режим: ${state.status?.routing_mode === "smart" ? "умный" : state.status?.routing_mode === "strict" ? "строгий" : "неизвестно"}`, run: () => void state.perform("toggle-mode") },
-      { key: "c", label: "Профили и источники", run: () => state.open(state.nativeInstalled() && state.status?.subscription === "configured" ? "profiles" : "subscription") },
-      { key: "e", label: `Сайт для проверки: ${displayCheckAddress(state.target)}`, run: () => state.open("target") },
-      ...(state.nativeInstalled() ? [{
-        key: "u",
-        label: state.updatedTo ? `Обновлено до ${state.updatedTo}` : state.updateInfo?.available ? `Обновление: ${state.updateInfo.installed} → ${state.updateInfo.latest} · установить` : state.updateInfo ? `Версия ${state.updateInfo.installed} · последняя · проверить снова` : "Проверить обновления",
-        run: () => { if (state.updateInfo?.available && !state.updatedTo) state.confirmUpdate(); else void state.perform("update/check"); },
-      }] : []),
-      ...(state.nativeInstalled() && state.gatewayRestartOffered ? [{ key: "g", label: "Перезапустить шлюз", run: () => state.confirm("gateway/restart") }] : []),
+      ...(state.nativeInstalled() ? [row("toggle", "w", "Автостарт после сна", () => { const options = state.autostart; if (options) void state.perform("autostart/set", state.autostartValue(options.gateway, options.connect, !options.resume)); else void state.perform("autostart/read"); }, state.autostart ? state.autostart.resume ? "да" : "нет" : "не проверен")] : []),
+      row("open", "a", "Автозапуск", () => state.open("autostart"), `${state.autostart ? `шлюз ${state.autostart.gateway ? "да" : "нет"}, VPN ${state.autostart.connect ? "да" : "нет"}` : "не проверен"} · служба ${state.serviceState ? `${state.activeServiceLabel(state.serviceState.active)}/${({ enabled: "вкл", disabled: "выкл", masked: "маска" } as Record<string, string>)[state.serviceState.enabled] ?? "неизвестно"}` : "неизвестно"}`),
+      row("toggle", "m", "Режим", () => void state.perform("toggle-mode"), state.status?.routing_mode === "smart" ? "умный" : state.status?.routing_mode === "strict" ? "строгий" : "неизвестно"),
+      row("open", "c", "Профили и источники", () => state.open(state.nativeInstalled() && state.status?.subscription === "configured" ? "profiles" : "subscription")),
+      row("open", "e", "Сайт для проверки", () => state.open("target"), displayCheckAddress(state.target)),
+      ...(state.nativeInstalled() ? [row(state.updateInfo?.available && !state.updatedTo ? "open" : "action", "u",
+        state.updatedTo ? `Обновлено до ${state.updatedTo}` : state.updateInfo?.available ? `Обновление: ${state.updateInfo.installed} → ${state.updateInfo.latest} · установить` : state.updateInfo ? `Версия ${state.updateInfo.installed} · последняя · проверить снова` : "Проверить обновления",
+        () => { if (state.updateInfo?.available && !state.updatedTo) state.confirmUpdate(); else void state.perform("update/check"); })] : []),
       ...(state.updatedTo ? [{ key: "R", label: "Перезапустить интерфейс", run: () => state.relaunch() }] : []),
       ...(!state.ready() ? [{ key: "s", label: `Запустить ${state.serviceObject()}`, run: run("backend/start") }] : []),
-      ...(["healthy", "unhealthy", "egress-unavailable", "running", "stopped", "starting"].includes(state.status?.gateway_state ?? state.status?.vpn_state ?? "") ? [{ key: "z", label: state.nativeMode() ? "Остановить сервис" : "Остановить Docker и VPN", run: () => state.confirm("stop") }] : []),
+      ...dangerGroup([
+        ...(state.nativeInstalled() && state.gatewayRestartOffered ? [{ key: "g", label: "Перезапустить шлюз", run: () => state.confirm("gateway/restart") }] : []),
+        ...(["healthy", "unhealthy", "egress-unavailable", "running", "stopped", "starting"].includes(state.status?.gateway_state ?? state.status?.vpn_state ?? "") ? [{ key: "z", label: state.nativeMode() ? "Остановить сервис" : "Остановить Docker и VPN", run: () => state.confirm("stop") }] : []),
+      ]),
     ];
     if (state.screen === "autostart") {
       if (!state.autostart) return [{ key: "u", label: "Загрузить настройки", run: run("autostart/read") }];
       return [
-        { key: "g", label: `${state.nativeMode() || state.autostart.runtime === "native" ? "Запускать native-службу" : "Запускать шлюз"}: ${state.autostart.gateway ? "да" : "нет"}`, run: () => void state.perform("autostart/set", state.autostartValue(!state.autostart!.gateway, false)) },
-        { key: "a", label: `Подключать VPN: ${state.autostart.connect ? "да" : "нет"}`, run: () => void state.perform("autostart/set", state.autostartValue(state.autostart!.gateway || !state.autostart!.connect, !state.autostart!.connect)) },
+        row("toggle", "g", state.nativeMode() || state.autostart.runtime === "native" ? "Запускать native-службу" : "Запускать шлюз", () => void state.perform("autostart/set", state.autostartValue(!state.autostart!.gateway, false)), state.autostart.gateway ? "да" : "нет"),
+        row("toggle", "a", "Подключать VPN", () => void state.perform("autostart/set", state.autostartValue(state.autostart!.gateway || !state.autostart!.connect, !state.autostart!.connect)), state.autostart.connect ? "да" : "нет"),
       ];
     }
     if (state.screen === "diagnostics")
@@ -297,15 +311,15 @@ export function defineMenuActions(state: AppState, items: MenuItem[]): ActionDef
         : screen === "servers" && item.key === "s" ? "backend/start" : undefined;
       if (request) {
         if (state.backendOffline || state.reconnecting && !["status", "servers/list"].includes(request))
-          reason = "Служба управления недоступна. [f] Восстановить связь";
+          reason = "Служба управления недоступна. Выберите «Восстановить связь».";
         else if (state.nativePreviewOnly() && !["status", "backend/start", "network/reapply", "start", "disconnect", "stop", "autostart/read", "autostart/set"].includes(request))
           reason = state.nativeUnavailable(request);
         else if (!queueable.has(request) && (((!!state.batch || state.homeTesting) && !["servers/select", "status", "subscription/read"].includes(request)) ||
           [...state.tasks.values()].some(task => !compatible(request, task.action)))) {
-          reason = "Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k].";
+          reason = "Эта операция конфликтует с текущей. Дождитесь завершения или отмените её в разделе «Задачи».";
         }
       }
     }
-    return { ...item, id, keys: [item.key], scope: screen, available: !reason, ...(reason ? { unavailableReason: reason, unavailableBehavior } : {}) };
+    return { ...(isListMenu(screen) ? { title: item.label, kind: "action" as const } : {}), ...item, id, keys: [item.key], scope: screen, available: !reason, ...(reason ? { unavailableReason: reason, unavailableBehavior } : {}) };
   });
 }

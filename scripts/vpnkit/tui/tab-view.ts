@@ -16,7 +16,7 @@ export class TabView {
     const screen = state.screen === "tasks" ? "tasks" : state.screen === "home" || isOverlay(state.screen) && state.overlayBase === "home" ? "home" : state.tab;
     this.row.visible = screen !== "home";
     const task = [...state.tasks.values()].find(t => t.action !== "status");
-    this.activity.content = state.batch || task || state.queue.length ? `  ${state.batch ? `Проверка ${state.batch.done}/${state.batch.total}` : task ? state.actionLabel(task.action) : ""}${state.queue.length ? ` · в очереди ${state.queue.length}` : ""} [j]` : "";
-    this.title.content = ({ servers: "Серверы", profiles: "Профили", diagnostics: "Диагностика", settings: "Настройки", tasks: "Замеры", home: "" })[screen];
+    this.activity.content = state.batch || task || state.queue.length ? `  ${state.batch ? `Проверка ${state.batch.done}/${state.batch.total}` : task ? state.actionLabel(task.action) : ""}${state.queue.length ? ` · в очереди ${state.queue.length}` : ""} · Задачи` : "";
+    this.title.content = ({ servers: "Серверы", profiles: "Профили", diagnostics: "Диагностика", settings: "Настройки", tasks: "Задачи", home: "" })[screen];
   }
 }

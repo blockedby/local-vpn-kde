@@ -19,6 +19,7 @@ export { cell } from "./formatting";
 const RELAUNCH_COMMAND = "/usr/bin/kvpn";
 
 export class App extends AppState {
+  private actionFirst = false;
   private root: BoxRenderable;
   private headerView: HeaderView;
   private tabView: TabView;
@@ -47,13 +48,7 @@ export class App extends AppState {
     this.homeView = new HomeView(renderer, this.content, index => { if (this.screen !== "home" || this.helpOpen) return; this.homeIndex = index; this.activateHome(); });
     this.summaryView = new SummaryView(renderer, this.content);
     this.menuView = new MenuView(renderer, this.content, index => {
-      if (isOverlay(this.screen) || this.helpOpen) return;
-      this.selected = index;
-      const item = this.items()[index];
-      const action = item && this.actions().find(candidate => candidate.keys.includes(item.key));
-      if (action?.available) action.run();
-      else if (action?.unavailableBehavior === "notice" && action.unavailableReason) this.notify(action.unavailableReason, true);
-      this.paint();
+      if (!isOverlay(this.screen)) this.activateMenuRow(index);
     });
     const serverArea = new BoxRenderable(renderer, { flexDirection: "row", flexGrow: 1, minHeight: 0, overflow: "hidden" });
     this.content.add(serverArea);
@@ -70,13 +65,13 @@ export class App extends AppState {
   }
   private onResize = () => { this.syncServerViewport(); this.paint(); };
   override viewport() { return { width: this.renderer.width, height: this.renderer.height, terminalHeight: this.renderer.terminalHeight }; }
-  override paintMeasurement() { super.paintMeasurement(); this.headerView.update(this, this.demo); this.detailsView.update(this, this.renderer.width >= DETAILS_THRESHOLD && (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0); if (this.screen === "details") this.overlayView.update(this); }
+  override paintMeasurement() { super.paintMeasurement(); this.headerView.update(this, this.demo); this.detailsView.update(this, this.renderer.width >= DETAILS_THRESHOLD && (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.hasServerTable()); if (this.screen === "details") this.overlayView.update(this); }
   override paintTable() {
     super.paintTable();
-    const tableVisible = (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0;
+    const tableVisible = (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.hasServerTable();
     const wide = this.renderer.width >= DETAILS_THRESHOLD && tableVisible;
     this.detailsView.update(this, wide);
-    this.tableView.update({ width: this.renderer.terminalWidth - 2 - (wide ? DETAILS_WIDTH : 0), visible: this.renderer.width >= MIN_COLS && this.renderer.height >= MIN_ROWS && (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0, servers: this.visibleServers(), rowCount: this.rowCount(), serverID: this.serverID, batch: this.batch, frame: this.frame, liveSpeeds: this.liveSpeeds, sort: this.sort, sortDescending: this.sortDescending, filter: this.filter, filterEditing: this.filterEditing, shown: this.filteredServers().length, total: this.servers.length });
+    this.tableView.update({ width: this.renderer.terminalWidth - 2 - (wide ? DETAILS_WIDTH : 0), visible: this.renderer.width >= MIN_COLS && this.renderer.height >= MIN_ROWS && tableVisible, servers: this.visibleServers(), rowCount: this.rowCount(), serverID: this.serverID, batch: this.batch, frame: this.frame, liveSpeeds: this.liveSpeeds, sort: this.sort, sortDescending: this.sortDescending, filter: this.filter, filterEditing: this.filterEditing, shown: this.filteredServers().length, total: this.servers.length });
     this.headerView.update(this, this.demo);
     if (this.screen === "details" || this.serverMenu) this.overlayView.update(this);
   }
@@ -89,18 +84,30 @@ export class App extends AppState {
     const small = this.renderer.width < MIN_COLS || this.renderer.height < MIN_ROWS;
     this.tooSmall.visible = small;
     const overlayScreen = this.screen;
+    const noticeRows = this.noticeView.update(this);
     const modal = isOverlay(overlayScreen);
     if (modal) this.screen = this.overlayBase;
     this.homeView.update(this, !small && this.screen === "home");
     const editor = !small && ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(this.screen);
     this.editorView.update(this.editorValue, editor && !this.helpOpen, this.closing);
-    const items = small || this.screen === "home" || this.screen === "servers" && this.ready() && !this.nativePreviewOnly() && this.status?.subscription === "configured" ? [] : this.items();
-    this.menuView.update(items, editor || small, this.selected, true, ["settings", "diagnostics", "profiles"].includes(this.screen));
-    this.summaryView.update(this);
+    // The table can disappear under an open filter (subscription removed, service stopped).
+    if (this.filterEditing && this.screen === "servers" && !this.hasServerTable()) this.filterEditing = false;
+    const items = small ? [] : this.visibleMenuItems();
+    // Rows can shrink under the cursor; keep the marker on a row that Enter will run.
+    if (items.length && this.selected >= items.length) this.selected = items.length - 1;
+    // Diagnostics puts its action above the facts; other screens describe first, then list actions.
+    const actionFirst = this.screen === "diagnostics";
+    if (actionFirst !== this.actionFirst) {
+      this.actionFirst = actionFirst;
+      if (actionFirst) this.content.insertBefore(this.menuView.node, this.summaryView.node);
+      else this.content.insertBefore(this.summaryView.node, this.menuView.node);
+    }
+    const summaryRows = this.summaryView.update(this);
+    this.menuView.update(items, editor || small, this.selected, this.renderer.terminalWidth - 2, this.renderer.terminalHeight - 3 - summaryRows - noticeRows);
     if (small || this.screen === "home") this.summaryView.hide();
     this.paintTable();
     this.screen = overlayScreen;
-    this.noticeView.update(this); this.footerView.update(this, modal && ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(overlayScreen)); this.overlayView.update(this);
+    this.footerView.update(this, modal && ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(overlayScreen)); this.overlayView.update(this);
   }
   override onClosing() { this.editorView.blur(); }
   override onBeforeDispose() { this.renderer.keyInput.off("keypress", this.onKey); this.renderer.off("resize", this.onResize); }

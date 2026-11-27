@@ -150,7 +150,7 @@ test("fastest confirmation uses session results, rejects unreachable sites and r
     ];
     state.catalogLoaded = true;
     state.open("servers", false);
-    key(state, "b"); expect(state.notice).toContain("[t]");
+    key(state, "b"); expect(state.notice).toContain("Скорость сервера");
     for (const server of state.servers) state.measurementTimes.set(server.server_id, Date.now());
     key(state, "b");
     expect(state.fastestCandidate?.id).toBe(rows[1]!.server_id);

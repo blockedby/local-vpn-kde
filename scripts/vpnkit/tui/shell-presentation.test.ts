@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import { App } from "./app";
 import { FakeBackend, rows } from "./app-test-fixtures";
+import { MIN_COLS } from "./model";
 
 async function fixture(width: number, height: number) {
   const terminal = await createTestRenderer({ width, height });
@@ -64,8 +65,8 @@ test("shell: a narrow tall terminal stacks home tiles in one column", async () =
   try {
     app.open("home", false); app.homeIndex = 0; app.notice = ""; app.paint(); await t.renderOnce();
     const lines = t.captureCharFrame().split("\n");
-    for (const title of ["Подключение", "Серверы", "Замеры", "Профили", "Диагностика", "Настройки"])
-      expect(lines.filter(line => line.includes(title) && line.includes("│"))).toHaveLength(1);
+    for (const title of ["Подключение", "Серверы", "Профили", "Диагностика", "Настройки"])
+      expect(lines.filter(line => line.includes(title))).toHaveLength(1);
     expect(lines.findIndex(line => line.includes("Серверы"))).toBeGreaterThan(lines.findIndex(line => line.includes("Подключение")));
     app.onKey({ name: "down", preventDefault() {} }); expect(app.homeIndex).toBe(1);
     app.onKey({ name: "right", preventDefault() {} }); expect(app.homeIndex).toBe(1);
@@ -85,7 +86,7 @@ test("shell: a short home grid scrolls to the selected tile and counts hidden ti
     expect(frame).toContain("Подключение"); expect(frame).not.toContain("Настройки"); expect(frame).toMatch(/↓ ещё \d/);
     app.onKey({ name: "end", preventDefault() {} }); await t.renderOnce();
     frame = t.captureCharFrame();
-    expect(frame).toContain("› * Настройки"); expect(frame).not.toContain("Подключение"); expect(frame).toMatch(/↑ ещё \d/); expect(frame).not.toContain("↓ ещё");
+    expect(frame).toContain("* Настройки"); expect(frame).not.toContain("Подключение"); expect(frame).toMatch(/↑ ещё \d/); expect(frame).not.toContain("↓ ещё");
   } finally { await app.close(); }
 });
 
@@ -148,7 +149,7 @@ test("shell: an empty catalog explains how to refresh", async () => {
   try {
     await app.perform("status"); app.open("servers", false); await app.perform("servers/list"); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Список серверов пуст");
-    expect(t.captureCharFrame()).toContain("[r]");
+    expect(t.captureCharFrame()).toContain("Выберите «Обновить подписку и список»");
   } finally { await app.close(); }
 });
 
@@ -171,7 +172,7 @@ test("shell: confirmation keeps its originating tab and footer follows context",
   try {
     app.status!.networkmanager_active = "yes";
     app.open("settings"); await t.renderOnce();
-    expect(t.captureCharFrame().split("\n").at(-2)).toContain("x отключить");
+    expect(t.captureCharFrame().split("\n").at(-2)?.trim()).toBe("↑↓ выбор · Enter открыть · Esc назад · ? все клавиши");
     app.onKey({ name: "x", preventDefault() {} }); await t.renderOnce();
     let frame = t.captureCharFrame();
     expect(frame.split("\n")[1]).toContain("‹ Главная › Настройки");
@@ -200,10 +201,10 @@ test("shell: help combines aliases and long notices wrap without hiding recovery
     expect(t.captureCharFrame()).toMatch(/Tab\/Shift\+Tab +Сменить вкладку/);
     app.paletteQuery = "";
     app.onKey({ name: "escape", preventDefault() {} });
-    app.notify("Сетевые настройки VPN поменялись, нажмите [f] чтобы применить их ещё раз.", true);
+    app.notify("Сетевые настройки VPN поменялись, выберите «Применить сетевые настройки VPN».", true);
     t.resize(60, 16); await t.renderOnce();
     const frame = t.captureCharFrame().replace(/\s+/g, " ");
-    expect(frame).toContain("нажмите [f] чтобы применить их ещё раз.");
+    expect(frame).toContain("выберите «Применить сетевые настройки VPN».");
   } finally { await app.close(); }
 });
 
@@ -228,7 +229,7 @@ test("shell: dialogs keep the workspace, capture shortcuts and stack help", asyn
     let frame = t.captureCharFrame();
     expect(frame).toContain("Node 00");
     expect(frame).toContain("остановить Docker и отключить VPN?");
-    expect(frame).toContain("[n] Нет"); expect(frame).toContain("[y] Да");
+    expect(frame).toMatch(/› Нет +│/); expect(frame).toMatch(/ Да +│/);
     const before = backend.calls.length;
     app.onKey({ name: "d", preventDefault() {} });
     expect(app.screen).toBe("confirm"); expect(backend.calls.length).toBe(before);
@@ -237,7 +238,7 @@ test("shell: dialogs keep the workspace, capture shortcuts and stack help", asyn
     expect(t.captureCharFrame()).not.toContain("confirm");
     app.onKey({ name: "escape", preventDefault() {} }); await t.renderOnce();
     expect(app.helpOpen).toBe(false); expect(app.screen).toBe("confirm");
-    frame = t.captureCharFrame(); expect(frame).toContain("[n] Нет");
+    frame = t.captureCharFrame(); expect(frame).toMatch(/› Нет +│/);
     app.onKey({ name: "escape", preventDefault() {} });
     expect(app.screen).toBe("servers"); expect(backend.calls.length).toBe(before);
   } finally { await app.close(); }
@@ -255,7 +256,7 @@ test("shell: editor and native confirmation fit the minimum terminal", async () 
     app.confirmation = "subscription"; app.open("confirm"); await t.renderOnce();
     frame = t.captureCharFrame();
     expect(frame).toContain("Polkit"); expect(frame).toContain("автозапуск не изменяется");
-    expect(frame).toContain("[n] Нет"); expect(frame).toContain("[y] Да");
+    expect(frame).toMatch(/› Нет +│/); expect(frame).toMatch(/ Да +│/);
   } finally { await app.close(); }
 });
 
@@ -311,11 +312,11 @@ test("shell: settings show stored and actual state and profiles use available ro
     app.open("settings"); await t.renderOnce();
     let frame = t.captureCharFrame();
     expect(frame).toContain("шлюз да, VPN нет"); expect(frame).toContain("служба активна/вкл");
-    expect(frame).toContain(app.target); expect(frame).toContain("Режим: строгий");
+    expect(frame).toContain(app.target); expect(frame).toMatch(/Режим [ .]+‹ строгий ›/);
     expect(frame).not.toContain("[a] Автозапуск");
     t.resize(60, 16); app.open("autostart"); await t.renderOnce();
     frame = t.captureCharFrame();
-    expect(frame).toContain("Автозапуск"); expect(frame).toContain("[g]"); expect(frame).toContain("[a]");
+    expect(frame).toContain("Автозапуск"); expect(frame).toMatch(/Запускать шлюз .*‹ да ›/); expect(frame).toMatch(/Подключать VPN .*‹ нет ›/);
     app.onKey({ name: "escape", preventDefault() {} }); expect(app.screen).toBe("settings");
     t.resize(80, 24);
     app.profiles = { active: "p0", items: Array.from({ length: 9 }, (_, i) => ({ id: `p${i}`, name: `Profile ${i}`, kind: "server" as const, count: i, stale: i === 2 })) };
@@ -336,11 +337,62 @@ test("shell: long task overlays scroll and outside clicks cannot activate worksp
     expect(app.screen).toBe("tasks"); expect(app.serverID).toBe(before);
     for (let i = 0; i < 11; i++) app.onKey({ name: "down", preventDefault() {} });
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("› 12  Выполняется");
+    expect(t.captureCharFrame()).toMatch(/› Выполняется /);
     app.tasks.clear(); app.open("profiles"); app.open("profile-remove");
     expect(app.items()[app.selected]?.key).toBe("n");
     await t.renderOnce(); expect(t.captureCharFrame()).toContain("Удалить активный профиль?");
   } finally { app.tasks.clear(); await app.close(); }
+});
+
+for (const width of [80, MIN_COLS]) test(`menu rows keep value and arrow on one line without letters at ${width} columns`, async () => {
+  const { terminal, app } = await fixture(width, 24);
+  try {
+    app.status = { ...app.status!, runtime: "native", installed: true };
+    app.autostart = { gateway: false, connect: false, resume: false };
+    app.open("settings", false, false);
+    await terminal.renderOnce();
+    const lines = terminal.captureCharFrame().split("\n");
+    const first = lines.findIndex(line => line.includes("› Автостарт после сна"));
+    expect(first).toBeGreaterThan(0);
+    expect(lines[first]).toMatch(/‹ нет › *$/);
+    expect(lines[first + 1]).toMatch(/Автозапуск .*→ *$/);
+    expect(lines[first + 2]).toMatch(/Режим .*‹ строгий › *$/);
+    for (const line of lines.slice(first, first + 3)) expect(Bun.stringWidth(line.trimEnd())).toBeLessThanOrEqual(78);
+    for (const line of lines.slice(first, first + 3)) expect(Bun.stringWidth(line)).toBe(width);
+    expect(lines.at(-2)?.trimEnd()).toEndWith("? все клавиши");
+    if (width === 80) expect(lines.at(-2)?.trim()).toBe("↑↓ выбор · ←→ изменить · Esc назад · ? все клавиши");
+    for (const key of ["right", "return"]) {
+      app.open("settings", false, false); terminal.mockInput.pressArrow("down");
+      await terminal.renderOnce();
+      expect(terminal.captureCharFrame().split("\n").at(-2)).not.toContain("←→ изменить");
+      terminal.mockInput.pressArrow("left"); expect(app.screen).toBe("settings");
+      if (key === "right") terminal.mockInput.pressArrow("right"); else terminal.mockInput.pressEnter();
+      expect(app.screen).toBe("autostart"); await terminal.renderOnce();
+      const dialog = terminal.captureCharFrame().split("\n");
+      const toggle = dialog.findIndex(line => /› Запускать.*‹ нет › +│/.test(line));
+      expect(toggle).toBeGreaterThan(0); expect(dialog[toggle + 1]).toMatch(/Подключать VPN.*‹ нет › +│/);
+    }
+  } finally { await app.close(); }
+});
+
+test("dangerous settings are last; clicking the divider does nothing and arrows skip it", async () => {
+  const { terminal, app, backend } = await fixture(80, 24);
+  try {
+    app.status = { ...app.status!, runtime: "native", installed: true }; app.gatewayRestartOffered = true;
+    app.open("settings", false, false);
+    const items = app.items();
+    expect(items.slice(-2).map(item => item.key)).toEqual(["g", "z"]);
+    app.selected = items.length - 3; app.paint(); await terminal.renderOnce();
+    const lines = terminal.captureCharFrame().split("\n");
+    const divider = lines.findIndex(line => /^\s*─+\s*$/.test(line)); expect(divider).toBeGreaterThan(0);
+    const before = backend.calls.length;
+    await terminal.mockMouse.click(8, divider); expect(app.selected).toBe(items.length - 3);
+    terminal.mockInput.pressArrow("down"); expect(items[app.selected]?.key).toBe("g");
+    terminal.mockInput.pressArrow("up"); expect(app.selected).toBe(items.length - 3);
+    await terminal.mockMouse.click(8, divider + 1);
+    expect(app.confirmation).toBe("gateway/restart"); expect(app.items()[app.selected]?.key).toBe("n");
+    expect(backend.calls).toHaveLength(before);
+  } finally { await app.close(); }
 });
 
 test("shell: fastest server confirmation names the measurement and defaults to No", async () => {
@@ -364,7 +416,7 @@ test("shell: activity shows running, queued and finished work and cancellation p
     backend.hold = { action: "servers/speed-batch", promise: new Promise(resolve => { finish = resolve; }) };
     const batch = app.runBatch("speed"); await Bun.sleep(10);
     app.onKey({ name: "p", preventDefault() {} }); await t.renderOnce();
-    expect(t.captureCharFrame().split("\n")[1]).toContain("в очереди 1 [j]");
+    expect(t.captureCharFrame().split("\n")[1]).toContain("в очереди 1 · Задачи");
     app.onKey({ name: "j", preventDefault() {} }); await t.renderOnce();
     let frame = t.captureCharFrame();
     expect(frame).toContain("Выполняются"); expect(frame).toContain("В очереди"); expect(frame).toContain("Завершены");
@@ -383,3 +435,92 @@ test("shell: activity shows running, queued and finished work and cancellation p
 function importReply(): import("./bridge").Reply {
   return { ok: true, reason: "ok", code: 0, status: { vpn_state: "inactive", gateway_state: "healthy", subscription: "configured", routing_mode: "strict", networkmanager_configured: "yes", networkmanager_active: "no", diagnostics: "not-run" } };
 }
+
+test("confirmation: ← returns to Нет, so ↓ ← Enter cancels instead of stopping", async () => {
+  const { terminal, backend, app } = await fixture(80, 24);
+  try {
+    app.status = { ...app.status!, runtime: "native", installed: true, gateway_state: "healthy" };
+    app.open("settings", false, false); app.confirm("stop");
+    const before = backend.calls.length;
+    const key = (name: string) => app.onKey({ name, preventDefault() {} });
+    key("down"); key("left"); expect(app.selected).toBe(0); key("return"); await Bun.sleep(20);
+    expect(backend.calls.slice(before).some(call => call.action === "stop")).toBe(false);
+    expect(String(app.screen)).not.toBe("confirm");
+  } finally { await app.close(); }
+});
+
+test("restart confirmation keeps its warning at the minimum terminal size", async () => {
+  const { terminal, app } = await fixture(MIN_COLS, 10);
+  try {
+    app.status = { ...app.status!, runtime: "native", installed: true };
+    app.open("settings", false, false); app.confirm("gateway/restart"); await terminal.renderOnce();
+    const frame = terminal.captureCharFrame().replace(/[│\s]+/g, " ");
+    expect(frame).toContain("отключится"); expect(frame).toContain("Нет"); expect(frame).toContain("Да");
+  } finally { await app.close(); }
+});
+
+test("menu selection is clamped when the list shrinks, tasks footer offers cancel only when possible, update check is an action", async () => {
+  const { terminal, app } = await fixture(80, 24);
+  try {
+    app.status = { ...app.status!, runtime: "native", installed: true };
+    app.open("autostart", false, false); app.autostart = undefined; app.selected = 1;
+    const select = app.actions().find(action => action.id === "menu:select");
+    expect(app.selected).toBe(0); expect(select?.available).toBe(true);
+    app.open("tasks", false, false); app.paint(); await terminal.renderOnce();
+    expect(terminal.captureCharFrame()).not.toContain("Enter выполнить"); expect(terminal.captureCharFrame()).not.toContain("Enter отменить");
+    app.open("settings", false, false);
+    expect(app.items().find(item => item.key === "u")?.kind).toBe("action");
+    app.updateInfo = { available: true, installed: "0.5.4", latest: "0.5.5" } as any;
+    expect(app.items().find(item => item.key === "u")?.kind).toBe("open");
+  } finally { await app.close(); }
+});
+
+test("servers without a table show the start row and footer without letters", async () => {
+  const terminal = await createTestRenderer({ width: 80, height: 24 });
+  const backend = new FakeBackend(); backend.status = { ...backend.status, runtime: "native", installed: true, gateway_state: "absent", vpn_state: "inactive" };
+  const app = new App(terminal.renderer, backend);
+  try {
+    await app.perform("status"); app.open("servers", false); app.paint(); await terminal.renderOnce();
+    const frame = terminal.captureCharFrame();
+    expect(frame).toContain("› Запустить сервис"); expect(frame).not.toContain("[s]");
+    expect(frame.split("\n").at(-2)?.trim()).toBe("Enter запустить сервис · Esc главная · ? все клавиши");
+    terminal.mockInput.pressEnter(); await Bun.sleep(20);
+    expect(backend.calls.some(call => call.action === "backend/start")).toBe(true);
+  } finally { await app.close(); }
+});
+
+test("server row menu and server details share one panel position and size", async () => {
+  const { terminal: t, app } = await fixture(110, 20);
+  try {
+    const box = () => { const lines = t.captureCharFrame().split("\n"); const top = lines.findIndex(line => line.includes("╭─ Сервер")); const bottom = lines.findIndex((line, i) => i > top && line.includes("╰")); return { top, bottom, left: lines[top]!.indexOf("╭"), right: lines[top]!.lastIndexOf("╮") }; };
+    app.openServerMenu(); await t.renderOnce(); const menu = box();
+    expect(t.captureCharFrame()).not.toMatch(/Скорость сервера +T/);
+    app.closeServerMenu(); app.open("details"); await t.renderOnce(); const details = box();
+    expect(menu.top).toBeGreaterThan(0); expect(details).toEqual(menu);
+  } finally { await app.close(); }
+});
+
+test("servers: table-only keys do nothing once the table disappears, and the fallback keeps a selected row", async () => {
+  const { terminal: t, backend, app } = await fixture(80, 24);
+  try {
+    app.status = { ...app.status!, subscription: "missing" as any }; app.paint(); await t.renderOnce();
+    for (const name of ["/", "l", "b"]) app.onKey({ name, preventDefault() {} });
+    expect(app.filterEditing).toBe(false); expect(String(app.screen)).toBe("servers");
+    app.filterEditing = true; app.paint(); expect(app.filterEditing).toBe(false);
+    app.status = { ...app.status!, runtime: "native", installed: true, subscription: "configured", gateway_state: "egress-unavailable" }; app.servers = []; app.paint(); await t.renderOnce();
+    const rows = app.visibleMenuItems(); expect(rows.length).toBeGreaterThan(1);
+    app.selected = rows.length - 1;
+    app.status = { ...app.status!, gateway_state: "absent" }; app.paint(); await t.renderOnce();
+    expect(app.selected).toBeLessThan(app.visibleMenuItems().length);
+    expect(t.captureCharFrame()).toContain("› ");
+    void backend;
+  } finally { await app.close(); }
+});
+
+test("servers fallback footer keeps Enter at the minimum width", async () => {
+  const { terminal: t, app } = await fixture(MIN_COLS, 10);
+  try {
+    app.servers = []; app.catalogLoaded = true; app.paint(); await t.renderOnce();
+    expect(t.captureCharFrame().split("\n").at(-2)).toContain("Enter");
+  } finally { await app.close(); }
+});

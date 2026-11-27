@@ -22,6 +22,7 @@ test("settings check, confirm and install an update for the installed native app
     let frame = t.captureCharFrame();
     expect(frame).toContain("Обновление: 0.4.3 → 0.4.4");
     expect(frame).toContain("Доступна версия 0.4.4");
+    expect(frame).toContain("Установить: Настройки → Обновление");
 
     key(app, "u"); await t.renderOnce();
     expect(app.screen).toBe("confirm"); expect(app.confirmation).toBe("update");
@@ -67,7 +68,7 @@ test("a running gateway gets a separate, default-No restart after installation",
     backend.hold = { action: "gateway/restart", promise: restart.promise };
     key(app, "g"); key(app, "y");
     backend.onProgress?.("gateway-restart"); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Перезапускаем шлюз [j]");
+    expect(t.captureCharFrame()).toContain("Перезапускаем шлюз · Задачи");
     expect([...app.tasks.values()].find(task => task.action === "gateway/restart")?.phase).toBe("Переход на новую версию");
     expect(backend.calls.filter(call => call.action === "gateway/restart")).toHaveLength(1);
     restart.resolve(reply(backend.status)); await settle(); await t.renderOnce();

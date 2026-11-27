@@ -88,7 +88,7 @@ export async function perform(
   ): Promise<Reply | undefined> {
     if (state.closing || state.disposed) return;
     if (state.backendOffline || state.reconnecting && !["status", "servers/list"].includes(action)) {
-      state.notify("Служба управления недоступна. [f] Восстановить связь", true); return;
+      state.notify("Служба управления недоступна. Выберите «Восстановить связь».", true); return;
     }
     if (!state.canPerform(action)) return;
     const measurementActive = !!state.batch || state.homeTesting;
@@ -96,7 +96,7 @@ export async function perform(
     if ((measurementActive && !insideBatch && !allowedDuringMeasurement) ||
         [...state.tasks.values()].some(task => !compatible(action, task.action))) {
       if (!insideBatch && queueable.has(action)) state.enqueue(action, value);
-      else if (action !== "status") state.notify("Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k].");
+      else if (action !== "status") state.notify("Эта операция конфликтует с текущей. Дождитесь завершения или отмените её в разделе «Задачи».");
       return;
     }
     if (action === "subscription" && (!value || !/^(https?:|vless:|hysteria2:|hy2:)\/\//.test(value))) {
@@ -219,12 +219,12 @@ export async function perform(
             ? "Сохранено. Настройка применяется при входе в графическую сессию."
             : "Сохранено. Настройка применяется при следующем входе в KDE.",
           "backend/start": state.nativeMode()
-            ? "Native-служба готова. Доступны VPN и автозапуск; серверы пока не подключены."
+            ? "Сервис запущен. Можно проверять серверы и подключать VPN."
             : "Docker готов. Можно проверять серверы.",
           start: "",
-          disconnect: state.nativeMode() ? "VPN отключён. Native-служба работает." : "VPN отключён. Docker работает.",
-          stop: state.nativeMode() ? "Native-служба и VPN остановлены." : "Docker и VPN остановлены.",
-          "servers/list": "Список загружен.",
+          disconnect: state.nativeMode() ? "VPN отключён. Сервис работает." : "VPN отключён. Docker работает.",
+          stop: state.nativeMode() ? "Сервис и VPN остановлены." : "Docker и VPN остановлены.",
+          "servers/list": "",
           "servers/refresh": "Каталог обновлён.",
           "servers/select": "Сервер выбран.",
           "servers/rename": "Имя сервера сохранено.",
@@ -234,10 +234,10 @@ export async function perform(
           diagnostics: "Состояние компонентов обновлено.",
           "toggle-mode": "Режим изменён.",
           "update/check": reply.update?.available
-            ? `Доступна версия ${reply.update.latest}. Установить: [u] в настройках.`
+            ? `Доступна версия ${reply.update.latest}. Установить: Настройки → Обновление.`
             : `Установлена последняя версия ${reply.update?.installed ?? ""}.`,
-          "update/install": `Обновлено до ${reply.update?.installed ?? ""}, VPN не отключался.${state.gatewayRestartOffered ? " Шлюз пока работает на старой версии: [g] — перезапустить шлюз." : ""} [R] — перезапустить интерфейс.`,
-          "gateway/restart": reply.gateway_restarted === false ? "Шлюз не запущен; он стартует на новой версии." : "Шлюз перезапущен на новой версии. [R] — перезапустить интерфейс.",
+          "update/install": `Обновлено до ${reply.update?.installed ?? ""}, VPN не отключался.${state.gatewayRestartOffered ? " Шлюз пока работает на старой версии. В настройках выберите «Перезапустить шлюз»." : ""} В настройках выберите «Перезапустить интерфейс».`,
+          "gateway/restart": reply.gateway_restarted === false ? "Шлюз не запущен; он стартует на новой версии." : "Шлюз перезапущен на новой версии. В настройках выберите «Перезапустить интерфейс».",
         };
         state.noticeIdentity = { action, reason: reply.reason, ok: true };
         state.notice = done[action] ?? "Готово.";

@@ -22,6 +22,8 @@ export type Screen =
   | "diagnostics"
   | "target"
   | "confirm";
+/** Screens behind the home tiles, in tile order; the first tile is the connection action. */
+export const HOME_TILES = ["", "servers", "profiles", "diagnostics", "settings"] as const;
 export const overlayScreens: readonly Screen[] = ["server-rename", "autostart", "details", "confirm", "cancel-confirm", "retry-confirm", "profile-remove", "tasks", "recovery", "subscription", "target", "profile-name", "profile-source"];
 export const isOverlay = (screen: Screen) => overlayScreens.includes(screen);
 export type Batch = "ping" | "speed" | "availability";
@@ -180,7 +182,7 @@ export class AppState {
   enqueue(action: Action, value?: string, kind?: "batch" | "home", batchKind?: Batch) {
     if (this.queue.some(entry => entry.action === action && (kind === "batch" || entry.value === value) && entry.kind === kind)) { this.notify("Эта операция уже в очереди."); return; }
     this.queue.push({ id: `queue-${++this.nextTask}`, action, value, kind, batchKind, signature: this.catalogSignature(), catalogRevision: this.catalogRevision, wasReady: this.ready(), started: Date.now() });
-    this.notify("Операция поставлена в очередь [j].");
+    this.notify("Операция поставлена в очередь. Подробности — в разделе «Задачи».");
   }
   abandonQueue(outcome: string) {
     for (const entry of this.queue) this.history.unshift({ action: entry.action, started: entry.started, ended: Date.now(), phase: "", outcome });
@@ -344,7 +346,7 @@ export class AppState {
   homePing?: number;
   homeSpeedAt = 0;
   homeSpeedServer?: { id: string; name: string };
-  homeSpeedLabel = "[t] Проверить скорость выбранного сервера";
+  homeSpeedLabel = "Проверить скорость выбранного сервера";
 
   editorValue = "";
   constructor(readonly backend: Backend) {
@@ -396,7 +398,7 @@ export class AppState {
       this.abandonQueue("Не запущено: связь потеряна");
       this.cancelled = true;
       this.recovery = { ...recoveryFor("status", "backend-unavailable", this.status?.runtime), action: "status" };
-      this.notify("Связь потеряна. Действие могло продолжиться. [f] Восстановить связь", true);
+      this.notify("Связь потеряна. Действие могло продолжиться. Выберите «Восстановить связь».", true);
     };
     this.backend.onSpeedProgress = (row, id) => {
       const task = id ? this.tasks.get(id) : undefined;
@@ -456,6 +458,9 @@ export class AppState {
   }
   ready() {
     return (this.status?.gateway_state ?? this.status?.vpn_state) === "healthy";
+  }
+  hasServerTable() {
+    return this.ready() && !this.nativePreviewOnly() && this.status?.subscription === "configured" && this.servers.length > 0;
   }
   runtime(): "docker" | "native" {
     return this.status?.runtime === "native" ? "native" : "docker";
@@ -593,7 +598,7 @@ export class AppState {
       return;
     }
     if (isOverlay(screen) && !isOverlay(this.screen)) this.overlayBase = this.screen === "home" ? "home" : this.tab;
-    const tile = ["", "servers", "tasks", "profiles", "diagnostics", "settings"].indexOf(screen);
+    const tile = HOME_TILES.indexOf(screen as typeof HOME_TILES[number]);
     if (tile > 0) this.homeIndex = tile;
     if (this.screen === "subscription") this.draft = this.editorValue;
     this.filterEditing = false;
@@ -601,7 +606,7 @@ export class AppState {
     if (["servers", "profiles", "diagnostics", "settings"].includes(screen)) this.tab = screen as typeof this.tab;
     this.helpOpen = false;
     this.pendingScreenRead = undefined;
-    this.selected = screen === "profile-remove" ? 1 : 0;
+    this.selected = 0;
     if (screen === "details") this.detailsOffset = 0;
     if (screen === "retry-confirm") {
       this.confirmationSnapshot = this.confirmationContext();
@@ -644,20 +649,21 @@ export class AppState {
     return width >= 90 ? 3 : width < 56 ? 1 : 2;
   }
 
-  moveHome(key: string) {
+  homeDestination(key: string) {
     const columns = this.homeColumns();
-    const row = Math.floor(this.homeIndex / columns), col = this.homeIndex % columns;
-    if (key === "home") this.homeIndex = 0;
-    else if (key === "end") this.homeIndex = 5;
-    else if (key === "left" && col > 0) this.homeIndex--;
-    else if (key === "right" && col < columns - 1 && this.homeIndex < 5) this.homeIndex++;
-    else if (key === "up" && row > 0) this.homeIndex -= columns;
-    else if (key === "down" && this.homeIndex + columns < 6) this.homeIndex += columns;
-    this.paint();
+    const column = this.homeIndex % columns, first = this.homeIndex - column;
+    const count = Math.min(columns, HOME_TILES.length - first);
+    if (key === "home") return 0;
+    if (key === "end") return HOME_TILES.length - 1;
+    if (key === "left") return first + Math.max(0, column - 1);
+    if (key === "right") return first + Math.min(count - 1, column + 1);
+    const next = first + (key === "down" ? columns : -columns);
+    if (next < 0 || next >= HOME_TILES.length) return this.homeIndex;
+    const nextCount = Math.min(columns, HOME_TILES.length - next);
+    return next + Math.floor((column + 0.5) * nextCount / count);
   }
   activateHome() {
-    const target = [undefined, "servers", "tasks", "profiles", "diagnostics", "settings"] as const;
-    if (this.homeIndex) { this.open(target[this.homeIndex]!); return; }
+    if (this.homeIndex) { this.open(HOME_TILES[this.homeIndex] as Screen); return; }
     const action = this.actions().find(item => ["home:connect", "home:start-service", "home:x"].includes(item.id));
     if (action?.available) action.run();
     else if (action?.unavailableBehavior === "notice" && action.unavailableReason) this.notify(action.unavailableReason, true);
@@ -681,7 +687,7 @@ export class AppState {
     const candidates = this.filteredServers().filter(server => this.measurementTimes.has(server.server_id) && server.status === "ready" && server.availability !== "failed" && server.download_mbps !== undefined && Number.isFinite(server.download_mbps) && server.download_mbps >= 0)
       .sort((a, b) => b.download_mbps! - a.download_mbps! || a.server_id.localeCompare(b.server_id));
     const server = candidates[0];
-    if (!server) { this.notify("Нет подходящих замеров этой сессии. Запустите тест скорости [t]."); return; }
+    if (!server) { this.notify("Нет подходящих замеров этой сессии. Выберите «Скорость сервера»."); return; }
     if (server.selected) { this.notify("Самый быстрый сервер уже выбран."); return; }
     this.fastestCandidate = { id: server.server_id, name: server.display_name, speed: server.download_mbps!, measuredAt: this.measurementTimes.get(server.server_id)! };
     this.confirmation = "fastest";
@@ -776,6 +782,20 @@ export class AppState {
   }
   items(): ActionDefinition[] {
     return defineMenuActions(this, menuItems(this));
+  }
+  visibleMenuItems(items = this.items()) {
+    if (this.screen === "home" || this.screen === "servers" && this.hasServerTable()) return [];
+    if (this.screen === "servers" && this.ready() && !this.nativePreviewOnly() && this.status?.subscription === "configured")
+      return items.filter(item => item.key === "r");
+    return items;
+  }
+  activateMenuRow(index: number) {
+    if (this.helpOpen || this.filterEditing) return;
+    const item = this.visibleMenuItems()[index];
+    if (!item) return;
+    this.selected = index;
+    this.onKey({ name: item.kind || this.screen === "servers" ? "return" : item.key, preventDefault() {} });
+    this.paint();
   }
   actions(): ActionDefinition[] { return actionRegistry(this); }
   groupedActions() { return groupedActions(this); }

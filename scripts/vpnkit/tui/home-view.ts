@@ -1,7 +1,10 @@
 import { BoxRenderable, TextAttributes, TextRenderable, type CliRenderer } from "@opentui/core";
-import type { AppState } from "./app-state";
+import { HOME_TILES, type AppState } from "./app-state";
 import { cell, displayCheckAddress, pluralRu } from "./formatting";
 import { connection, palette as p } from "./model";
+
+const TILES = HOME_TILES.length;
+const LAST = TILES - 1;
 
 export class HomeView {
   private root: BoxRenderable;
@@ -15,8 +18,9 @@ export class HomeView {
     for (let i = 0; i < 6; i++) { const row = new BoxRenderable(renderer, { flexDirection: "row", flexShrink: 0 }); this.root.add(row); this.rows.push(row); }
     this.more = new TextRenderable(renderer, { content: "", height: 1, flexShrink: 0, fg: p.muted, visible: false });
     this.root.add(this.more);
-    for (let i = 0; i < 6; i++) {
-      const box = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, flexBasis: 0, minWidth: 0, border: true, borderStyle: "rounded", onMouseDown: e => { if (e.button === 0) activate(i); } });
+    for (let i = 0; i < TILES; i++) {
+      // Filled blocks instead of box-drawing borders: terminals with extra line spacing draw `│` as a dashed line.
+      const box = new BoxRenderable(renderer, { flexDirection: "column", justifyContent: "center", flexGrow: 1, flexBasis: 0, minWidth: 0, paddingX: 1, marginRight: 1, backgroundColor: p.panel, onMouseDown: e => { if (e.button === 0) activate(i); } });
       const title = new TextRenderable(renderer, { height: 1, fg: p.text, attributes: TextAttributes.BOLD }); box.add(title);
       const lines = [0, 1, 2, 3].map(() => { const line = new TextRenderable(renderer, { height: 1, fg: p.muted }); box.add(line); return line; });
       this.tiles.push({ box, title, lines });
@@ -25,20 +29,21 @@ export class HomeView {
   update(state: AppState, visible: boolean) {
     this.root.visible = visible;
     if (!visible) return;
-    const cols = state.homeColumns(), rowsTotal = Math.ceil(6 / cols);
-    // Full tiles take five rows, compact four, title-only three. Header, footer and
-    // a two-line notice take four; when even title-only rows do not fit, scroll.
+    const cols = state.homeColumns(), rowsTotal = Math.ceil(TILES / cols);
+    // Full tiles take five rows, compact four, title-only three, plus one blank row under
+    // each. Content is centred, so every height leaves equal space above and below.
+    // Header, footer and a two-line notice take four; when even title-only rows do not fit, scroll.
     const room = this.renderer.height - 2 - (state.noticeReserved() ? 2 : 0);
-    const compact = this.renderer.height < rowsTotal * 5 + 5;
-    const tileHeight = !compact ? 5 : rowsTotal * 4 <= room ? 4 : 3;
-    const fitsAll = rowsTotal * tileHeight <= room;
+    const compact = this.renderer.height < rowsTotal * 6 + 5;
+    const tileHeight = !compact ? 5 : rowsTotal * 5 <= room ? 4 : 3;
+    const fitsAll = rowsTotal * (tileHeight + 1) <= room;
     // A scrolled grid spends one row saying how many tiles are out of view.
-    const visibleRows = fitsAll ? rowsTotal : Math.max(1, Math.min(rowsTotal, Math.floor((room - 1) / tileHeight)));
+    const visibleRows = fitsAll ? rowsTotal : Math.max(1, Math.min(rowsTotal, Math.floor((room - 1) / (tileHeight + 1))));
     const selectedRow = Math.floor(state.homeIndex / cols);
     if (selectedRow < this.firstRow) this.firstRow = selectedRow;
     if (selectedRow >= this.firstRow + visibleRows) this.firstRow = selectedRow - visibleRows + 1;
     this.firstRow = Math.max(0, Math.min(this.firstRow, rowsTotal - visibleRows));
-    const above = this.firstRow * cols, below = Math.max(0, 6 - (this.firstRow + visibleRows) * cols);
+    const above = this.firstRow * cols, below = Math.max(0, TILES - (this.firstRow + visibleRows) * cols);
     this.more.visible = !fitsAll;
     this.more.content = [above && `↑ ещё ${above}`, below && `↓ ещё ${below}`].filter(Boolean).join(" · ");
     const selected = state.catalogLoaded && !state.catalogStale ? state.servers.find(s => s.selected) : undefined;
@@ -50,19 +55,17 @@ export class HomeView {
     const actions = state.actions();
     const lifecycle = actions.find(a => ["home:connect", "home:start-service", "home:x"].includes(a.id));
     const lifecycleTask = [...state.tasks.values()].find(task => ["backend/start", "start", "disconnect", "stop"].includes(task.action));
-    // A tile shows a letter only when that key does what Enter on the tile does.
-    const opensProfiles = state.nativeInstalled() && state.status?.subscription === "configured";
-    const titleActions = [lifecycle, ...["global:servers", "global:tasks", opensProfiles ? "global:subscription" : "", "global:diagnostics", "global:settings"].map(id => actions.find(a => a.id === id))];
-    const glyphs = ["▶", "≡", "•", "◇", "+", "*"];
+    const glyphs = ["▶", "≡", "◇", "+", "*"];
     const data = [
       ["Подключение", lifecycleTask ? state.actionLabel(lifecycleTask.action) : connection(state.status).title, `Enter — ${lifecycle?.label ?? "—"}`],
       ["Серверы", `${state.catalogLoaded && !state.catalogStale ? `${state.servers.length} ${pluralRu(state.servers.length, ["сервер", "сервера", "серверов"])}` : "— серверов"} · выбран: ${selected?.display_name ?? "—"}`, `Лучший ping: ${best ? `${best.display_name} · ${best.latency_ms} мс` : "—"}`],
-      ["Замеры", state.batch ? `Выполняется ${state.batch.done}/${state.batch.total}` : state.measurementAction ? "Выполняется замер" : "Замеров нет", `В очереди: ${state.queue.filter(q => q.kind === "batch" || q.kind === "home" || q.action.startsWith("servers/")).length}`],
       ["Профили", state.profiles ? `${state.profiles.items.length} ${pluralRu(state.profiles.items.length, ["профиль", "профиля", "профилей"])}` : "Профилей: —", `Активен: ${profile?.name ?? "—"}`],
       ["Диагностика", `Шлюз: ${health[gateway ?? ""] ?? "—"}`, `Сеть: ${state.status?.networkmanager_active === "yes" ? "активна" : state.status?.networkmanager_active === "no" ? "отключена" : "—"}`],
       ["Настройки", `Режим: ${mode} · автозапуск: ${state.autostart ? (state.autostart.connect ? "VPN" : state.autostart.gateway ? "шлюз" : "нет") : "—"}`, `Сайт: ${state.target ? displayCheckAddress(state.target) : "не задан"}`],
     ];
-    const width = Math.floor((this.renderer.width - 2) / cols) - 2;
+    // The last row may hold fewer tiles, which then grow wider.
+    const tileWidth = (i: number) => Math.floor((this.renderer.width - 2) / Math.min(cols, TILES - Math.floor(i / cols) * cols)) - 3;
+    const width = tileWidth(LAST);
     // Preserve the redacted address and complete status when extra rows are available.
     const wrap = (text: string): string[] => {
       const lines: string[] = [];
@@ -79,9 +82,9 @@ export class HomeView {
       if (line) lines.push(line);
       return lines;
     };
-    const settingsLines = compact ? [data[5]![1]!] : [...wrap(data[5]![1]!), ...wrap(data[5]![2]!)];
-    const extra = compact ? 0 : Math.min(2, Math.max(0, this.renderer.height - (6 / cols * 5) - 2), Math.max(0, settingsLines.length - 2));
-    this.rows.forEach((row, i) => { row.visible = i >= this.firstRow && i < this.firstRow + visibleRows; row.height = compact ? tileHeight : 5 + (i === Math.floor(5 / cols) ? extra : 0); });
+    const settingsLines = compact ? [data[LAST]![1]!] : [...wrap(data[LAST]![1]!), ...wrap(data[LAST]![2]!)];
+    const extra = compact ? 0 : Math.min(2, Math.max(0, this.renderer.height - (rowsTotal * 6) - 2), Math.max(0, settingsLines.length - 2));
+    this.rows.forEach((row, i) => { row.visible = i >= this.firstRow && i < this.firstRow + visibleRows; row.height = 1 + (compact ? tileHeight : 5 + (i === Math.floor(LAST / cols) ? extra : 0)); });
     // Rebuild every row when the column count changes: appending only the moved
     // tiles would leave them after the ones that stayed, out of navigation order.
     if (cols !== this.columns) {
@@ -90,15 +93,16 @@ export class HomeView {
       this.tiles.forEach((tile, i) => this.rows[Math.floor(i / cols)]!.add(tile.box));
     }
     this.tiles.forEach((tile, i) => {
-      tile.box.height = compact ? tileHeight : 5 + (Math.floor(i / cols) === Math.floor(5 / cols) ? extra : 0); tile.box.borderColor = i === state.homeIndex ? p.accent : p.edge;
-      const title = `${i === state.homeIndex ? "›" : " "} ${glyphs[i]} ${data[i]![0]!}`;
-      const shortcut = titleActions[i]?.keys[0];
-      tile.title.content = shortcut && Bun.stringWidth(title) + 1 + Bun.stringWidth(shortcut) <= width
-        ? title + " ".repeat(width - Bun.stringWidth(title) - Bun.stringWidth(shortcut)) + shortcut
-        : cell(title, width).trimEnd();
+      // The row is one taller than the block, leaving a blank row between grid rows.
+      tile.box.height = compact ? tileHeight : 5 + (Math.floor(i / cols) === Math.floor(LAST / cols) ? extra : 0); tile.box.backgroundColor = i === state.homeIndex ? p.edge : p.panel;
+      // Centred tiles: the highlighted border and title colour mark the selection, so no cursor glyph.
+      // Letter shortcuts are not drawn; they live in the «Клавиши» window.
+      const own = tileWidth(i);
+      const center = (text: string) => { const fitted = cell(text, own).trimEnd(); return " ".repeat(Math.max(0, Math.floor((own - Bun.stringWidth(fitted)) / 2))) + fitted; };
+      tile.title.content = center(`${glyphs[i]} ${data[i]![0]!}`);
       tile.title.fg = i === state.homeIndex ? p.accent : p.text;
-      const lines = i === 5 && extra ? settingsLines : data[i]!.slice(1);
-      tile.lines.forEach((line, n) => { line.visible = n < (compact ? tileHeight - 3 : 2 + (Math.floor(i / cols) === Math.floor(5 / cols) ? extra : 0)) && n < lines.length; line.content = cell(lines[n] ?? "", width).trimEnd(); });
+      const lines = i === LAST && extra ? settingsLines : data[i]!.slice(1);
+      tile.lines.forEach((line, n) => { line.visible = n < (compact ? tileHeight - 3 : 2 + (Math.floor(i / cols) === Math.floor(LAST / cols) ? extra : 0)) && n < lines.length; line.content = center(lines[n] ?? ""); });
     });
   }
 }

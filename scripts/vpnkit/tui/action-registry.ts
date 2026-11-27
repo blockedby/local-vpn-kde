@@ -58,8 +58,7 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
       : state.screen === "confirm" && state.confirmation === "subscription" ? "subscription"
       : state.screen === "cancel-confirm" ? "tasks"
       : state.screen === "retry-confirm" ? "recovery"
-      : state.screen === "tasks" ? "home"
-      : ["autostart", "details", "confirm", "recovery", "subscription"].includes(state.screen) ? state.overlayBase : "home", state.screen !== "confirm"); }, state.closing ? "Закрываем приложение." : state.screen === "home" ? "Уже на главной." : undefined, "none", true);
+      : ["autostart", "details", "confirm", "recovery", "subscription", "tasks"].includes(state.screen) ? state.overlayBase : "home", state.screen !== "confirm"); }, state.closing ? "Закрываем приложение." : state.screen === "home" ? "Уже на главной." : undefined, "none", true);
   add("global:quit-control", ["ctrl+c"], "Выход", "global", () => void state.close(), state.closing || state.disposed ? "Закрываем приложение." : undefined, "none", true);
   if (editor) {
     add("editor:submit", ["return"], "Сохранить", "editor", () => {
@@ -86,6 +85,27 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
     }, undefined, "none", true);
     return actions;
   }
+  const bindList = (items: ActionDefinition[]) => {
+    // Items can shrink under the cursor (a failed load, an update offer going away).
+    const selected = Math.min(state.selected, Math.max(0, items.length - 1));
+    if (!underlying) state.selected = selected;
+    const move = (delta: number) => { state.selected = (state.selected + items.length + delta) % items.length; state.paint(); };
+    const edge = items.length <= 1 ? "Нет другого пункта." : undefined;
+    add("menu:previous", ["up"], "Выбор", "menu", () => move(-1), edge);
+    add("menu:next", ["down"], "Выбор", "menu", () => move(1), edge);
+    if (["confirm", "profile-remove", "retry-confirm", "cancel-confirm"].includes(state.screen)) {
+      for (const [key, delta] of [["left", -1], ["right", 1], ["tab", 1], ["shift+tab", -1]] as const)
+        add(`confirmation:${key}`, [key], "Выбор", "confirmation", () => move(delta), edge, "none", true);
+    }
+    const current = items[selected];
+    const owner = current && (actions.find(action => action.keys.includes(current.key)) ?? current);
+    const activate = () => { current?.run(); state.paint(); };
+    const reason = current ? current.unavailableReason ?? owner?.unavailableReason : "Нет выбранного пункта.";
+    const behavior = current?.unavailableBehavior ?? owner?.unavailableBehavior ?? "none";
+    const confirmation = ["confirm", "profile-remove", "retry-confirm", "cancel-confirm"].includes(state.screen);
+    add("menu:select", current?.kind === "open" && !confirmation ? ["return", "right"] : ["return"], current?.kind === "open" ? "Открыть" : "Выбрать", "menu", activate, reason, behavior, true);
+    if (current?.kind === "toggle" && !confirmation) add("menu:change", ["left", "right", "space"], "Изменить значение", "menu", activate, reason, behavior, true);
+  };
   if (isOverlay(state.screen)) {
     if (state.screen === "details") {
       add("details:up", ["up", "pageup"], "Прокрутить вверх", "menu", () => { state.detailsOffset = Math.max(0, state.detailsOffset - 1); state.paint(); });
@@ -93,15 +113,7 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
       return actions;
     }
     const items = state.items();
-    const move = (delta: number) => { state.selected = (state.selected + items.length + delta) % Math.max(1, items.length); state.paint(); };
-    if (["confirm", "profile-remove", "retry-confirm", "cancel-confirm"].includes(state.screen)) {
-      for (const [key, delta] of [["left", -1], ["right", 1], ["tab", 1], ["shift+tab", -1]] as const)
-        add(`confirmation:${key}`, [key], "Выбор", "confirmation", () => move(delta), items.length <= 1 ? "Нет другого пункта." : undefined, "none", true);
-    }
-    add("menu:previous", ["up"], "Выбор", "menu", () => move(-1), items.length <= 1 ? "Нет другого пункта." : undefined);
-    add("menu:next", ["down"], "Выбор", "menu", () => move(1), items.length <= 1 ? "Нет другого пункта." : undefined);
-    const current = items[state.selected];
-    add("menu:select", ["return"], "Выбрать", "menu", () => { current?.run(); state.paint(); }, current?.unavailableReason ?? (!current ? "Нет выбранного пункта." : undefined), current?.unavailableBehavior ?? "none");
+    bindList(items);
     for (const item of items) actions.push({ ...item, preventDefault: true, run: () => { item.run(); state.paint(); } });
     return actions;
   }
@@ -111,8 +123,8 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
   if (state.recovery) {
     const reapply = state.recovery.actions.includes("reapply");
     const conflict = [...state.tasks.values()].some(task => !compatible("network/reapply", task.action));
-    const reason = !reapply ? undefined : state.backendOffline || state.reconnecting ? "Служба управления недоступна. [f] Восстановить связь"
-      : (state.batch || state.homeTesting || conflict) ? "Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k]." : undefined;
+    const reason = !reapply ? undefined : state.backendOffline || state.reconnecting ? "Служба управления недоступна. Выберите «Восстановить связь»."
+      : (state.batch || state.homeTesting || conflict) ? "Эта операция конфликтует с текущей. Дождитесь завершения или отмените её в разделе «Задачи»." : undefined;
     add("global:recovery", ["f"], reapply ? "Применить сетевые настройки VPN" : "Действия", "global", () => {
       if (state.recovery?.actions.includes("reapply")) void state.perform("network/reapply"); else state.open("recovery");
     }, reason, "notice");
@@ -140,18 +152,17 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
     for (const item of lifecycle) actions.push({ ...item, scope: "global", run: () => { item.run(); state.paint(); } });
   if (state.screen === "home") {
     for (const key of ["left", "right", "up", "down", "home", "end"]) {
-      const cols = state.homeColumns(), i = state.homeIndex;
-      const blocked = key === "left" ? i % cols === 0 : key === "right" ? i % cols === cols - 1 || i === 5 : key === "up" ? i < cols : key === "down" ? i + cols >= 6 : key === "home" ? i === 0 : i === 5;
-      add(`tile:${key}`, [key], "Выбор", "home", () => state.moveHome(key), blocked ? "Край сетки." : undefined, "none", true);
+      const destination = state.homeDestination(key);
+      add(`tile:${key}`, [key], "Выбор", "home", () => { state.homeIndex = destination; state.paint(); }, destination === state.homeIndex ? "Край сетки." : undefined, "none", true);
     }
     const lifecycleAction = actions.find(action => ["home:connect", "home:start-service", "home:x"].includes(action.id));
     add("tile:open", ["return"], "Открыть", "home", () => state.activateHome(), state.homeIndex === 0 ? lifecycleAction?.unavailableReason : undefined, lifecycleAction?.unavailableBehavior ?? "none", true);
   }
   const items = state.items();
   if (state.screen === "servers") {
-    add("servers:filter", ["/"], "Фильтр серверов", "server-table", () => { state.filterEditing = true; state.filterAnchor = state.serverID; state.paint(); }, state.ready() && state.servers.length ? undefined : "Список серверов недоступен.", "none", true);
-    add("servers:fastest", ["b"], "Подключить самый быстрый", "server-table", () => state.confirmFastest());
-    add("servers:details", ["l"], "Подробности сервера", "server-table", () => state.open("details"), state.serverID ? undefined : "Нет выбранного сервера.");
+    add("servers:filter", ["/"], "Фильтр серверов", "server-table", () => { state.filterEditing = true; state.filterAnchor = state.serverID; state.paint(); }, state.hasServerTable() ? undefined : "Список серверов недоступен.", "none", true);
+    add("servers:fastest", ["b"], "Подключить самый быстрый", "server-table", () => state.confirmFastest(), state.hasServerTable() ? undefined : "Список серверов недоступен.");
+    add("servers:details", ["l"], "Подробности сервера", "server-table", () => state.open("details"), !state.hasServerTable() ? "Список серверов недоступен." : state.serverID ? undefined : "Нет выбранного сервера.");
     if (rowActions) add("servers:rename", ["n"], "Переименовать", "server-table", () => state.openServerRename(), state.serverID ? undefined : "Нет выбранного сервера.", "notice", true);
     const ping = items.find(item => item.key === "p");
     add(ping?.id ?? "servers:ping-alias", ["p"], state.filter ? `Ping показанных (${state.filteredServers().length}) + сайт` : "Ping всех + сайт", "server-table", () => void state.runBatch("ping"),
@@ -166,7 +177,7 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
     }, state.servers.length ? undefined : "Список серверов пуст.");
     for (const [key, delta] of [["[", -1], ["]", 1]] as const) add(`servers:sort-${key}`, [key], "Столбец сортировки", "server-table", () => { const sorts = ["name", "ping", "speed", "availability", "country"] as const; state.setSort(sorts[(sorts.indexOf(state.sort) + delta + sorts.length) % sorts.length]!); }, state.servers.length ? undefined : "Список серверов пуст.");
     add("servers:sort-reverse", ["\\"], "Обратить сортировку", "server-table", () => state.setSort(state.sort), state.servers.length ? undefined : "Список серверов пуст.");
-    if (rowActions || state.servers.length && state.ready() && !state.nativePreviewOnly()) {
+    if (rowActions || state.hasServerTable()) {
       for (const [name, delta] of [["up", -1], ["down", 1], ["pageup", -state.rowCount()], ["pagedown", state.rowCount()], ["home", -Infinity], ["end", Infinity]] as const) {
         const list = state.sortedServers(), at = Math.max(0, list.findIndex(s => s.server_id === state.serverID));
         const next = Math.max(0, Math.min(list.length - 1, at + delta));
@@ -178,12 +189,7 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
     }
   }
   // The list is ordered in the same precedence as the former dispatch path.
-  const menuScope: ActionScope = ["confirm", "profile-remove", "retry-confirm", "cancel-confirm"].includes(state.screen) ? "confirmation" : "menu";
-  const menuMove = (delta: number) => { state.selected = (state.selected + items.length + delta) % Math.max(1, items.length); state.paint(); };
-  if (state.screen !== "servers" && state.screen !== "home") add("menu:previous", ["up"], "Выбор", menuScope, () => menuMove(-1), items.length <= 1 ? "Нет другого пункта." : undefined);
-  if (state.screen !== "servers" && state.screen !== "home") add("menu:next", ["down"], "Выбор", menuScope, () => menuMove(1), items.length <= 1 ? "Нет другого пункта." : undefined);
-  const current = items[state.selected];
-  if (state.screen !== "home" && (state.screen !== "servers" || !state.ready() || state.nativePreviewOnly())) add("menu:select", ["return"], "Выбрать", menuScope, () => { current?.run(); state.paint(); }, current ? current.unavailableReason : "Нет выбранного пункта.", current?.unavailableBehavior ?? "none");
+  if (state.screen !== "home" && !(state.screen === "servers" && (rowActions || state.hasServerTable()))) bindList(state.visibleMenuItems(items));
   if (!items.some(item => item.key === "u")) add("global:refresh", ["u"], state.screen === "diagnostics" ? "Обновить диагностику" : "Обновить состояние", "global", () => { void state.perform(state.screen === "diagnostics" ? "diagnostics" : "status"); state.paint(); }, state.backendOffline ? "Служба управления недоступна." : undefined, state.backendOffline ? "notice" : "none");
   for (const item of items) actions.push({ ...item, preventDefault: true, run: () => { item.run(); state.paint(); } });
   // A shortcut has one effective owner. Earlier definitions have the same
@@ -225,7 +231,7 @@ export function matchesAction(action: ActionDefinition, key: AppKeyEvent): boole
 
 /** Stable, ordered groups usable by a footer, help screen or command palette. */
 export function groupedActions(state: AppState, underlying = false) {
-  const hint: Record<string, string> = { escape: "Esc", return: "Enter", tab: "Tab", "shift+tab": "Shift+Tab", "ctrl+c": "Ctrl+C", "ctrl+p": "Ctrl+P", up: "↑", down: "↓", pageup: "PgUp", pagedown: "PgDn", "shift+t": "T", home: "Home", end: "End", left: "←", right: "→" };
+  const hint: Record<string, string> = { escape: "Esc", return: "Enter", space: "Space", tab: "Tab", "shift+tab": "Shift+Tab", "ctrl+c": "Ctrl+C", "ctrl+p": "Ctrl+P", up: "↑", down: "↓", pageup: "PgUp", pagedown: "PgDn", "shift+t": "T", home: "Home", end: "End", left: "←", right: "→" };
   const groups: { scope: ActionScope; actions: (ActionDefinition & { keyHints: string[] })[] }[] = [];
   const listed = actionRegistry(state, false, underlying);
   if (state.serverMenu && (!state.helpOpen || underlying)) {

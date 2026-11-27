@@ -1,7 +1,41 @@
 import { expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import { App } from "./app";
-import { FakeBackend, rows } from "./app-test-fixtures";
+import { FakeBackend, rows, settle } from "./app-test-fixtures";
+
+test("minimum-size server panel exposes the last action and the last details", async () => {
+  const terminal = await createTestRenderer({ width: 40, height: 10 });
+  const app = new App(terminal.renderer, new FakeBackend()), input = terminal.mockInput;
+  try {
+    await app.perform("status"); input.pressKey("v"); await settle(); input.pressEnter(); app.onKey({ name: "end", preventDefault() {} }); await terminal.renderOnce();
+    expect(terminal.captureCharFrame()).toContain("› Переименовать"); input.pressEnter(); expect(app.screen).toBe("server-rename");
+    input.pressEscape(); await Bun.sleep(50); input.pressEnter();
+    for (let step = 0; step < 3; step++) input.pressArrow("down");
+    input.pressEnter(); expect(app.screen).toBe("details"); await terminal.renderOnce();
+    expect(terminal.captureCharFrame()).not.toContain("Состояние:");
+    for (let step = 0; step < 5; step++) input.pressArrow("down");
+    await terminal.renderOnce(); const frame = terminal.captureCharFrame();
+    for (const field of ["Скорость:", "Сайт:", "Состояние:"]) expect(frame).toContain(field);
+  } finally { await app.close(); }
+});
+
+for (const scenario of ["missing subscription", "egress unavailable", "empty catalog"]) test(`Servers fallback activates its displayed row: ${scenario}`, async () => {
+  const terminal = await createTestRenderer({ width: 100, height: 24 });
+  const backend = new FakeBackend(); backend.rows = [];
+  backend.status = { ...backend.status, runtime: "native", installed: true,
+    ...(scenario === "missing subscription" ? { subscription: "not configured" } : scenario === "egress unavailable" ? { gateway_state: "egress-unavailable" } : {}) };
+  const app = new App(terminal.renderer, backend);
+  try {
+    await app.perform("status"); terminal.mockInput.pressKey("v"); await settle();
+    if (scenario === "egress unavailable") terminal.mockInput.pressArrow("down");
+    const label = scenario === "missing subscription" ? "Добавить подписку" : scenario === "egress unavailable" ? "Запустить сервис" : "Обновить подписку и список";
+    await terminal.renderOnce(); const frame = terminal.captureCharFrame();
+    expect(frame).toContain(`› ${label}`); expect(frame).toContain(`Enter ${label.toLowerCase()}`);
+    const before = backend.calls.length; terminal.mockInput.pressEnter(); await settle();
+    if (scenario === "missing subscription") expect(app.screen).toBe("subscription");
+    else expect(backend.calls[before]?.action).toBe(scenario === "egress unavailable" ? "backend/start" : "servers/refresh");
+  } finally { await app.close(); }
+});
 
 for (const [width, height] of [[100, 35], [60, 16]] as const) test(`row menu fits ${width}x${height}`, async () => {
   const terminal = await createTestRenderer({ width, height }); const backend = new FakeBackend(); const app = new App(terminal.renderer, backend);

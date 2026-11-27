@@ -69,7 +69,7 @@ export async function runBatch(state: AppState, kind: Batch, retry?: { ids: stri
       state.notify(`Сначала запустите ${state.serviceObject()}.`, true);
       return;
     }
-    if (state.catalogStale) { state.notify("Подписка изменена. Обновите список серверов [r].", true); return; }
+    if (state.catalogStale) { state.notify("Подписка изменена. Выберите «Обновить подписку и список».", true); return; }
     state.cancelled = false;
     state.noticeIdentity = undefined;
     state.notice = "";
@@ -187,6 +187,7 @@ export async function reconnectBackend(state: AppState) {
     if (!state.backend.reconnect) { state.notify("Перезапустите интерфейс: служба не поддерживает восстановление.", true); return; }
     state.reconnecting = true;
     state.paint();
+    const recovery = state.recovery;
     try {
       await state.backend.reconnect();
       if (state.closing || state.disposed) return;
@@ -197,8 +198,14 @@ export async function reconnectBackend(state: AppState) {
         const list = await state.perform("servers/list");
         if (!list?.ok) throw new Error();
       }
+      // A disconnect that arrived during these reads wins: keep its recovery and stay offline.
+      if (state.backendOffline) throw new Error();
+      if (state.recovery === recovery) {
+        state.recovery = undefined;
+        if (state.screen === "recovery") state.open(state.overlayBase, false, false);
+      }
       state.notify("Связь восстановлена. Состояние обновлено; действия не повторялись.");
-    } catch { state.backendOffline = true; state.notify("Не удалось восстановить связь. Можно повторить [u].", true); }
+    } catch { state.backendOffline = true; state.notify("Не удалось восстановить связь. Выберите «Восстановить связь» ещё раз.", true); }
     finally {
       state.reconnecting = false;
       state.paint();

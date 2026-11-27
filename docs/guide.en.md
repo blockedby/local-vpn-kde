@@ -55,11 +55,11 @@ kvpn
 
 ## First connection
 
-The interface opens on a home screen with Connection («Подключение»), Servers («Серверы»), Measurements («Замеры»), Profiles («Профили»), Diagnostics («Диагностика») and Settings («Настройки») tiles. Use the arrow keys to choose a tile and `Enter` to open a section or perform the connection action; `Esc` returns from a section to home. In nested screens and menus `Esc` closes those first; in the server table it first clears a filter. A breadcrumb shows the path to the section; `Tab` / `Shift+Tab` cycle through Servers, Profiles, Diagnostics and Settings.
+The interface opens on a home screen with Connection («Подключение»), Servers («Серверы»), Profiles («Профили»), Diagnostics («Диагностика») and Settings («Настройки») tiles. Use the arrow keys to choose a tile and `Enter` to open a section or perform the connection action; `Esc` returns from a section to home. In nested screens and menus `Esc` closes those first; in the server table it first clears a filter. A breadcrumb shows the path to the section; `Tab` / `Shift+Tab` cycle through Servers, Profiles, Diagnostics and Settings.
 
 1. Press `c` and add the first subscription or an individual server link. Once installed native mode is configured, `c` opens Profiles («Профили»).
 2. If the service is stopped, start it using the **Connection** tile or `s`. Open **Servers** (`v`, «Серверы»); refresh the list if needed (`r`).
-3. Choose a row with the arrows and press `Enter`. The menu offers Select server («Выбрать сервер»), Ping and site («Ping и сайт»), Server speed («Скорость сервера»), Server details («Подробности сервера») and Rename («Переименовать»). Choose **Select server** and confirm: No («Нет») is selected by default, and Left/Right move between the buttons.
+3. Choose a row with the arrows and press `Enter`. The menu offers Select server («Выбрать сервер»), Ping and site («Ping и сайт»), Server speed («Скорость сервера»), Server details («Подробности сервера») and Rename («Переименовать»). Choose **Select server** and confirm: No («Нет») is selected by default. Press `↓` to select Yes, then `Enter` to confirm.
 4. Return home and choose **Connection** or press `s` to connect the VPN.
 
 **“Service ready” does not mean “VPN connected.”** The service can run checks while the system VPN connection remains off.
@@ -75,6 +75,7 @@ The interface opens on a home screen with Connection («Подключение»
 | `a` | Autostart settings |
 | `d` | Diagnostics |
 | `i` | Settings |
+| `↑` / `↓` in list menus | Select a row. Use `←`, `→` or `Space` to change a toggle; `→` opens a row marked with an arrow. `Enter` activates the row, `Esc` goes back. The shortcut on the right also works. |
 | `Tab` / `Shift+Tab` | Next / previous section among the four listed above |
 | `/` | Filter displayed and original names and country code; `Enter` keeps it, `Esc` clears it |
 | `p` / `t` | Ping and site / speed and site for shown servers |

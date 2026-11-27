@@ -1,6 +1,7 @@
 import { BoxRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
 import { isOverlay, type AppState } from "./app-state";
 import { palette as p } from "./model";
+import { isListMenu } from "./menu-actions";
 
 export class FooterView {
   private footer: TextRenderable;
@@ -22,7 +23,7 @@ export class FooterView {
     if (state.screen === "server-rename") { return "Enter сохранить · Esc отмена"; }
     if (state.filterEditing) { return "Enter применить · Esc очистить"; }
     if (state.serverMenu) { return "↑↓ действие · Enter выполнить · Esc закрыть"; }
-    if (state.screen === "servers" && state.ready() && !state.nativePreviewOnly() && state.servers.length) {
+    if (state.screen === "servers" && state.hasServerTable()) {
       const base = "↑↓ сервер · Enter действия · / фильтр · Esc главная";
       let result = base;
       const actions = state.actions();
@@ -31,6 +32,14 @@ export class FooterView {
       return result;
     }
     if (state.screen === "tasks") { return `↑↓ выбор${state.items()[state.selected]?.available ? " · Enter отменить" : ""} · Esc назад`; }
+    // Servers without a table (service stopped, no subscription) show a plain menu: drive it with arrows too.
+    if (state.screen === "servers") {
+      const rows = state.visibleMenuItems(), item = rows[state.selected];
+      const enter = `Enter ${(item?.title ?? item?.label ?? "выбрать").toLowerCase()}`;
+      // Enter goes first and is shortened rather than dropped on narrow terminals.
+      return [Bun.stringWidth(enter) + 18 > this.renderer.terminalWidth ? "Enter выбрать" : enter, rows.length > 1 ? "↑↓ выбор" : "", "Esc главная"].filter(Boolean).join(" · ");
+    }
+    if (isListMenu(state.screen)) { const kind = state.items()[state.selected]?.kind; return `↑↓ выбор${kind === "toggle" ? " · ←→ изменить" : kind === "open" ? " · Enter открыть" : " · Enter выполнить"} · Esc назад`; }
     const actions = state.groupedActions().flatMap(group => group.actions).filter(action => action.available);
     if (state.screen === "home") {
       const has = (id: string) => state.groupedActions().flatMap(group => group.actions).some(action => action.id === id);
@@ -43,8 +52,7 @@ export class FooterView {
       hints.push("Esc назад");
       return hints.join(" · ");
     }
-    const priorities = editor ? ["editor:submit", "global:back", "global:quit-control"] : state.screen === "servers"
-      ? ["global:recovery", "servers:select", "servers:filter", "global:cancel", "servers:details", "servers:p", "servers:t", "servers:r", "home:connect", "home:start-service", "home:x", "servers:sort"]
+    const priorities = editor ? ["editor:submit", "global:back", "global:quit-control"]
       : ["global:recovery", "menu:select", "diagnostics:u", "home:connect", "home:start-service", "home:x", "global:cancel", "global:back", "global:tasks"];
     const short: Record<string,string> = { "global:recovery": "восстановить", "servers:select": "выбрать", "servers:filter": "фильтр", "servers:p": state.filter ? `ping ${state.filteredServers().length}` : "ping", "servers:t": state.filter ? `скорость ${state.filteredServers().length}` : "скорость", "servers:r": "обновить", "servers:details": "подробно", "home:connect": "подключить", "home:start-service": "запустить", "home:x": "отключить", "global:cancel": "отменить", "servers:sort": "сортировка", "menu:select": "выбрать", "diagnostics:u": "обновить", "global:back": "назад", "global:tasks": "задачи", "editor:submit": "сохранить", "global:quit-control": "выход" };
     const hints = priorities.flatMap(id => { const a = actions.find(a => a.id === id); return a ? [`${a.keyHints[0]} ${short[id] ?? a.label.toLowerCase()}`] : []; });

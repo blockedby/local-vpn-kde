@@ -101,7 +101,7 @@ test("failed speed replies containing cached values do not count as a session me
     backend.hold = { action: "servers/speed", promise: Promise.resolve({ ...reply(), ok: false, reason: "stale", catalog: { status: "ok", server: { ...rows[1]!, status: "ready", download_mbps: 100 } } }) };
     await state.perform("servers/speed", rows[1]!.server_id);
     state.confirmFastest();
-    expect(state.notice).toContain("[t]");
+    expect(state.notice).toContain("Скорость сервера");
     expect(state.measurementTimes.has(rows[1]!.server_id)).toBe(false);
   } finally { await state.close(); }
 });

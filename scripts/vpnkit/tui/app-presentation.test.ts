@@ -5,6 +5,22 @@ import { connection } from "./model";
 import type { Action, CheckProgress, Reply } from "./bridge";
 import { FakeBackend, settle, reply, rows, initial } from "./app-test-fixtures";
 
+for (const editor of ["subscription", "profile-source"] as const) test(`minimum-size ${editor} editor shows the typed source`, async () => {
+  const terminal = await createTestRenderer({ width: 40, height: 10 });
+  const backend = new FakeBackend(); backend.status = { ...initial, runtime: "native", installed: true, subscription: editor === "subscription" ? "not configured" : "configured" };
+  const app = new App(terminal.renderer, backend), input = terminal.mockInput;
+  try {
+    await app.perform("status"); input.pressKey("c"); await settle();
+    if (editor === "profile-source") { input.pressKey("n"); await input.typeText("Z".repeat(60)); input.pressEnter(); }
+    expect(app.screen).toBe(editor); await terminal.renderOnce();
+    input.pressKey("u", { ctrl: true }); await input.typeText("https://source.invalid"); await terminal.renderOnce();
+    expect(app.editorValue).toBe("https://source.invalid"); expect(terminal.captureCharFrame()).toContain("source.invalid");
+    input.pressEnter(); await settle();
+    if (editor === "subscription") expect(app.screen).toBe("confirm");
+    else expect(backend.calls.some(call => call.action === "profiles/add" && call.value?.includes("https://source.invalid"))).toBe(true);
+  } finally { await app.close(); }
+});
+
 test("legacy status without runtime keeps Docker lifecycle wording", async () => {
   const t = await createTestRenderer({ width: 100, height: 28 });
   const b = new FakeBackend();
@@ -61,11 +77,11 @@ test("shell has clickable home tiles and a section breadcrumb", async () => {
   try {
     await app.perform("status"); await t.renderOnce();
     const frame = t.captureCharFrame();
-    for (const label of ["Подключение", "Серверы", "Замеры", "Профили", "Диагностика", "Настройки"]) expect(frame.split(label)).toHaveLength(2);
+    for (const label of ["Подключение", "Серверы", "Профили", "Диагностика", "Настройки"]) expect(frame.split(label)).toHaveLength(2);
     const row = frame.split("\n").findIndex(line => line.includes("Диагностика"));
-    await t.mockMouse.click(5, row); await t.renderOnce();
+    await t.mockMouse.click(frame.split("\n")[row]!.indexOf("Диагностика"), row); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("‹ Главная › Диагностика");
-    expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+    expect(t.captureCharFrame()).toContain("Сеть VPN");
   } finally { await app.close(); }
 });
 
@@ -117,7 +133,7 @@ test("missing actual autostart status stays explicit and does not infer from sav
     await settle();
     await t.renderOnce();
     const frame = t.captureCharFrame();
-    expect(frame).toContain("Запускать шлюз: да");
+    expect(frame).toMatch(/Запускать шлюз [ .]+‹ да ›/);
     expect(frame).toContain("не проверено");
     expect(frame).toContain("недоступно");
     expect(frame).not.toContain("Фактическое состояние службы: автозапуск включён");
@@ -141,7 +157,7 @@ test("presentation: completed diagnostics never reopen a screen the user left", 
     finish(reply());
     await task;
     await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("OpenVPN / KDE");
+    expect(t.captureCharFrame()).not.toContain("Сеть VPN");
     expect(t.captureCharFrame()).toContain("Enter — Подключить");
   } finally {
     finish(reply());
@@ -173,10 +189,10 @@ test("presentation: installed native separates service startup, connection, disc
     t.mockInput.pressKey("x"); await settle();
     t.mockInput.pressKey("n"); await settle();
     t.mockInput.pressKey("x"); t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Native-служба работает");
+    expect(t.captureCharFrame()).toContain("Сервис работает");
     t.mockInput.pressKey("z"); await settle();
     t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Native-служба и VPN остановлены");
+    expect(t.captureCharFrame()).toContain("Сервис и VPN остановлены");
   } finally { await app.close(); }
 });
 
@@ -360,11 +376,11 @@ test("presentation: native autostart edits retain the returned runtime and do no
     t.mockInput.pressKey("a");
     await settle();
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запускать native-службу: нет");
+    expect(t.captureCharFrame()).toMatch(/Запускать native-службу [ .]+‹ нет ›/);
     t.mockInput.pressKey("g");
     await settle();
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запускать native-службу: да");
+    expect(t.captureCharFrame()).toMatch(/Запускать native-службу [ .]+‹ да ›/);
   } finally {
     await app.close();
   }
@@ -381,11 +397,11 @@ test("presentation: navigation and diagnostics Back are immediate during a held 
     const task = app.perform("start");
     t.mockInput.pressKey("d");
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+    expect(t.captureCharFrame()).toContain("Сеть VPN");
     t.mockInput.pressEscape();
     await Bun.sleep(60);
     await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("OpenVPN / KDE");
+    expect(t.captureCharFrame()).not.toContain("Сеть VPN");
     t.mockInput.pressKey("c");
     await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Enter сохранить");
@@ -504,7 +520,7 @@ test("presentation: batch publishes each result and allows navigation without ca
     await settle();
     t.mockInput.pressKey("d");
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+    expect(t.captureCharFrame()).toContain("Сеть VPN");
     b.hold = undefined;
     finish({
       ...reply(),
@@ -762,11 +778,11 @@ test("presentation: autostart is opt-in, keeps gateway/connect consistent and ne
     await app.perform("status");
     t.mockInput.pressKey("a"); await settle(); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("При входе в KDE");
-    expect(t.captureCharFrame()).toContain("Подключать VPN: нет");
+    expect(t.captureCharFrame()).toMatch(/Подключать VPN [ .]+‹ нет ›/);
     t.mockInput.pressKey("a"); await settle();
     t.mockInput.pressKey("g"); await settle();
     t.resize(60, 18); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запускать шлюз: нет");
+    expect(t.captureCharFrame()).toMatch(/Запускать шлюз [ .]+‹ нет ›/);
   } finally { await app.close(); }
 });
 
@@ -786,7 +802,7 @@ test("presentation: failed autostart save requires rereading authoritative setti
     t.mockInput.pressKey("a"); await settle();
     t.mockInput.pressKey("a"); await settle(); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Загрузить настройки");
-    expect(t.captureCharFrame()).not.toContain("Подключать VPN: да");
+    expect(t.captureCharFrame()).not.toMatch(/Подключать VPN [ .]+‹ да ›/);
   } finally { await app.close(); }
 });
 
@@ -809,8 +825,8 @@ test("presentation: autostart screen keeps saved intent separate from the actual
     await settle();
     await t.renderOnce();
     const frame = t.captureCharFrame();
-    expect(frame).toContain("Запускать шлюз: да");
-    expect(frame).toContain("Подключать VPN: да");
+    expect(frame).toMatch(/Запускать шлюз [ .]+‹ да ›/);
+    expect(frame).toMatch(/Подключать VPN [ .]+‹ да ›/);
     expect(frame).toContain("Фактическое состояние службы: автозапуск отключён");
     expect(frame).toContain("текущее состояние: неактивна");
   } finally {
@@ -848,7 +864,7 @@ test("presentation: successful autostart saves refresh actual state and preserve
     t.mockInput.pressKey("g");
     await settle();
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запускать native-службу: нет");
+    expect(t.captureCharFrame()).toMatch(/Запускать native-службу [ .]+‹ нет ›/);
     expect(t.captureCharFrame()).toContain("автозапуск отключён");
   } finally {
     await app.close();
@@ -938,8 +954,8 @@ test("presentation: installed native diagnostics failure can be retried without 
     expect(t.captureCharFrame()).toContain("Не удалось создать журнал");
     t.mockInput.pressKey("u"); await settle(); await t.renderOnce();
     const frame = t.captureCharFrame();
-    expect(frame).toContain("Native-служба:");
-    expect(frame).toContain("Проверка: выполнена");
+    expect(frame).toMatch(/Сервис +/);
+    expect(frame).toMatch(/Проверка +выполнена/);
     expect(frame).not.toContain("Docker");
     expect(frame).not.toContain("Не удалось создать журнал");
     t.mockInput.pressKey("h"); await Bun.sleep(60); await t.renderOnce();
@@ -1263,7 +1279,7 @@ test("presentation: ping and site render before batch completion and completed r
   expect(row).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
   expect(t.captureCharFrame()).toContain("1/2");
   t.mockInput.pressKey("d"); await t.renderOnce();
-  expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+  expect(t.captureCharFrame()).toContain("Сеть VPN");
   t.mockInput.pressKey("v"); await t.renderOnce();
   expect(t.captureCharFrame()).toContain("37");
   finish({...reply(),catalog:{status:"ok",servers:rows.map(s=>({...s,ping_status:"ready",availability:"ready",latency_ms:37}))}});
@@ -1448,8 +1464,7 @@ for (const width of [48, 100, 140]) {
       await t.renderOnce();
       const frame = t.captureCharFrame();
       expect(frame).toContain("Сетевые настройки VPN поменялись,");
-      expect(frame).toContain("нажмите [f]");
-      expect(frame).toContain("ещё раз.");
+      expect(frame.replace(/\s+/g, " ")).toContain("выберите «Применить сетевые настройки VPN».");
       expect(frame).not.toContain("Действие не выполнено");
       expect(frame).not.toContain("[f] Действия");
       expect(frame).not.toContain("private-attempt");

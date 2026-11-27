@@ -69,6 +69,30 @@ test("reading table rows does not change the viewport", () => {
   expect(state.viewStart).toBe(0);
 });
 
+test("selected-row aliases share letter availability, appear in help and yield to text inputs", async () => {
+  const { state, backend } = fixture("autostart-loaded", "native");
+  const press = (key: string) => state.onKey(event(key));
+  try {
+    state.backendOffline = true;
+    const reason = state.items()[0]!.unavailableReason!;
+    expect(reason).toBeTruthy();
+    for (const key of ["right", "left", "space", "return", "g"]) {
+      state.notice = ""; press(key); expect(state.notice).toBe(reason);
+    }
+    state.openKeys(true);
+    expect(state.filteredPaletteActions().find(entry => entry.action.id === "menu:change")?.action.keyHints).toEqual(["←", "→", "Space"]);
+    for (const input of ["search", "editor", "filter"]) {
+      if (input === "editor") state.open("target", false, false);
+      if (input === "filter") { state.open("servers", false, false); state.filterEditing = true; }
+      for (const key of ["left", "right", "space"]) {
+        expect(state.actions().some(action => matchesAction(action, event(key)))).toBe(false);
+        press(key);
+      }
+    }
+    expect(backend.calls).toEqual([]);
+  } finally { await state.close(); }
+});
+
 
 test("server movement and catalog changes keep the cursor in the viewport", () => {
   const {state} = fixture("servers", "docker");

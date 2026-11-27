@@ -89,7 +89,9 @@ test("explicit recovery rereads status and catalog without replaying interrupted
     f.b.onDisconnect?.();
     f.b.held.get("servers/select")!.reject(new Error("backend-unavailable")); await task;
     const before = f.b.calls.length;
-    await f.key("f"); await f.key("u");
+    await f.key("f"); expect(f.app.screen).toBe("recovery"); await f.key("return");
+    expect(f.app.screen).toBe("home"); expect(f.app.recovery).toBeUndefined();
+    expect(f.app.notice).toContain("Связь восстановлена");
     expect(f.b.reconnects).toBe(1);
     expect(f.b.calls.slice(before).map(c => c.action)).toEqual(["status", "servers/list"]);
     expect(f.b.calls.filter(c => c.action === "servers/select")).toHaveLength(1);
@@ -133,5 +135,24 @@ test("live speed belongs to measured server and late samples cannot overwrite fi
     f.b.onSpeedProgress?.({ ...sample, download_mbps: 999 }, id);
     expect(f.app.homeSpeed).toBe(32);
     expect(f.app.liveSpeeds.has(rows[0].server_id)).toBe(false);
+  } finally { await f.close(); }
+});
+
+test("a disconnect during reconnect reads keeps the app offline with its recovery", async () => {
+  const f = await fixture();
+  f.b.holds.add("servers/select");
+  try {
+    const task = f.app.perform("servers/select", rows[1].server_id);
+    f.b.onDisconnect?.();
+    f.b.held.get("servers/select")!.reject(new Error("backend-unavailable")); await task;
+    f.b.holds.add("servers/list");
+    await f.key("f"); expect(f.app.screen).toBe("recovery"); await f.key("return");
+    expect(f.b.held.has("servers/list")).toBe(true);
+    f.b.onDisconnect?.();
+    const r = reply(); r.catalog = { status: "ok", servers: structuredClone(rows) };
+    f.b.held.get("servers/list")!.resolve(r); await settle(); await settle();
+    expect(f.app.backendOffline).toBe(true); expect(f.app.recovery).toBeDefined();
+    expect(f.app.notice).not.toContain("Связь восстановлена");
+    f.b.holds.delete("servers/list");
   } finally { await f.close(); }
 });
