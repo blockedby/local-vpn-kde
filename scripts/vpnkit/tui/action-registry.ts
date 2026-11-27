@@ -87,12 +87,14 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
     return actions;
   }
   const bindList = (items: ActionDefinition[]) => {
+    // Items can shrink under the cursor (a failed load, an update offer going away).
+    if (state.selected >= items.length) state.selected = Math.max(0, items.length - 1);
     const move = (delta: number) => { state.selected = (state.selected + items.length + delta) % items.length; state.paint(); };
     const edge = items.length <= 1 ? "Нет другого пункта." : undefined;
     add("menu:previous", ["up"], "Выбор", "menu", () => move(-1), edge);
     add("menu:next", ["down"], "Выбор", "menu", () => move(1), edge);
     if (["confirm", "profile-remove", "retry-confirm", "cancel-confirm"].includes(state.screen)) {
-      for (const [key, delta] of [["tab", 1], ["shift+tab", -1]] as const)
+      for (const [key, delta] of [["left", -1], ["right", 1], ["tab", 1], ["shift+tab", -1]] as const)
         add(`confirmation:${key}`, [key], "Выбор", "confirmation", () => move(delta), edge, "none", true);
     }
     const current = items[state.selected];
@@ -100,8 +102,9 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
     const activate = () => { current?.run(); state.paint(); };
     const reason = current ? current.unavailableReason ?? owner?.unavailableReason : "Нет выбранного пункта.";
     const behavior = current?.unavailableBehavior ?? owner?.unavailableBehavior ?? "none";
-    add("menu:select", current?.kind === "open" ? ["return", "right"] : ["return"], current?.kind === "open" ? "Открыть" : "Выбрать", "menu", activate, reason, behavior, true);
-    if (current?.kind === "toggle") add("menu:change", ["left", "right", "space"], "Изменить значение", "menu", activate, reason, behavior, true);
+    const confirmation = ["confirm", "profile-remove", "retry-confirm", "cancel-confirm"].includes(state.screen);
+    add("menu:select", current?.kind === "open" && !confirmation ? ["return", "right"] : ["return"], current?.kind === "open" ? "Открыть" : "Выбрать", "menu", activate, reason, behavior, true);
+    if (current?.kind === "toggle" && !confirmation) add("menu:change", ["left", "right", "space"], "Изменить значение", "menu", activate, reason, behavior, true);
   };
   if (isOverlay(state.screen)) {
     if (state.screen === "details") {

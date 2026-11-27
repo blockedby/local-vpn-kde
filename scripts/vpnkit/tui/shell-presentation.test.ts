@@ -435,3 +435,42 @@ test("shell: activity shows running, queued and finished work and cancellation p
 function importReply(): import("./bridge").Reply {
   return { ok: true, reason: "ok", code: 0, status: { vpn_state: "inactive", gateway_state: "healthy", subscription: "configured", routing_mode: "strict", networkmanager_configured: "yes", networkmanager_active: "no", diagnostics: "not-run" } };
 }
+
+test("confirmation: ← returns to Нет, so ↓ ← Enter cancels instead of stopping", async () => {
+  const { terminal, backend, app } = await fixture(80, 24);
+  try {
+    app.status = { ...app.status!, runtime: "native", installed: true, gateway_state: "healthy" };
+    app.open("settings", false, false); app.confirm("stop");
+    const before = backend.calls.length;
+    const key = (name: string) => app.onKey({ name, preventDefault() {} });
+    key("down"); key("left"); expect(app.selected).toBe(0); key("return"); await Bun.sleep(20);
+    expect(backend.calls.slice(before).some(call => call.action === "stop")).toBe(false);
+    expect(String(app.screen)).not.toBe("confirm");
+  } finally { await app.close(); }
+});
+
+test("restart confirmation keeps its warning at the minimum terminal size", async () => {
+  const { terminal, app } = await fixture(MIN_COLS, 10);
+  try {
+    app.status = { ...app.status!, runtime: "native", installed: true };
+    app.open("settings", false, false); app.confirm("gateway/restart"); await terminal.renderOnce();
+    const frame = terminal.captureCharFrame().replace(/[│\s]+/g, " ");
+    expect(frame).toContain("отключится"); expect(frame).toContain("Нет"); expect(frame).toContain("Да");
+  } finally { await app.close(); }
+});
+
+test("menu selection is clamped when the list shrinks, tasks footer offers cancel only when possible, update check is an action", async () => {
+  const { terminal, app } = await fixture(80, 24);
+  try {
+    app.status = { ...app.status!, runtime: "native", installed: true };
+    app.open("autostart", false, false); app.autostart = undefined; app.selected = 1;
+    const select = app.actions().find(action => action.id === "menu:select");
+    expect(app.selected).toBe(0); expect(select?.available).toBe(true);
+    app.open("tasks", false, false); app.paint(); await terminal.renderOnce();
+    expect(terminal.captureCharFrame()).not.toContain("Enter выполнить"); expect(terminal.captureCharFrame()).not.toContain("Enter отменить");
+    app.open("settings", false, false);
+    expect(app.items().find(item => item.key === "u")?.kind).toBe("action");
+    app.updateInfo = { available: true, installed: "0.5.4", latest: "0.5.5" } as any;
+    expect(app.items().find(item => item.key === "u")?.kind).toBe("open");
+  } finally { await app.close(); }
+});

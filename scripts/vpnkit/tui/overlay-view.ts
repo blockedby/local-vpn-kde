@@ -133,7 +133,9 @@ export class OverlayView {
       this.dialogSummary.update(state);
       const items = state.items();
       const listHeight = menuHeight(items);
-      const maxHeight = this.renderer.terminalHeight - 4;
+      // A confirmation must show its consequence; on a tiny terminal it may cover the header and footer.
+      const confirmation = ["confirm", "profile-remove", "retry-confirm", "cancel-confirm"].includes(state.screen);
+      const maxHeight = this.renderer.terminalHeight - (confirmation && this.renderer.terminalHeight < 16 ? 0 : 4);
       const summaryLimit = listHeight ? Math.max(1, maxHeight - 2 - Math.min(listHeight, 2)) : Infinity;
       const summaryHeight = Math.min(summaryLimit, this.dialogSummary.fit(width - 2, 0, summaryLimit));
       const height = Math.min(maxHeight, Math.max(5, 2 + summaryHeight + (editor ? 3 : listHeight)));

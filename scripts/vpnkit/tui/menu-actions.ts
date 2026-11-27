@@ -206,7 +206,7 @@ export function menuItems(state: AppState): MenuItem[] {
       row("toggle", "m", "Режим", () => void state.perform("toggle-mode"), state.status?.routing_mode === "smart" ? "умный" : state.status?.routing_mode === "strict" ? "строгий" : "неизвестно"),
       row("open", "c", "Профили и источники", () => state.open(state.nativeInstalled() && state.status?.subscription === "configured" ? "profiles" : "subscription")),
       row("open", "e", "Сайт для проверки", () => state.open("target"), displayCheckAddress(state.target)),
-      ...(state.nativeInstalled() ? [row(state.updateInfo?.available && !state.updatedTo ? "action" : "open", "u",
+      ...(state.nativeInstalled() ? [row(state.updateInfo?.available && !state.updatedTo ? "open" : "action", "u",
         state.updatedTo ? `Обновлено до ${state.updatedTo}` : state.updateInfo?.available ? `Обновление: ${state.updateInfo.installed} → ${state.updateInfo.latest} · установить` : state.updateInfo ? `Версия ${state.updateInfo.installed} · последняя · проверить снова` : "Проверить обновления",
         () => { if (state.updateInfo?.available && !state.updatedTo) state.confirmUpdate(); else void state.perform("update/check"); })] : []),
       ...(state.updatedTo ? [{ key: "R", label: "Перезапустить интерфейс", run: () => state.relaunch() }] : []),
