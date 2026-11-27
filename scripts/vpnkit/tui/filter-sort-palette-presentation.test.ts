@@ -3,6 +3,19 @@ import { createTestRenderer } from "@opentui/core/testing";
 import { App } from "./app";
 import { FakeBackend } from "./app-test-fixtures";
 
+test("dismissing cross-screen search still activates the original settings row", async () => {
+  const terminal = await createTestRenderer({ width: 80, height: 24 });
+  const backend = new FakeBackend(); backend.status = { ...backend.status, runtime: "native", installed: true };
+  const app = new App(terminal.renderer, backend), input = terminal.mockInput;
+  try {
+    await app.perform("status"); app.autostart = { gateway: true, connect: false };
+    input.pressKey("i"); input.pressArrow("down"); input.pressArrow("down");
+    input.pressKey(":"); await input.typeText("ping"); input.pressEscape(); await Bun.sleep(50); input.pressEscape(); await Bun.sleep(50);
+    input.pressEnter(); expect(backend.calls.at(-1)?.action).toBe("toggle-mode");
+    expect(backend.calls.some(call => call.action === "autostart/set")).toBe(false);
+  } finally { await app.close(); }
+});
+
 test("shortcut sections, search focus and selection share one keyboard window", async () => {
   const terminal = await createTestRenderer({ width: 80, height: 24 });
   const app = new App(terminal.renderer, new FakeBackend());

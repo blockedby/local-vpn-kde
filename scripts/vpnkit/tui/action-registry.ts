@@ -88,7 +88,8 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
   }
   const bindList = (items: ActionDefinition[]) => {
     // Items can shrink under the cursor (a failed load, an update offer going away).
-    if (state.selected >= items.length) state.selected = Math.max(0, items.length - 1);
+    const selected = Math.min(state.selected, Math.max(0, items.length - 1));
+    if (!underlying) state.selected = selected;
     const move = (delta: number) => { state.selected = (state.selected + items.length + delta) % items.length; state.paint(); };
     const edge = items.length <= 1 ? "Нет другого пункта." : undefined;
     add("menu:previous", ["up"], "Выбор", "menu", () => move(-1), edge);
@@ -97,7 +98,7 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
       for (const [key, delta] of [["left", -1], ["right", 1], ["tab", 1], ["shift+tab", -1]] as const)
         add(`confirmation:${key}`, [key], "Выбор", "confirmation", () => move(delta), edge, "none", true);
     }
-    const current = items[state.selected];
+    const current = items[selected];
     const owner = current && (actions.find(action => action.keys.includes(current.key)) ?? current);
     const activate = () => { current?.run(); state.paint(); };
     const reason = current ? current.unavailableReason ?? owner?.unavailableReason : "Нет выбранного пункта.";
