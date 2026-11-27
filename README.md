@@ -4,7 +4,7 @@
 
 **Ваши серверы. Ваши подписки. Один терминальный интерфейс.**
 
-VPN для Linux и KDE · NetworkManager · Native и Docker
+VPN для Linux и KDE · NetworkManager
 
 **Русский** · [English](README.en.md)
 
@@ -30,7 +30,7 @@ VPN для Linux и KDE · NetworkManager · Native и Docker
 
 ## Установка
 
-### Native · Arch / CachyOS или Debian 13, x86_64
+### Arch / CachyOS или Debian 13, x86_64
 
 Скачайте пакет из [последнего выпуска](https://github.com/blockedby/local-vpn-kde/releases/latest) вместе с `SHA256SUMS`, проверьте и установите:
 
@@ -41,20 +41,9 @@ sudo apt install ./local-vpn-kde-native_*_amd64.deb          # Debian 13
 kvpn
 ```
 
-Интерфейс запускается обычным пользователем. Docker на этом компьютере не нужен. Установка не подключает VPN.
+Интерфейс запускается обычным пользователем. Установка не подключает VPN.
 
 Без пакетного менеджера: [переносимый bundle](docs/portable-installer.md).
-
-### Docker · Linux x86-64 с KDE
-
-Ubuntu 24.04+, Debian 13+, Fedora, Arch / CachyOS. Выполняйте без sudo — установщик запросит права сам:
-
-```bash
-git clone https://github.com/blockedby/local-vpn-kde.git
-cd local-vpn-kde
-./install.sh
-./run.sh
-```
 
 ## Начать пользоваться
 

@@ -4,7 +4,7 @@
 
 **Your servers. Your subscriptions. One terminal interface.**
 
-VPN for Linux and KDE · NetworkManager · Native and Docker
+VPN for Linux and KDE · NetworkManager
 
 [Русский](README.md) · **English**
 
@@ -30,7 +30,7 @@ Keep your own VPS alongside multiple subscriptions. Selecting a profile changes 
 
 ## Install
 
-### Native · Arch / CachyOS or Debian 13, x86_64
+### Arch / CachyOS or Debian 13, x86_64
 
 Download the package from the [latest release](https://github.com/blockedby/local-vpn-kde/releases/latest) together with `SHA256SUMS`, verify and install it:
 
@@ -41,20 +41,9 @@ sudo apt install ./local-vpn-kde-native_*_amd64.deb          # Debian 13
 kvpn
 ```
 
-Launch the interface as your regular user. No Docker is needed on this computer. Installation does not connect the VPN.
+Launch the interface as your regular user. Installation does not connect the VPN.
 
 Without a package manager: [portable bundle](docs/portable-installer.md).
-
-### Docker · Linux x86-64 with KDE
-
-Ubuntu 24.04+, Debian 13+, Fedora, Arch / CachyOS. Run without sudo — the installer requests privileges when needed:
-
-```bash
-git clone https://github.com/blockedby/local-vpn-kde.git
-cd local-vpn-kde
-./install.sh
-./run.sh
-```
 
 ## Get connected
 
