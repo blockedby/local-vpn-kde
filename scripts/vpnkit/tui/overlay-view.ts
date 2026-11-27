@@ -15,10 +15,8 @@ export class OverlayView {
   private dialogEditor: EditorView;
   private backdrop: BoxRenderable;
   private box: BoxRenderable;
-  private text: TextRenderable;
-  private paletteBox: BoxRenderable;
-  private paletteInput: InputRenderable;
-  private paletteRows: TextRenderable[] = [];
+  private search: InputRenderable;
+  private keysRows: TextRenderable[] = [];
   private rowBackdrop: BoxRenderable;
   private rowMenu: BoxRenderable;
   private rowHeader: TextRenderable;
@@ -56,46 +54,66 @@ export class OverlayView {
       state.paint();
     }, "overlay");
     this.dialogEditor = new EditorView(renderer, this.dialog, value => this.current?.edit(value));
-    this.backdrop = new BoxRenderable(renderer, { position: "absolute", top: 2, left: 0, width: "100%", height: 1, zIndex: 99, backgroundColor: p.base, visible: false });
+    this.backdrop = new BoxRenderable(renderer, { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", zIndex: 99, visible: false });
     root.add(this.backdrop);
-    this.box = new BoxRenderable(renderer, { position: "absolute", top: 2, left: 2, width: 54, height: 10, zIndex: 100, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, title: " Помощь · ↑↓ прокрутка · Esc закрыть ", overflow: "hidden", visible: false });
-    this.text = new TextRenderable(renderer, { content: "", fg: p.text, width: "100%", height: "100%" });
-    this.box.add(this.text); root.add(this.box);
-    this.paletteBox = new BoxRenderable(renderer, { position: "absolute", top: 2, left: 2, width: 54, height: 12, zIndex: 110, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, title: " Команды · ↑↓ выбор · Esc закрыть ", overflow: "hidden", visible: false });
-    this.paletteInput = new InputRenderable(renderer, { width: "100%", maxLength: 256, placeholder: "Название или клавиша", backgroundColor: p.panel, textColor: p.text, focusedBackgroundColor: p.edge });
-    this.paletteBox.add(this.paletteInput);
-    this.paletteInput.on("input", () => { if (!this.current?.paletteOpen) return; this.current.paletteQuery = this.paletteInput.value; this.current.paletteIndex = 0; this.current.paintPalette(); });
-    for (let i = 0; i < 24; i++) { const row = new TextRenderable(renderer, { content: "", height: 1, flexShrink: 0 }); this.paletteBox.add(row); this.paletteRows.push(row); }
-    root.add(this.paletteBox);
+    this.box = new BoxRenderable(renderer, { position: "absolute", zIndex: 100, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, title: " Клавиши ", bottomTitleAlignment: "left", overflow: "hidden", flexDirection: "column", visible: false });
+    root.add(this.box);
+    this.search = new InputRenderable(renderer, { width: "100%", flexShrink: 0, maxLength: 256, placeholder: "действие или клавиша", backgroundColor: p.panel, textColor: p.text, focusedBackgroundColor: p.edge,
+      onMouseDown: () => { if (this.current?.helpOpen) { this.current.searchFocused = true; this.current.paint(); } } });
+    this.search.on("input", () => { if (!this.current?.helpOpen || this.current.paletteQuery === this.search.value) return; const flipped = !this.current.paletteQuery !== !this.search.value; this.current.paletteQuery = this.search.value; this.current.paletteIndex = 0; if (flipped) this.current.paint(); else this.current.paintPalette(); });
+    this.box.add(this.search);
+    for (let i = 0; i < 24; i++) { const row = new TextRenderable(renderer, { content: "", height: 1, flexShrink: 0 }); this.box.add(row); this.keysRows.push(row); }
   }
   private current?: AppState;
   private listOffset = 0;
+  private keysOffset = 0;
   private taskRows: number[] = [];
   updatePalette(state: AppState) {
     this.current = state;
-    this.paletteBox.visible = state.paletteOpen;
-    if (!state.paletteOpen) { this.paletteInput.blur(); return; }
-    const width = Math.min(76, this.renderer.terminalWidth - 4), height = Math.min(18, this.renderer.terminalHeight - 4);
-    this.paletteBox.width = width; this.paletteBox.height = height;
-    this.paletteBox.left = Math.floor((this.renderer.terminalWidth - width) / 2); this.paletteBox.top = Math.floor((this.renderer.terminalHeight - height) / 2);
-    if (this.paletteInput.value !== state.paletteQuery) this.paletteInput.value = state.paletteQuery;
-    this.paletteInput.focus();
-    const entries = state.filteredPaletteActions(), count = height - 3;
-    const offset = Math.max(0, state.paletteIndex - count + 1);
-    this.paletteRows.forEach((row, i) => {
-      const entry = entries[offset + i]; row.visible = i < count && !!entry;
-      if (!entry) return;
-      const action = entry.action;
-      const server = ["servers:select", "servers:single-speed", "servers:details"].includes(action.id) ? state.servers.find(s => s.server_id === state.serverID)?.display_name : undefined;
-      const key: Record<string, string> = { "shift+t": "T", "ctrl+c": "Ctrl+C", "ctrl+p": "Ctrl+P", "shift+tab": "Shift+Tab", tab: "Tab", return: "Enter", escape: "Esc", up: "↑", down: "↓", pageup: "PgUp", pagedown: "PgDn", home: "Home", end: "End" };
-      row.content = cell(`${offset + i === state.paletteIndex ? "›" : " "} ${action.label}${server ? ` · ${server}` : ""}  [${key[action.key] ?? action.key}]${action.available ? "" : ` · ${action.unavailableReason ?? "недоступно"}`}`, width - 2).trimEnd();
-      row.fg = action.available ? (offset + i === state.paletteIndex ? p.accent : p.text) : p.muted;
+    const visible = state.helpOpen && this.renderer.width >= MIN_COLS && this.renderer.height >= MIN_ROWS;
+    this.box.visible = this.backdrop.visible = visible;
+    if (!visible) { this.search.blur(); return; }
+    const entries = state.filteredPaletteActions();
+    state.paletteIndex = Math.max(0, Math.min(state.paletteIndex, entries.length - 1));
+    // One list: a section header before each change of section, then its rows.
+    type Line = { header: string } | { index: number };
+    const lines: Line[] = [];
+    entries.forEach((entry, index) => { if (index && entries[index - 1]!.section !== entry.section) lines.push({ header: entry.section }); lines.push({ index }); });
+    const keyWidth = Math.min(8, Math.max(1, ...entries.map(({ action }) => Bun.stringWidth(action.keyHints.join("/") || "—"))));
+    const searching = state.searchFocused || !!state.paletteQuery;
+    // Fixed size while open, so typing a query does not make the window jump.
+    const width = Math.min(56, this.renderer.terminalWidth - 4);
+    const height = Math.min(this.keysRows.length, state.keysPageSize()) + 2;
+    const count = height - 2 - (searching ? 1 : 0);
+    this.box.width = width; this.box.height = height;
+    this.box.left = Math.floor((this.renderer.terminalWidth - width) / 2); this.box.top = Math.max(1, Math.floor((this.renderer.terminalHeight - height - 1) / 2));
+    const here = state.keysSectionName();
+    this.box.title = cell(` Клавиши · ${state.paletteQuery ? "поиск" : here} `, width - 14).trimEnd() + (searching ? " " : " · / поиск ");
+    this.search.visible = searching;
+    if (this.search.value !== state.paletteQuery) this.search.value = state.paletteQuery;
+    if (state.searchFocused) this.search.focus(); else this.search.blur();
+    const at = lines.findIndex(line => "index" in line && line.index === state.paletteIndex);
+    if (at >= 0 && at < this.keysOffset) this.keysOffset = at > 0 && "header" in lines[at - 1]! ? at - 1 : at;
+    if (at >= this.keysOffset + count) this.keysOffset = at - count + 1;
+    const top = this.keysOffset = Math.max(0, Math.min(this.keysOffset, lines.length - count));
+    this.keysRows.forEach((row, i) => {
+      const line = lines[top + i]; row.visible = i < count;
+      if (i >= count) return;
+      if (!entries.length) { row.content = i ? "" : "  Ничего не найдено"; row.fg = p.muted; return; }
+      if (!line) { row.content = ""; return; }
+      if ("header" in line) { const label = `── ${line.header} `; row.content = label + "─".repeat(Math.max(0, width - 2 - Bun.stringWidth(label))); row.fg = p.muted; return; }
+      const { action } = entries[line.index]!, selected = line.index === state.paletteIndex;
+      const keys = action.keyHints.join("/") || "—";
+      row.content = cell(`${selected ? "›" : " "} ${Bun.stringWidth(keys) > keyWidth ? keys : cell(keys, keyWidth)}  ${safeText(action.label)}`, width - 2).trimEnd();
+      row.fg = selected ? p.accent : action.available ? p.text : p.muted;
     });
+    const chosen = entries[state.paletteIndex]?.action;
+    this.box.bottomTitle = chosen && !chosen.available ? cell(` ${safeText(chosen.unavailableReason ?? "Недоступно.")} `, width - 4).trimEnd() + " " : undefined;
   }
   update(state: AppState) {
     this.current = state;
     this.updatePalette(state);
-    const rowVisible = state.serverMenu && !state.helpOpen && !state.paletteOpen && this.renderer.terminalWidth >= MIN_COLS && this.renderer.terminalHeight >= MIN_ROWS;
+    const rowVisible = state.serverMenu && !state.helpOpen && this.renderer.terminalWidth >= MIN_COLS && this.renderer.terminalHeight >= MIN_ROWS;
     this.rowBackdrop.visible = rowVisible; this.rowMenu.visible = rowVisible;
     if (rowVisible) {
       const width = Math.min(50, this.renderer.terminalWidth - 4);
@@ -155,38 +173,5 @@ export class OverlayView {
       this.listOffset = Math.max(0, Math.min(Math.max(0, displayItems.length - availableRows), selected - availableRows + 1));
       this.dialogMenu.update(displayItems.slice(this.listOffset, this.listOffset + availableRows), editor, selected - this.listOffset, true, state.screen === "tasks");
     }
-    this.box.visible = state.helpOpen;
-    this.backdrop.visible = state.helpOpen;
-    if (!state.helpOpen) return;
-    state.helpOpen = false;
-    const groups = state.groupedActions();
-    state.helpOpen = true;
-    const width = Math.min(76, this.renderer.terminalWidth - 4), height = Math.min(this.renderer.terminalHeight - 4, 30);
-    this.backdrop.height = Math.max(1, this.renderer.terminalHeight - 3);
-    this.box.width = width; this.box.height = height;
-    this.box.left = Math.floor((this.renderer.terminalWidth - width) / 2);
-    this.box.top = Math.floor((this.renderer.terminalHeight - height) / 2);
-    const names: Record<string,string> = { global: "Общие", home: "Главная", "server-table": "Серверы", menu: "Выбор", editor: "Редактор", confirmation: "Подтверждение", confirm: "Подтверждение", "profile-remove": "Подтверждение", "cancel-confirm": "Подтверждение", "retry-confirm": "Подтверждение", tasks: "Задачи", recovery: "Восстановление", details: "Сервер", servers: "Серверы", profiles: "Профили", diagnostics: "Диагностика", settings: "Настройки", autostart: "Автозапуск" };
-    const wrap = (line: string) => {
-      const result: string[] = []; let current = "";
-      for (const word of line.split(/\s+/)) {
-        const next = current ? `${current} ${word}` : word;
-        if (Bun.stringWidth(next) > width - 4 && current) { result.push(current); current = `  ${word}`; }
-        else current = next;
-      }
-      if (current) result.push(current);
-      return result;
-    };
-    const lines = groups.flatMap(group => {
-      const merged: typeof group.actions = [];
-      for (const action of group.actions) {
-        const existing = merged.find(a => a.label === action.label && a.available === action.available && a.unavailableReason === action.unavailableReason);
-        if (existing) existing.keyHints.push(...action.keyHints);
-        else merged.push({ ...action, keyHints: [...action.keyHints] });
-      }
-      return [names[group.scope] ?? group.scope, ...merged.flatMap(a => wrap(`${a.keyHints.join("/")}  ${a.label}${a.available ? "" : ` · ${a.unavailableReason ?? "недоступно"}`}`))];
-    });
-    state.helpOffset = Math.min(state.helpOffset, Math.max(0, lines.length - (height - 2)));
-    this.text.content = lines.slice(state.helpOffset, state.helpOffset + height - 2).map(line => cell(line, width - 2).trimEnd()).join("\n");
   }
 }

@@ -83,22 +83,32 @@ test("changing sort during a pass preserves frozen order until completion", asyn
 
 test("palette filters actions, ignores text hotkeys, and preserves confirmations and availability", async () => {
   const { state, backend } = fixture(); state.status!.networkmanager_active = "yes";
-  state.onKey(key(":")); expect(state.paletteOpen).toBe(true);
+  state.onKey(key(":")); expect(state.helpOpen).toBe(true);
   expect(new Set(state.paletteActions().map(v => v.action.id)).size).toBe(state.paletteActions().length);
   const ids = new Set(state.paletteActions().map(v => v.action.id));
-  state.paletteOpen = false;
+  state.helpOpen = false;
   for (const screen of ["servers", "profiles", "diagnostics", "settings", "autostart", "tasks", "details"] as const) {
     state.screen = screen;
     for (const action of state.actions()) if (!/^(help:|editor:|filter:)/.test(action.id) && action.id !== "global:palette") expect(ids.has(action.id)).toBe(true);
   }
-  state.screen = "servers"; state.paletteOpen = true;
-  state.onKey(key("q")); expect(state.paletteOpen).toBe(true); expect(state.closing).toBe(false);
+  state.screen = "servers"; state.openKeys(true);
+  state.onKey(key("q")); expect(state.helpOpen).toBe(true); expect(state.closing).toBe(false);
   state.paletteQuery = "отключить vpn"; state.paletteIndex = 0; state.onKey(key("return"));
   expect(String(state.screen)).toBe("confirm"); expect(backend.calls.some(call => call.action === "disconnect")).toBe(false);
   state.open("servers", false); state.onKey(key(":")); state.paletteQuery = "отменить";
   const index = state.filteredPaletteActions().findIndex(v => !v.action.available); expect(index).toBeGreaterThanOrEqual(0);
-  state.paletteIndex = index; state.onKey(key("return")); expect(state.paletteOpen).toBe(true);
-  state.paletteOpen = false; await state.close();
+  const reason = state.filteredPaletteActions()[index]!.action.unavailableReason!;
+  state.paletteIndex = index; state.onKey(key("return")); expect(state.helpOpen).toBe(true); expect(state.notice).toBe(reason);
+  state.helpOpen = false; await state.close();
+});
+
+test("Enter on an exact alias runs the searched shortcut, not the first key of the row", async () => {
+  const { state } = fixture();
+  try {
+    state.openKeys(true); state.paletteQuery = "Shift+Tab";
+    expect(state.filteredPaletteActions().map(row => row.action.keyHints)).toEqual([["Tab", "Shift+Tab"]]);
+    state.onKey(key("return")); expect(state.helpOpen).toBe(false); expect(state.screen).toBe("settings");
+  } finally { await state.close(); }
 });
 
 test("palette autostart toggle does not start a conflicting screen read", async () => {
@@ -107,7 +117,7 @@ test("palette autostart toggle does not start a conflicting screen read", async 
   let finish!: (r: Reply) => void;
   backend.hold = { action: "autostart/read", promise: new Promise(resolve => { finish = resolve; }) };
   try {
-    state.paletteOpen = true; state.paletteQuery = "";
+    state.openKeys(true); state.paletteQuery = state.filteredPaletteActions(true).find(entry => entry.action.id === "autostart:g")!.action.label;
     state.paletteIndex = state.filteredPaletteActions().findIndex(entry => entry.action.id === "autostart:g");
     expect(state.paletteIndex).toBeGreaterThanOrEqual(0);
     state.runPaletteAction(); await settle();
@@ -142,11 +152,11 @@ test("every available palette action avoids conflicts with reads it starts", asy
     return { state, pending };
   }
   const seed = prepared();
-  const ids = seed.state.paletteActions().filter(entry => entry.action.available).map(entry => entry.action.id);
+  const ids = seed.state.filteredPaletteActions(true).filter(entry => entry.action.available).map(entry => [entry.action.id, entry.action.label] as const);
   await seed.state.close();
-  for (const id of ids) {
+  for (const [id, label] of ids) {
     const { state, pending } = prepared();
-    state.paletteOpen = true;
+    state.openKeys(true); state.paletteQuery = label;
     state.paletteIndex = state.filteredPaletteActions().findIndex(entry => entry.action.id === id);
     try {
       expect(state.paletteIndex).toBeGreaterThanOrEqual(0);

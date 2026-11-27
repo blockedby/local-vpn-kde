@@ -7,7 +7,7 @@ import { serverViewport, sortedServers, type ServerSort } from "./catalog-order"
 import { safeText } from "./formatting";
 import { names } from "./action-labels";
 import { dispatchKey } from "./key-dispatch";
-import { actionRegistry, groupedActions } from "./action-registry";
+import { actionRegistry, groupedActions, serverMenuActions } from "./action-registry";
 import { perform, updateCatalog } from "./request-execution";
 import { testHomeSpeed, runBatch, cancelTask, cancel, retryCheck, reconnectBackend } from "./measurements";
 import { defineMenuActions, menuItems, type ActionDefinition } from "./menu-actions";
@@ -77,7 +77,6 @@ export class AppState {
   overlayBase: "home" | AppState["tab"] = "home";
   tab: "servers" | "profiles" | "diagnostics" | "settings" = "servers";
   helpOpen = false;
-  helpOffset = 0;
   detailsOffset = 0;
   measurementTimes = new Map<string, number>();
   speedSamples = new Map<string, number[]>();
@@ -259,36 +258,75 @@ export class AppState {
   filter = "";
   filterEditing = false;
   filterAnchor?: string;
-  paletteOpen = false;
+  searchFocused = false;
   paletteQuery = "";
   paletteIndex = 0;
-  paletteActions() {
-    const screen = this.screen, tab = this.tab;
-    const open = this.paletteOpen; this.paletteOpen = false;
-    const result: { action: ActionDefinition; screen: Screen }[] = [];
+  openKeys(search: boolean) {
+    this.helpOpen = true; this.searchFocused = search;
+    this.paletteQuery = ""; this.paletteIndex = 0; this.paint();
+  }
+  /** Rows the shortcuts list can show, including section headers. */
+  keysPageSize() { return Math.max(1, Math.min(18, this.viewport().terminalHeight - 7)); }
+  paletteActions(all = true) {
+    const screen = this.screen, menu = this.serverMenu;
+    const result: { action: ActionDefinition & { keyHints: string[] }; screen: Screen }[] = [];
     const seen = new Set<string>();
-    for (const target of [tab, "servers", "profiles", "diagnostics", "settings", "autostart", "tasks", "details", ...(this.recovery || this.backendOffline ? ["recovery" as const] : [])] as Screen[]) {
-      this.screen = target;
-      for (const action of actionRegistry(this)) {
-        if (seen.has(action.id) || /^(help:|editor:|filter:)/.test(action.id) || action.id === "global:palette") continue;
-        if (target === "tasks" && action.id.startsWith("task:cancel:") && Number(action.key) > [...this.tasks.values()].filter(task => task.action !== "status").length + this.queue.length) continue;
-        const labels: Record<string, string> = { "global:back": "Вернуться или закрыть уведомление", "global:quit-control": "Выйти из приложения", "global:quit": "Выйти из приложения", "global:tab": "Следующая вкладка", "global:shift+tab": "Предыдущая вкладка", "menu:previous": "Предыдущий пункт", "menu:next": "Следующий пункт", "menu:select": "Выбрать пункт меню", "servers:up": "Предыдущий сервер", "servers:down": "Следующий сервер", "servers:pageup": "Предыдущая страница серверов", "servers:pagedown": "Следующая страница серверов", "servers:home": "Первый сервер", "servers:end": "Последний сервер" };
-        seen.add(action.id); result.push({ action: { ...action, label: action.id.startsWith("task:cancel:") ? `Отменить: ${action.label}` : labels[action.id] ?? action.label }, screen: target });
+    const screens: Screen[] = all ? ["home", "servers", "profiles", "diagnostics", "settings", "autostart", "tasks", "details"] : [];
+    if (all && (this.recovery || this.backendOffline)) screens.push("recovery");
+    try {
+      for (const [index, target] of [screen, ...screens.filter(target => menu || target !== screen)].entries()) {
+        this.screen = target; this.serverMenu = !index && menu;
+        for (const group of groupedActions(this, true)) for (const action of group.actions) {
+          if (seen.has(action.id)) continue;
+          if (target === "tasks" && action.id.startsWith("task:cancel:") && Number(action.key) > [...this.tasks.values()].filter(task => task.action !== "status").length + this.queue.length) continue;
+          const outsideDialog = index > 0 && (menu || isOverlay(screen));
+          seen.add(action.id); result.push({ action: outsideDialog ? { ...action, available: false, unavailableReason: "Сначала закройте текущее окно." } : action, screen: target });
+        }
+        // Row-menu actions (rename, single ping) have no key of their own but should be searchable.
+        if (target === "servers" && !this.serverMenu) for (const action of serverMenuActions(this)) {
+          if (seen.has(action.id)) continue;
+          const outsideDialog = index > 0 && (menu || isOverlay(screen));
+          seen.add(action.id); result.push({ action: { ...action, keyHints: [], ...(outsideDialog ? { available: false, unavailableReason: "Сначала закройте текущее окно." } : {}) }, screen: target });
+        }
       }
-    }
-    this.screen = screen; this.tab = tab; this.paletteOpen = open;
+    } finally { this.screen = screen; this.serverMenu = menu; }
     return result;
   }
-  filteredPaletteActions() {
+  keysSectionName(screen: Screen = this.screen) {
+    return ({ home: "Главная", servers: "Серверы", profiles: "Профили", diagnostics: "Диагностика", settings: "Настройки", autostart: "Автозапуск", tasks: "Задачи", details: "Сервер", recovery: "Восстановление" } as Partial<Record<Screen, string>>)[screen] ?? "Это окно";
+  }
+  /** Without a query: this screen, then global keys. With a query: every screen. */
+  filteredPaletteActions(all?: boolean) {
     const query = this.paletteQuery.trim().toLocaleLowerCase("ru");
-    return this.paletteActions().filter(({action}) => `${action.label} ${action.keys.join(" ")}`.toLocaleLowerCase("ru").includes(query));
+    const here = this.keysSectionName();
+    const merged: (ReturnType<AppState["paletteActions"]>[number] & { section: string })[] = [];
+    const navigation = new Set(["up", "down", "left", "right", "pageup", "pagedown", "home", "end"]);
+    for (const entry of this.paletteActions(all ?? !!query)) {
+      const action = entry.action;
+      // Arrows and paging are in the footer; listing them only pushes real actions out of view.
+      if (action.keys.length && action.keys.every(key => navigation.has(key))) continue;
+      const section = action.scope === "global" ? "Общие" : entry.screen === this.screen ? here : this.keysSectionName(entry.screen);
+      const alias = merged.find(row => row.section === section && row.screen === entry.screen && row.action.label === action.label && row.action.unavailableReason === action.unavailableReason);
+      if (alias) {
+        const exactKey = [...action.keys, ...action.keyHints].some(key => key.toLocaleLowerCase("ru") === query);
+        alias.action = { ...(exactKey ? action : alias.action), keys: [...new Set([...alias.action.keys, ...action.keys])], keyHints: [...new Set([...alias.action.keyHints, ...action.keyHints])] };
+      } else merged.push({ ...entry, section });
+    }
+    const rank = (section: string) => section === here ? 0 : section === "Общие" ? 1 : 2;
+    return merged.filter(({action}) => `${action.label} ${action.keys.join(" ")} ${action.keyHints.join(" ")}`.toLocaleLowerCase("ru").includes(query))
+      .map((entry, order) => ({ entry, order })).sort((a, b) => rank(a.entry.section) - rank(b.entry.section) || a.order - b.order).map(({ entry }) => entry);
   }
   runPaletteAction() {
     const entry = this.filteredPaletteActions()[this.paletteIndex];
-    if (!entry?.action.available) return;
-    this.paletteOpen = false;
-    if (entry.action.scope !== "global" && this.screen !== entry.screen) this.open(entry.screen, false, false);
-    entry.action.run(); this.paint();
+    if (!entry) return;
+    if (!entry.action.available) { this.notify(entry.action.unavailableReason ?? "Команда недоступна.", true); return; }
+    this.helpOpen = false;
+    if (this.screen !== entry.screen) this.open(entry.screen, false, false);
+    const action = this.groupedActions().flatMap(group => group.actions).find(action => action.id === entry.action.id)
+      ?? (this.screen === "servers" ? serverMenuActions(this).find(action => action.id === entry.action.id) : undefined);
+    if (action?.available) action.run();
+    else this.notify(action?.unavailableReason ?? "Команда недоступна.", true);
+    this.paint();
   }
   target = "https://www.youtube.com/";
   editorRevision = 0;

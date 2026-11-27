@@ -4,8 +4,7 @@
 
 **Your servers. Your subscriptions. One terminal interface.**
 
-VPN for Linux and KDE, integrated with NetworkManager.<br>
-Run natively without Docker, or use a dedicated Docker gateway.
+VPN for Linux and KDE, integrated with NetworkManager.
 
 [Русский](../README.md) · **English**
 
@@ -31,18 +30,9 @@ In the native runtime, choosing a profile changes the displayed server list. App
 
 ## Install
 
-Choose your runtime:
+The app targets Linux with KDE and NetworkManager (Arch Linux / CachyOS, x86_64). Installation requires internet access and administrator privileges.
 
-| | Native | Docker |
-| :--- | :--- | :--- |
-| **System** | Arch Linux / CachyOS, x86_64 | Ubuntu 24.04+, Debian 13+, Fedora, Arch / CachyOS, x86-64 |
-| **Gateway** | System service, no Docker | Docker container |
-| **Installation** | Prebuilt local bundle | Build from the repository |
-| **Launch** | `kvpn` | `./run.sh` |
-
-Both options target Linux with KDE and NetworkManager. Installation requires internet access and administrator privileges.
-
-### Native · one sudo command
+### One sudo command
 
 Your trusted bundle directory must contain `install-native.sh`, the executable `vpnkit-portable` and its checksum file. Verify the checksum, then install **from your regular desktop account**:
 
@@ -53,7 +43,7 @@ sudo bash ./install-native.sh
 
 The installer adds missing system dependencies, installs the application and sets up user permissions. If configuration already exists, it prepares the NetworkManager profile. On a fresh installation, the profile is created after server setup, on first connection.
 
-**Installation does not start or connect the VPN.** The target computer needs no Go, Bun or Docker. System components — NetworkManager, its OpenVPN plugin, OpenVPN, systemd, polkit and networking utilities — are installed through pacman.
+**Installation does not start or connect the VPN.** The target computer needs no Go or Bun. System components — NetworkManager, its OpenVPN plugin, OpenVPN, systemd, polkit and networking utilities — are installed through pacman.
 
 Launch the interface **without sudo**:
 
@@ -62,19 +52,6 @@ kvpn
 ```
 
 > Native bundles are currently built locally; these instructions do not assume a published release download. See [native installer](portable-installer.md) for bundle contents and build commands.
-
-### Docker · from source
-
-Install Git through your package manager if needed. Then run **without sudo**:
-
-```bash
-git clone https://github.com/blockedby/local-vpn-kde.git
-cd local-vpn-kde
-./install.sh
-./run.sh
-```
-
-The installer requests administrator access when needed, installs build and runtime dependencies including Go, Bun, Docker Compose and OpenVPN, and prepares the KDE profile.
 
 ## First connection
 
@@ -104,11 +81,13 @@ The interface opens on a home screen with Connection («Подключение»
 | `T` / `b` | Test the speed of the row under the cursor / offer the fastest measured shown server for confirmation |
 | `o` / `[` / `]` / `\` | Cycle sort (name, ping, speed, site, country) / choose column / reverse direction |
 | `l` | Details for the row under the cursor |
-| `:` / `Ctrl+P` | Search commands |
+| `:` / `Ctrl+P` | Search all actions in the shortcuts table |
 | `j` / `k` | Activity / cancel operation |
 | `X` | Remove the active profile after confirmation |
-| `z` | Stop the service or Docker and the VPN after confirmation |
-| `?` / `q` | Help / exit the interface |
+| `z` | Stop the service and the VPN after confirmation |
+| `?` / `q` | Open keyboard shortcuts / exit the interface |
+
+The shortcuts window lists the current screen's actions first, then a «Общие» (global) section. `/` searches every screen; `Esc` clears the search first, then closes the window. Select a row with `↑` / `↓` and press `Enter` to run it; when an action is unavailable, the reason appears on the bottom border.
 
 The status line names the selected server and the footer shows available keys. `a` opens autostart; it does not run ping. Checks can overlap or wait in a queue; `j` shows running, queued and finished operations. Available actions and shortcuts depend on the section and service state.
 
@@ -118,7 +97,7 @@ To rename a server, press `Enter` on its row and choose Rename («Переиме
 
 Country lookup is offline, using the embedded [server-country](https://github.com/sapics/ip-location-db) dataset (public domain, PDDL 1.0); no server address is sent to a country lookup service. A known IP's code is available immediately; for a hostname it may appear after a successful ping, check or speed measurement. TCP ping uses the connected address; a proxy lookup with ambiguous or unknown addresses supplies no new code, and a previously determined code may remain. The embedded database is a snapshot, so a code can become outdated.
 
-Autostart settings apply at the next KDE login. You can start only the gateway or also connect the VPN. Disabling autostart leaves the current connection running; the TUI does not open automatically at login. Docker may also restart an already-running gateway through its container restart policy.
+Autostart settings apply at the next KDE login. You can start only the gateway or also connect the VPN. Disabling autostart leaves the current connection running; the TUI does not open automatically at login.
 
 ### When another VPN is connected
 
@@ -154,13 +133,6 @@ sudo bash ./install-native.sh
 ```
 
 Compatible application upgrades preserve the active connection. Reopen the TUI to load the new interface. The running VPN engine receives its new version when you explicitly restart the service. System dependency upgrades and migration from older packages without this support have separate limitations — see [upgrades without disconnecting](native-hot-upgrade.md).
-
-**Docker:** from the repository directory:
-
-```bash
-git pull
-./install.sh
-```
 
 ## Documentation
 

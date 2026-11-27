@@ -281,3 +281,13 @@ test("demo speed test publishes scoped samples for the details pane", async () =
   expect(samples.length).toBeGreaterThanOrEqual(2);
   await backend.close();
 });
+
+test("demo profile owns its servers and declines profile changes", async () => {
+  const backend = new DemoBackend();
+  const list = await backend.request("profiles/list");
+  const servers = await backend.request("servers/list");
+  expect(servers.catalog?.servers?.every(server => server.profile_id === list.profiles?.active)).toBe(true);
+  const removed = await backend.request("profiles/remove", JSON.stringify({ id: "demo" }));
+  expect(removed.ok).toBe(false);
+  expect((await backend.request("profiles/list")).profiles?.items).toHaveLength(1);
+});

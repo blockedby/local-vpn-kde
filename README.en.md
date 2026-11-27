@@ -4,7 +4,7 @@
 
 **Your servers. Your subscriptions. One terminal interface.**
 
-VPN for Linux and KDE · NetworkManager · Native and Docker
+VPN for Linux and KDE · NetworkManager
 
 [Русский](README.md) · **English**
 
@@ -30,7 +30,7 @@ Keep your own VPS alongside multiple subscriptions. Selecting a profile changes 
 
 ## Install
 
-### Native · Arch / CachyOS or Debian 13, x86_64
+### Arch / CachyOS or Debian 13, x86_64
 
 Download the package from the [latest release](https://github.com/blockedby/local-vpn-kde/releases/latest) together with `SHA256SUMS`, verify and install it:
 
@@ -41,20 +41,9 @@ sudo apt install ./local-vpn-kde-native_*_amd64.deb          # Debian 13
 kvpn
 ```
 
-Launch the interface as your regular user. No Docker is needed on this computer. Installation does not connect the VPN.
+Launch the interface as your regular user. Installation does not connect the VPN.
 
 Without a package manager: [portable bundle](docs/portable-installer.md).
-
-### Docker · Linux x86-64 with KDE
-
-Ubuntu 24.04+, Debian 13+, Fedora, Arch / CachyOS. Run without sudo — the installer requests privileges when needed:
-
-```bash
-git clone https://github.com/blockedby/local-vpn-kde.git
-cd local-vpn-kde
-./install.sh
-./run.sh
-```
 
 ## Get connected
 
@@ -64,7 +53,7 @@ For the first connection, press `c` and add a subscription or link. If the servi
 
 `m` — routing mode · `a` — autostart · `d` — diagnostics · `x` — disconnect VPN.
 
-The status line shows the connection, selected server and routing mode. `?` opens help, `:` or `Ctrl+P` searches commands, and `j` opens activity. Checks can overlap or wait in a queue; cancel a task from the activity panel.
+The status line shows the connection, selected server and routing mode. `?` opens the keyboard shortcuts window, `:` or `Ctrl+P` opens it with search across all screens, and `j` opens activity. Checks can overlap or wait in a queue; cancel a task from the activity panel.
 
 The table shows name, two-letter country code, ping, speed, website access and status. The Country («Страна») column is hidden when the table is narrower than 60 characters. `Enter` opens the row menu: Select server («Выбрать сервер»), Ping and site («Ping и сайт»), Server speed («Скорость сервера»), Server details («Подробности сервера») and Rename («Переименовать»). `/` filters the displayed and original names and country code, `Enter` keeps the filter and `Esc` clears it. `p` checks ping and website access and `t` checks speed and website access for the shown servers; `T` tests the speed of the row under the cursor and `b` offers the fastest measured shown server for confirmation. `o` cycles sort columns (name, ping, speed, site, country), `[` and `]` choose a column, and `\` reverses direction; clicking a header also sorts it. `l` opens server details, `i` opens settings, and `X` removes the active profile after confirmation. `a` opens autostart; it does not run ping.
 

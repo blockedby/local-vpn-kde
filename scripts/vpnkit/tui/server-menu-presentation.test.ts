@@ -11,7 +11,8 @@ for (const [width, height] of [[100, 35], [60, 16]] as const) test(`row menu fit
     Object.assign(app.servers.find(server => server.server_id === app.serverID)!, { latency_ms: 24, download_mbps: 112, ping_status: "ready" });
     terminal.mockInput.pressEnter(); await terminal.renderOnce();
     const frame = terminal.captureCharFrame();
-    for (const text of ["Tokyo-03 · 24 мс · 112.0 Мбит/с", "Выбрать сервер", "Ping и сайт", "Скорость сервера", "Подробности сервера", "Переименовать", "↑↓ действие · Enter выполнить · Esc закрыть"]) expect(frame).toContain(text);
+    for (const text of ["Tokyo-03 · 24 мс · 112.0 Мбит/с", "Выбрать сервер", "Ping и сайт", "Скорость сервера", "Подробности сервера", "Переименовать", "↑↓ действие · Enter выполнить"]) expect(frame).toContain(text);
+    expect(frame.split("\n").at(-2)?.trimEnd()).toEndWith(width === 100 ? "Esc закрыть · ? все клавиши" : "Enter выполнить · ? все клавиши");
     if (process.env.TILE_HOME_CAPTURE === "1") await Bun.write(`../../../.build/tile-home-frames/${width}x${height}-row-menu.txt`, frame + "\n");
     terminal.mockInput.pressEnter(); await terminal.renderOnce();
     const confirm = terminal.captureCharFrame(); expect(confirm).toContain("Выбрать сервер Tokyo-03?"); expect(app.selected).toBe(0);

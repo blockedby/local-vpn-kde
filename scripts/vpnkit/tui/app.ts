@@ -41,13 +41,13 @@ export class App extends AppState {
     this.root = new BoxRenderable(renderer, { width: "100%", height: "100%", paddingX: 1, flexDirection: "column", backgroundColor: p.base });
     renderer.root.add(this.root);
     this.headerView = new HeaderView(renderer, this.root);
-    this.tabView = new TabView(renderer, this.root, tab => { if (!isOverlay(this.screen) && !this.helpOpen && !this.paletteOpen && !this.filterEditing) this.open(tab); });
+    this.tabView = new TabView(renderer, this.root, tab => { if (!isOverlay(this.screen) && !this.helpOpen && !this.filterEditing) this.open(tab); });
     this.content = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, minHeight: 0, overflow: "hidden" }); this.root.add(this.content);
     this.tooSmall = new TextRenderable(renderer, { content: `Увеличьте окно до ${MIN_COLS} × ${MIN_ROWS}.`, height: 1, fg: p.amber, visible: false }); this.content.add(this.tooSmall);
-    this.homeView = new HomeView(renderer, this.content, index => { if (this.screen !== "home" || this.helpOpen || this.paletteOpen) return; this.homeIndex = index; this.activateHome(); });
+    this.homeView = new HomeView(renderer, this.content, index => { if (this.screen !== "home" || this.helpOpen) return; this.homeIndex = index; this.activateHome(); });
     this.summaryView = new SummaryView(renderer, this.content);
     this.menuView = new MenuView(renderer, this.content, index => {
-      if (isOverlay(this.screen) || this.helpOpen || this.paletteOpen) return;
+      if (isOverlay(this.screen) || this.helpOpen) return;
       this.selected = index;
       const item = this.items()[index];
       const action = item && this.actions().find(candidate => candidate.keys.includes(item.key));
@@ -60,7 +60,7 @@ export class App extends AppState {
     const tableArea = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, minWidth: 0, overflow: "hidden" });
     serverArea.add(tableArea);
     this.detailsView = new DetailsView(renderer, serverArea);
-    this.tableView = new ServerTableView(renderer, tableArea, index => { if (isOverlay(this.screen) || this.helpOpen || this.filterEditing || this.paletteOpen) return; const server = this.visibleServers()[index]; if (server) { this.serverID = server.server_id; if (this.filter) this.filterAnchor = this.serverID; this.syncServerViewport(); this.paint(); } }, value => this.editFilter(value), column => { if (!isOverlay(this.screen) && !this.helpOpen && !this.filterEditing && !this.paletteOpen) this.setSort(column); });
+    this.tableView = new ServerTableView(renderer, tableArea, index => { if (isOverlay(this.screen) || this.helpOpen || this.filterEditing) return; const server = this.visibleServers()[index]; if (server) { this.serverID = server.server_id; if (this.filter) this.filterAnchor = this.serverID; this.syncServerViewport(); this.paint(); } }, value => this.editFilter(value), column => { if (!isOverlay(this.screen) && !this.helpOpen && !this.filterEditing) this.setSort(column); });
     this.editorView = new EditorView(renderer, this.content, value => this.edit(value));
     this.noticeView = new NoticeView(renderer, this.root);
     this.footerView = new FooterView(renderer, this.root);
