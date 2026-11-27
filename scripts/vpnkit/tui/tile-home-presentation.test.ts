@@ -18,7 +18,7 @@ for (const [width, height] of [[100,35],[60,16]] as const) test(`home tiles fit 
     // Tiles are chosen with arrows; no letter shortcut is drawn on them.
     for (const title of ["Подключение", "Серверы", "Профили", "Диагностика", "Настройки"]) {
       const line = frame.split("\n").find(line => line.includes(title))!;
-      expect(line.slice(line.indexOf(title)).split("│")[0]).toMatch(new RegExp(`${title} *$`));
+      expect(line).not.toMatch(new RegExp(`${title} +[a-zA-Z]( |$)`));
     }
     expect(frame).toContain("←↑↓→ выбор"); expect(frame).toContain("Enter открыть"); expect(frame).toContain("? все клавиши"); expect(frame).toContain("q выход");
     expect(frame).not.toContain("private-token"); expect(frame).not.toContain("secret=hidden"); expect(frame).not.toContain("fragment");
@@ -40,7 +40,7 @@ test("connected tile: its letter shortcut still does what Enter does", async () 
   try {
     await app.perform("status"); await t.renderOnce();
     const line = t.captureCharFrame().split("\n").find(line => line.includes("Подключение"))!;
-    expect(line.split("│")[1]).toMatch(/Подключение *$/);
+    expect(line).not.toMatch(/Подключение +[a-zA-Z]( |$)/);
     t.mockInput.pressKey("x"); await Bun.sleep(40);
     const byKey = [app.screen, app.confirmation];
     t.mockInput.pressEscape(); await Bun.sleep(40); expect(app.screen).toBe("home");
@@ -57,7 +57,7 @@ test("profiles tile shows no letter", async () => {
   try {
     await app.perform("status"); await t.renderOnce();
     const line = t.captureCharFrame().split("\n").find(line => line.includes("Профили"))!;
-    expect(line.slice(line.indexOf("Профили")).split("│")[0]).toMatch(/Профили *$/);
+    expect(line).not.toMatch(/Профили +[a-zA-Z]( |$)/);
   } finally { await app.close(); }
 });
 

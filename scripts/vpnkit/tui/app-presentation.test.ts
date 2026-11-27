@@ -173,10 +173,10 @@ test("presentation: installed native separates service startup, connection, disc
     t.mockInput.pressKey("x"); await settle();
     t.mockInput.pressKey("n"); await settle();
     t.mockInput.pressKey("x"); t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Native-служба работает");
+    expect(t.captureCharFrame()).toContain("Сервис работает");
     t.mockInput.pressKey("z"); await settle();
     t.mockInput.pressKey("y"); await settle(); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Native-служба и VPN остановлены");
+    expect(t.captureCharFrame()).toContain("Сервис и VPN остановлены");
   } finally { await app.close(); }
 });
 

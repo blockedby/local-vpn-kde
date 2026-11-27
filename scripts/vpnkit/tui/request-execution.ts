@@ -219,12 +219,12 @@ export async function perform(
             ? "Сохранено. Настройка применяется при входе в графическую сессию."
             : "Сохранено. Настройка применяется при следующем входе в KDE.",
           "backend/start": state.nativeMode()
-            ? "Native-служба готова. Доступны VPN и автозапуск; серверы пока не подключены."
+            ? "Сервис запущен. Можно проверять серверы и подключать VPN."
             : "Docker готов. Можно проверять серверы.",
           start: "",
-          disconnect: state.nativeMode() ? "VPN отключён. Native-служба работает." : "VPN отключён. Docker работает.",
-          stop: state.nativeMode() ? "Native-служба и VPN остановлены." : "Docker и VPN остановлены.",
-          "servers/list": "Список загружен.",
+          disconnect: state.nativeMode() ? "VPN отключён. Сервис работает." : "VPN отключён. Docker работает.",
+          stop: state.nativeMode() ? "Сервис и VPN остановлены." : "Docker и VPN остановлены.",
+          "servers/list": "",
           "servers/refresh": "Каталог обновлён.",
           "servers/select": "Сервер выбран.",
           "servers/rename": "Имя сервера сохранено.",

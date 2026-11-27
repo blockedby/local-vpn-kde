@@ -41,8 +41,8 @@ export class MenuView {
     });
     const count = Math.min(this.rows.length, Math.max(1, available));
     const offset = Math.max(0, Math.min(lines.length - count, lines.indexOf(selected) - count + 1));
-    const keyWidth = Math.max(1, ...items.map(item => Bun.stringWidth(item.key)));
-    const bodyWidth = width - keyWidth - 4;
+    // Letter shortcuts are not drawn; rows are driven with arrows and listed in «Клавиши».
+    const bodyWidth = width - 2;
     const widestTitle = Math.max(0, ...items.map(item => item.value === undefined ? 0 : Bun.stringWidth(item.title ?? item.label)));
     const titleWidth = Math.min(bodyWidth - 11, Math.floor(bodyWidth * 0.7), widestTitle + 4);
     this.rows.forEach((row, i) => {
@@ -66,7 +66,7 @@ export class MenuView {
         body = `${head} ${leader} ${item.kind === "toggle" ? `‹ ${value.trimEnd()} ›` : `  ${value}  →`}`;
       } else if (item.kind === "open") body = `${cell(title, bodyWidth - 3)}  →`;
       else body = title;
-      label.content = new StyledText([fg(p.text)(`${line === selected ? "›" : " "} ${cell(body, bodyWidth)}`), fg(p.muted)(`  ${item.key.padStart(keyWidth)}`)]);
+      label.content = new StyledText([fg(p.text)(`${line === selected ? "›" : " "} ${cell(body, bodyWidth)}`)]);
     });
   }
 }

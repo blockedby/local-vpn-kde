@@ -19,7 +19,8 @@ export class HomeView {
     this.more = new TextRenderable(renderer, { content: "", height: 1, flexShrink: 0, fg: p.muted, visible: false });
     this.root.add(this.more);
     for (let i = 0; i < TILES; i++) {
-      const box = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, flexBasis: 0, minWidth: 0, border: true, borderStyle: "rounded", onMouseDown: e => { if (e.button === 0) activate(i); } });
+      // Filled blocks instead of box-drawing borders: terminals with extra line spacing draw `│` as a dashed line.
+      const box = new BoxRenderable(renderer, { flexDirection: "column", justifyContent: "center", flexGrow: 1, flexBasis: 0, minWidth: 0, paddingX: 1, marginRight: 1, backgroundColor: p.panel, onMouseDown: e => { if (e.button === 0) activate(i); } });
       const title = new TextRenderable(renderer, { height: 1, fg: p.text, attributes: TextAttributes.BOLD }); box.add(title);
       const lines = [0, 1, 2, 3].map(() => { const line = new TextRenderable(renderer, { height: 1, fg: p.muted }); box.add(line); return line; });
       this.tiles.push({ box, title, lines });
@@ -62,7 +63,7 @@ export class HomeView {
       ["Настройки", `Режим: ${mode} · автозапуск: ${state.autostart ? (state.autostart.connect ? "VPN" : state.autostart.gateway ? "шлюз" : "нет") : "—"}`, `Сайт: ${state.target ? displayCheckAddress(state.target) : "не задан"}`],
     ];
     // The last row may hold fewer tiles, which then grow wider.
-    const tileWidth = (i: number) => Math.floor((this.renderer.width - 2) / Math.min(cols, TILES - Math.floor(i / cols) * cols)) - 2;
+    const tileWidth = (i: number) => Math.floor((this.renderer.width - 2) / Math.min(cols, TILES - Math.floor(i / cols) * cols)) - 3;
     const width = tileWidth(LAST);
     // Preserve the redacted address and complete status when extra rows are available.
     const wrap = (text: string): string[] => {
@@ -91,7 +92,8 @@ export class HomeView {
       this.tiles.forEach((tile, i) => this.rows[Math.floor(i / cols)]!.add(tile.box));
     }
     this.tiles.forEach((tile, i) => {
-      tile.box.height = compact ? tileHeight : 5 + (Math.floor(i / cols) === Math.floor(LAST / cols) ? extra : 0); tile.box.borderColor = i === state.homeIndex ? p.accent : p.edge;
+      // One blank row under each block separates the rows of the grid.
+      tile.box.height = (compact ? tileHeight : 5 + (Math.floor(i / cols) === Math.floor(LAST / cols) ? extra : 0)) - 1; tile.box.backgroundColor = i === state.homeIndex ? p.edge : p.panel;
       // Centred tiles: the highlighted border and title colour mark the selection, so no cursor glyph.
       // Letter shortcuts are not drawn; they live in the «Клавиши» window.
       const own = tileWidth(i);

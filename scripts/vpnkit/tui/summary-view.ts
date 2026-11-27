@@ -101,7 +101,6 @@ export class SummaryView {
             ? "Подписка · загрузка сохранённого адреса…"
             : "Подписка";
     }
-    if(state.screen==="profiles") { const lines = wrapDialogLine("Выбор профиля не меняет активное VPN-подключение.", Math.max(10, this.renderer.terminalWidth - 2)); height = lines.length; this.summary.content = lines.join("\n"); }
     if (state.screen === "server-rename") { this.summary.content = "Переименовать сервер"; }
     if(state.screen==="profile-name") this.summary.content="Новый профиль · имя\nНапример: Моя VPS или Основная подписка";
     if(state.screen==="profile-source") this.summary.content=`${state.profileName} · ссылка\nHTTPS-подписка, vless://, hysteria2:// или hy2://`;

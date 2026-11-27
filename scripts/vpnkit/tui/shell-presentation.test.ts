@@ -66,7 +66,7 @@ test("shell: a narrow tall terminal stacks home tiles in one column", async () =
     app.open("home", false); app.homeIndex = 0; app.notice = ""; app.paint(); await t.renderOnce();
     const lines = t.captureCharFrame().split("\n");
     for (const title of ["Подключение", "Серверы", "Профили", "Диагностика", "Настройки"])
-      expect(lines.filter(line => line.includes(title) && line.includes("│"))).toHaveLength(1);
+      expect(lines.filter(line => line.includes(title))).toHaveLength(1);
     expect(lines.findIndex(line => line.includes("Серверы"))).toBeGreaterThan(lines.findIndex(line => line.includes("Подключение")));
     app.onKey({ name: "down", preventDefault() {} }); expect(app.homeIndex).toBe(1);
     app.onKey({ name: "right", preventDefault() {} }); expect(app.homeIndex).toBe(1);
@@ -229,7 +229,7 @@ test("shell: dialogs keep the workspace, capture shortcuts and stack help", asyn
     let frame = t.captureCharFrame();
     expect(frame).toContain("Node 00");
     expect(frame).toContain("остановить Docker и отключить VPN?");
-    expect(frame).toMatch(/› Нет +n│/); expect(frame).toMatch(/ Да +y│/);
+    expect(frame).toMatch(/› Нет +│/); expect(frame).toMatch(/ Да +│/);
     const before = backend.calls.length;
     app.onKey({ name: "d", preventDefault() {} });
     expect(app.screen).toBe("confirm"); expect(backend.calls.length).toBe(before);
@@ -238,7 +238,7 @@ test("shell: dialogs keep the workspace, capture shortcuts and stack help", asyn
     expect(t.captureCharFrame()).not.toContain("confirm");
     app.onKey({ name: "escape", preventDefault() {} }); await t.renderOnce();
     expect(app.helpOpen).toBe(false); expect(app.screen).toBe("confirm");
-    frame = t.captureCharFrame(); expect(frame).toMatch(/› Нет +n│/);
+    frame = t.captureCharFrame(); expect(frame).toMatch(/› Нет +│/);
     app.onKey({ name: "escape", preventDefault() {} });
     expect(app.screen).toBe("servers"); expect(backend.calls.length).toBe(before);
   } finally { await app.close(); }
@@ -256,7 +256,7 @@ test("shell: editor and native confirmation fit the minimum terminal", async () 
     app.confirmation = "subscription"; app.open("confirm"); await t.renderOnce();
     frame = t.captureCharFrame();
     expect(frame).toContain("Polkit"); expect(frame).toContain("автозапуск не изменяется");
-    expect(frame).toMatch(/› Нет +n│/); expect(frame).toMatch(/ Да +y│/);
+    expect(frame).toMatch(/› Нет +│/); expect(frame).toMatch(/ Да +│/);
   } finally { await app.close(); }
 });
 
@@ -316,7 +316,7 @@ test("shell: settings show stored and actual state and profiles use available ro
     expect(frame).not.toContain("[a] Автозапуск");
     t.resize(60, 16); app.open("autostart"); await t.renderOnce();
     frame = t.captureCharFrame();
-    expect(frame).toContain("Автозапуск"); expect(frame).toMatch(/Запускать шлюз .* g│/); expect(frame).toMatch(/Подключать VPN .* a│/);
+    expect(frame).toContain("Автозапуск"); expect(frame).toMatch(/Запускать шлюз .*‹ да ›/); expect(frame).toMatch(/Подключать VPN .*‹ нет ›/);
     app.onKey({ name: "escape", preventDefault() {} }); expect(app.screen).toBe("settings");
     t.resize(80, 24);
     app.profiles = { active: "p0", items: Array.from({ length: 9 }, (_, i) => ({ id: `p${i}`, name: `Profile ${i}`, kind: "server" as const, count: i, stale: i === 2 })) };
@@ -337,14 +337,14 @@ test("shell: long task overlays scroll and outside clicks cannot activate worksp
     expect(app.screen).toBe("tasks"); expect(app.serverID).toBe(before);
     for (let i = 0; i < 11; i++) app.onKey({ name: "down", preventDefault() {} });
     await t.renderOnce();
-    expect(t.captureCharFrame()).toMatch(/› Выполняется .* 12│/);
+    expect(t.captureCharFrame()).toMatch(/› Выполняется /);
     app.tasks.clear(); app.open("profiles"); app.open("profile-remove");
     expect(app.items()[app.selected]?.key).toBe("n");
     await t.renderOnce(); expect(t.captureCharFrame()).toContain("Удалить активный профиль?");
   } finally { app.tasks.clear(); await app.close(); }
 });
 
-for (const width of [80, MIN_COLS]) test(`menu rows keep value, arrow and shortcut on one line at ${width} columns`, async () => {
+for (const width of [80, MIN_COLS]) test(`menu rows keep value and arrow on one line without letters at ${width} columns`, async () => {
   const { terminal, app } = await fixture(width, 24);
   try {
     app.status = { ...app.status!, runtime: "native", installed: true };
@@ -354,9 +354,9 @@ for (const width of [80, MIN_COLS]) test(`menu rows keep value, arrow and shortc
     const lines = terminal.captureCharFrame().split("\n");
     const first = lines.findIndex(line => line.includes("› Автостарт после сна"));
     expect(first).toBeGreaterThan(0);
-    expect(lines[first]).toMatch(/‹ нет › +w *$/);
-    expect(lines[first + 1]).toMatch(/Автозапуск .*→ +a *$/);
-    expect(lines[first + 2]).toMatch(/Режим .*‹ строгий › +m *$/);
+    expect(lines[first]).toMatch(/‹ нет › *$/);
+    expect(lines[first + 1]).toMatch(/Автозапуск .*→ *$/);
+    expect(lines[first + 2]).toMatch(/Режим .*‹ строгий › *$/);
     for (const line of lines.slice(first, first + 3)) expect(Bun.stringWidth(line.trimEnd())).toBeLessThanOrEqual(78);
     for (const line of lines.slice(first, first + 3)) expect(Bun.stringWidth(line)).toBe(width);
     expect(lines.at(-2)?.trimEnd()).toEndWith("? все клавиши");
@@ -369,8 +369,8 @@ for (const width of [80, MIN_COLS]) test(`menu rows keep value, arrow and shortc
       if (key === "right") terminal.mockInput.pressArrow("right"); else terminal.mockInput.pressEnter();
       expect(app.screen).toBe("autostart"); await terminal.renderOnce();
       const dialog = terminal.captureCharFrame().split("\n");
-      const toggle = dialog.findIndex(line => /› Запускать.*‹ нет › +g│/.test(line));
-      expect(toggle).toBeGreaterThan(0); expect(dialog[toggle + 1]).toMatch(/Подключать VPN.*‹ нет › +a│/);
+      const toggle = dialog.findIndex(line => /› Запускать.*‹ нет › +│/.test(line));
+      expect(toggle).toBeGreaterThan(0); expect(dialog[toggle + 1]).toMatch(/Подключать VPN.*‹ нет › +│/);
     }
   } finally { await app.close(); }
 });
