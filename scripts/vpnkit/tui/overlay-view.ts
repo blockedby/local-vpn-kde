@@ -1,6 +1,6 @@
 import { BoxRenderable, InputRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
 import { isOverlay, type AppState } from "./app-state";
-import { SummaryView } from "./summary-view";
+import { SummaryView, wrapDialogLine } from "./summary-view";
 import { MenuView, menuHeight } from "./menu-view";
 import { EditorView } from "./editor-view";
 import { MIN_COLS, MIN_ROWS, palette as p } from "./model";
@@ -101,10 +101,11 @@ export class OverlayView {
   /** Geometry shared by the server row menu and the server details: right side, fixed size. */
   private serverPanel(state: AppState) {
     const width = Math.min(50, this.renderer.terminalWidth - 4);
-    const menuHeight = 3 + serverMenuActions(state).length;
-    const detailsHeight = 2 + detailsLines(state).flatMap(line => wrapText(line, width - 2)).length;
+    const menuHeight = 3 + this.rowEntries.length;
+    const lines = detailsLines(state).flatMap(line => wrapDialogLine(line, width - 2));
+    const detailsHeight = 2 + lines.length;
     const height = Math.min(this.renderer.terminalHeight - 3, Math.max(menuHeight, detailsHeight));
-    return { width, height, left: Math.max(1, this.renderer.terminalWidth - width - 3), top: Math.max(0, Math.min(3, this.renderer.terminalHeight - height - 1)) };
+    return { lines, width, height, left: Math.max(1, this.renderer.terminalWidth - width - 3), top: Math.max(0, Math.min(3, this.renderer.terminalHeight - height - 1)) };
   }
   update(state: AppState) {
     this.current = state;
@@ -118,23 +119,33 @@ export class OverlayView {
       const server = state.servers.find(s => s.server_id === target?.id && s.display_name === target.name);
       const title = `${safeText(target?.name ?? "Сервер")} · ${server?.latency_ms === undefined ? "—" : Math.round(server.latency_ms)} мс · ${server?.download_mbps === undefined ? "—" : server.download_mbps.toFixed(1)} Мбит/с`;
       this.rowHeader.content = cell(` ${title}`, width - 2).trimEnd();
-      let height = 3;
+      const reason = wrapText(entries[state.serverMenuIndex]?.unavailableReason ?? "", width - 4).slice(0, this.renderer.terminalHeight - 7).map(line => `  ${line}`);
+      const height = Math.min(this.renderer.terminalHeight - 3, Math.max(panelHeight, 3 + entries.length + reason.length));
+      const count = height - 3 - reason.length;
+      const first = Math.max(0, state.serverMenuIndex - count + 1);
       this.rowEntries.forEach((row, i) => {
-        const action = entries[i]; row.visible = !!action; if (!action) return;
+        const action = entries[i]; row.visible = !!action && i >= first && i < first + count; if (!row.visible || !action) return;
         const label = `${i === state.serverMenuIndex ? "›" : " "} ${action.label}`;
-        const reason = action.unavailableReason && i === state.serverMenuIndex ? wrapText(action.unavailableReason, width - 4).map(line => `  ${line}`) : [];
-        row.content = `${label}${reason.length ? `\n${reason.join("\n")}` : ""}`;
-        row.height = 1 + reason.length; height += 1 + reason.length;
+        const lines = i === state.serverMenuIndex ? [label, ...reason] : [label];
+        row.content = lines.join("\n"); row.height = lines.length;
         row.fg = action.available ? i === state.serverMenuIndex ? p.accent : p.text : p.muted;
       });
       // The row menu and «Подробности сервера» share one panel: same place, same size.
-      this.rowMenu.width = width; this.rowMenu.height = Math.max(panelHeight, Math.min(height, this.renderer.terminalHeight - 3));
+      this.rowMenu.width = width; this.rowMenu.height = height;
       this.rowMenu.left = left; this.rowMenu.top = Math.min(top, this.renderer.terminalHeight - Number(this.rowMenu.height) - 1);
     }
     const modal = isOverlay(state.screen) && this.renderer.terminalWidth >= MIN_COLS && this.renderer.terminalHeight >= MIN_ROWS;
     const editor = ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(state.screen);
     this.dialog.visible = modal;
     this.dialogEditor.update(state.editorValue, modal && editor && !state.helpOpen, state.closing, state.screen);
+    if (modal && state.screen === "details") {
+      const { lines, width, height, left, top } = this.serverPanel(state);
+      state.detailsOffset = Math.min(state.detailsOffset, Math.max(0, lines.length - (height - 2)));
+      this.dialogSummary.showLines(lines.slice(state.detailsOffset, state.detailsOffset + height - 2));
+      this.dialogMenu.update([], false, 0);
+      Object.assign(this.dialog, { width, height, left, top, title: " Сервер " });
+      return;
+    }
     if (modal) {
       const width = Math.min(64, this.renderer.terminalWidth - 4);
       this.dialogSummary.update(state);
@@ -146,21 +157,10 @@ export class OverlayView {
       const summaryLimit = editor ? Math.max(0, maxHeight - 2 - 3) : listHeight ? Math.max(1, maxHeight - 2 - Math.min(listHeight, 2)) : Infinity;
       const summaryHeight = Math.min(summaryLimit, this.dialogSummary.fit(width - 2, 0, summaryLimit));
       const height = Math.min(maxHeight, Math.max(5, 2 + summaryHeight + (editor ? 3 : listHeight)));
-      if (state.screen === "details") {
-        state.detailsOffset = Math.min(state.detailsOffset, Math.max(0, summaryHeight - (height - 2)));
-        this.dialogSummary.update(state);
-        this.dialogSummary.fit(width - 2, state.detailsOffset, height - 2);
-      }
       this.dialog.width = width; this.dialog.height = height;
       this.dialog.left = Math.floor((this.renderer.terminalWidth - width) / 2);
       this.dialog.top = Math.floor((this.renderer.terminalHeight - height) / 2);
-      if (state.screen === "details") {
-        const panel = this.serverPanel(state);
-        this.dialog.width = panel.width; this.dialog.height = panel.height; this.dialog.left = panel.left; this.dialog.top = panel.top;
-        state.detailsOffset = Math.min(state.detailsOffset, Math.max(0, this.dialogSummary.fit(panel.width - 2) - (panel.height - 2)));
-        this.dialogSummary.update(state); this.dialogSummary.fit(panel.width - 2, state.detailsOffset, panel.height - 2);
-      }
-      this.dialog.title = state.screen === "server-rename" ? ` ${safeText(state.renameTarget?.original ?? "Сервер")} ` : ["confirm", "profile-remove", "cancel-confirm", "retry-confirm"].includes(state.screen) ? " Подтверждение " : state.screen === "autostart" ? " Автозапуск " : state.screen === "details" ? " Сервер " : state.screen === "tasks" ? " Задачи " : state.screen === "recovery" ? " Восстановление " : " Редактор ";
+      this.dialog.title = state.screen === "server-rename" ? ` ${safeText(state.renameTarget?.original ?? "Сервер")} ` : ["confirm", "profile-remove", "cancel-confirm", "retry-confirm"].includes(state.screen) ? " Подтверждение " : state.screen === "autostart" ? " Автозапуск " : state.screen === "tasks" ? " Задачи " : state.screen === "recovery" ? " Восстановление " : " Редактор ";
       const availableRows = Math.max(1, height - 2 - summaryHeight);
       this.dialogMenu.update(items, editor, state.selected, width - 2, availableRows);
     }

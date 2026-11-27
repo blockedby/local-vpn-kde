@@ -2,9 +2,8 @@ import { BoxRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
 import type { AppState } from "./app-state";
 import { palette as p } from "./model";
 import { cell, safeText } from "./formatting";
-import { detailsLines } from "./details-view";
 
-function wrapDialogLine(input: string, width: number): string[] {
+export function wrapDialogLine(input: string, width: number): string[] {
   const lines: string[] = [];
   let line = "";
   for (const word of safeText(input).split(/\s+/).filter(Boolean)) {
@@ -28,9 +27,11 @@ export class SummaryView {
   }
   fit(width: number, offset = 0, limit = Infinity) {
     const lines = this.summary.chunks.map(chunk => chunk.text).join("").split("\n").flatMap(line => wrapDialogLine(line, width));
-    this.summary.content = lines.slice(offset, offset + limit).join("\n");
-    this.summary.height = Math.min(limit, Math.max(0, lines.length - offset));
+    this.showLines(lines.slice(offset, offset + limit));
     return lines.length;
+  }
+  showLines(lines: string[]) {
+    this.summary.visible = true; this.summary.content = lines.join("\n"); this.summary.height = lines.length;
   }
   hide() { this.summary.visible = false; this.summary.height = 0; }
   get node() { return this.summary; }
@@ -38,7 +39,6 @@ export class SummaryView {
     const gateway = state.status?.gateway_state ?? state.status?.vpn_state;
     const gatewayNames: Record<string, string> = { healthy: "готов", "egress-unavailable": "нет выхода в сеть", absent: "не запущен", inactive: "не запущен", stopped: "остановлен", starting: "запускается", unhealthy: "ошибка", running: "проверяется" };
     let height = state.screen === "diagnostics" ? 6 : 2;
-    if (state.screen === "details") this.summary.content = detailsLines(state).join("\n");
     if (state.screen === "tasks") this.summary.content = state.tasks.size || state.queue.length || state.history.length ? "Состояние        Операция               Этап      Время" : "Нет выполняющихся задач";
     if (state.screen === "cancel-confirm") this.summary.content = `Точно отменить: ${state.cancelTaskAction ? state.actionLabel(state.cancelTaskAction) : "операция недоступна"}?`;
     if (state.screen === "retry-confirm") this.summary.content = `Точно повторить: ${state.retryOperation ? state.actionLabel(state.retryOperation.action) : "операция недоступна"}${state.retryTarget?.name ? ` · ${safeText(state.retryTarget.name)}` : ""}?`;
