@@ -6,6 +6,7 @@ import { EditorView } from "./editor-view";
 import { MIN_COLS, MIN_ROWS, palette as p } from "./model";
 import { cell, safeText, wrapText } from "./formatting";
 import { serverMenuActions } from "./action-registry";
+import { detailsLines } from "./details-view";
 
 /** Absolute overlay host. Other modal views can use the same positioning pattern. */
 export class OverlayView {
@@ -26,7 +27,7 @@ export class OverlayView {
     root.add(this.dialog);
     this.rowBackdrop = new BoxRenderable(renderer, { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", zIndex: 48, visible: false, onMouseDown: event => { if (event.button === 0) this.current?.closeServerMenu(); } });
     root.add(this.rowBackdrop);
-    this.rowMenu = new BoxRenderable(renderer, { position: "absolute", top: 3, left: 2, width: 48, height: 7, zIndex: 49, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, overflow: "hidden", flexDirection: "column", visible: false });
+    this.rowMenu = new BoxRenderable(renderer, { position: "absolute", top: 3, left: 2, width: 48, height: 7, zIndex: 49, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, title: " Сервер ", overflow: "hidden", flexDirection: "column", visible: false });
     this.rowMenu.onMouseDown = event => event.stopPropagation();
     this.rowHeader = new TextRenderable(renderer, { content: "", height: 1, fg: p.muted, flexShrink: 0 }); this.rowMenu.add(this.rowHeader);
     for (let i = 0; i < 5; i++) {
@@ -97,13 +98,21 @@ export class OverlayView {
     const chosen = entries[state.paletteIndex]?.action;
     this.box.bottomTitle = chosen && !chosen.available ? cell(` ${safeText(chosen.unavailableReason ?? "Недоступно.")} `, width - 4).trimEnd() + " " : undefined;
   }
+  /** Geometry shared by the server row menu and the server details: right side, fixed size. */
+  private serverPanel(state: AppState) {
+    const width = Math.min(50, this.renderer.terminalWidth - 4);
+    const menuHeight = 3 + serverMenuActions(state).length;
+    const detailsHeight = 2 + detailsLines(state).flatMap(line => wrapText(line, width - 2)).length;
+    const height = Math.min(this.renderer.terminalHeight - 3, Math.max(menuHeight, detailsHeight));
+    return { width, height, left: Math.max(1, this.renderer.terminalWidth - width - 3), top: Math.max(0, Math.min(3, this.renderer.terminalHeight - height - 1)) };
+  }
   update(state: AppState) {
     this.current = state;
     this.updatePalette(state);
     const rowVisible = state.serverMenu && !state.helpOpen && this.renderer.terminalWidth >= MIN_COLS && this.renderer.terminalHeight >= MIN_ROWS;
     this.rowBackdrop.visible = rowVisible; this.rowMenu.visible = rowVisible;
     if (rowVisible) {
-      const width = Math.min(50, this.renderer.terminalWidth - 4);
+      const { width, left, top, height: panelHeight } = this.serverPanel(state);
       const entries = serverMenuActions(state);
       const target = state.serverMenuTarget;
       const server = state.servers.find(s => s.server_id === target?.id && s.display_name === target.name);
@@ -112,17 +121,15 @@ export class OverlayView {
       let height = 3;
       this.rowEntries.forEach((row, i) => {
         const action = entries[i]; row.visible = !!action; if (!action) return;
-        const hint = action.key === "shift+t" ? "T" : action.key === "return" ? "Enter" : action.key;
         const label = `${i === state.serverMenuIndex ? "›" : " "} ${action.label}`;
-        const padding = Math.max(1, width - 4 - Bun.stringWidth(label) - Bun.stringWidth(hint));
         const reason = action.unavailableReason && i === state.serverMenuIndex ? wrapText(action.unavailableReason, width - 4).map(line => `  ${line}`) : [];
-        row.content = `${label}${" ".repeat(padding)}${hint}${reason.length ? `\n${reason.join("\n")}` : ""}`;
+        row.content = `${label}${reason.length ? `\n${reason.join("\n")}` : ""}`;
         row.height = 1 + reason.length; height += 1 + reason.length;
         row.fg = action.available ? i === state.serverMenuIndex ? p.accent : p.text : p.muted;
       });
-      this.rowMenu.width = width; this.rowMenu.height = Math.min(height, this.renderer.terminalHeight - 3);
-      this.rowMenu.left = Math.max(1, this.renderer.terminalWidth - width - 3);
-      this.rowMenu.top = Math.min(3, this.renderer.terminalHeight - Number(this.rowMenu.height) - 1);
+      // The row menu and «Подробности сервера» share one panel: same place, same size.
+      this.rowMenu.width = width; this.rowMenu.height = Math.max(panelHeight, Math.min(height, this.renderer.terminalHeight - 3));
+      this.rowMenu.left = left; this.rowMenu.top = Math.min(top, this.renderer.terminalHeight - Number(this.rowMenu.height) - 1);
     }
     const modal = isOverlay(state.screen) && this.renderer.terminalWidth >= MIN_COLS && this.renderer.terminalHeight >= MIN_ROWS;
     const editor = ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(state.screen);
@@ -147,6 +154,12 @@ export class OverlayView {
       this.dialog.width = width; this.dialog.height = height;
       this.dialog.left = Math.floor((this.renderer.terminalWidth - width) / 2);
       this.dialog.top = Math.floor((this.renderer.terminalHeight - height) / 2);
+      if (state.screen === "details") {
+        const panel = this.serverPanel(state);
+        this.dialog.width = panel.width; this.dialog.height = panel.height; this.dialog.left = panel.left; this.dialog.top = panel.top;
+        state.detailsOffset = Math.min(state.detailsOffset, Math.max(0, this.dialogSummary.fit(panel.width - 2) - (panel.height - 2)));
+        this.dialogSummary.update(state); this.dialogSummary.fit(panel.width - 2, state.detailsOffset, panel.height - 2);
+      }
       this.dialog.title = state.screen === "server-rename" ? ` ${safeText(state.renameTarget?.original ?? "Сервер")} ` : ["confirm", "profile-remove", "cancel-confirm", "retry-confirm"].includes(state.screen) ? " Подтверждение " : state.screen === "autostart" ? " Автозапуск " : state.screen === "details" ? " Сервер " : state.screen === "tasks" ? " Задачи " : state.screen === "recovery" ? " Восстановление " : " Редактор ";
       const availableRows = Math.max(1, height - 2 - summaryHeight);
       this.dialogMenu.update(items, editor, state.selected, width - 2, availableRows);

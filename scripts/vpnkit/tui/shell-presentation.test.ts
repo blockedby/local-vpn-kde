@@ -488,3 +488,14 @@ test("servers without a table show the start row and footer without letters", as
     expect(backend.calls.some(call => call.action === "backend/start")).toBe(true);
   } finally { await app.close(); }
 });
+
+test("server row menu and server details share one panel position and size", async () => {
+  const { terminal: t, app } = await fixture(110, 20);
+  try {
+    const box = () => { const lines = t.captureCharFrame().split("\n"); const top = lines.findIndex(line => line.includes("╭─ Сервер")); const bottom = lines.findIndex((line, i) => i > top && line.includes("╰")); return { top, bottom, left: lines[top]!.indexOf("╭"), right: lines[top]!.lastIndexOf("╮") }; };
+    app.openServerMenu(); await t.renderOnce(); const menu = box();
+    expect(t.captureCharFrame()).not.toMatch(/Скорость сервера +T/);
+    app.closeServerMenu(); app.open("details"); await t.renderOnce(); const details = box();
+    expect(menu.top).toBeGreaterThan(0); expect(details).toEqual(menu);
+  } finally { await app.close(); }
+});
