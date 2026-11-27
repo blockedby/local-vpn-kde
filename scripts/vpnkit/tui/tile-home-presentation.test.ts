@@ -15,10 +15,10 @@ for (const [width, height] of [[100,35],[60,16]] as const) test(`home tiles fit 
     for (const title of ["Подключение", "Серверы", "Замеры", "Профили", "Диагностика", "Настройки"]) expect(frame.split(title)).toHaveLength(2);
     expect(frame).toContain("› ▶ Подключение");
     for (const glyph of ["▶", "≡", "•", "◇", "+", "*"]) expect(Bun.stringWidth(glyph)).toBe(1);
-    // In Docker mode `c` opens the subscription editor, not profiles, so that tile shows no letter.
-    for (const [title, key] of [["Подключение", "s"], ["Серверы", "v"], ["Замеры", "j"], ["Профили", ""], ["Диагностика", "d"], ["Настройки", "i"]]) {
+    // Tiles are chosen with arrows; no letter shortcut is drawn on them.
+    for (const title of ["Подключение", "Серверы", "Замеры", "Профили", "Диагностика", "Настройки"]) {
       const line = frame.split("\n").find(line => line.includes(title))!;
-      expect(line.slice(line.indexOf(title)).split("│")[0]).toMatch(new RegExp(`${title} +${key} *$`));
+      expect(line.slice(line.indexOf(title)).split("│")[0]).toMatch(new RegExp(`${title} *$`));
     }
     expect(frame).toContain("←↑↓→ выбор"); expect(frame).toContain("Enter открыть"); expect(frame).toContain("? все клавиши"); expect(frame).toContain("q выход");
     expect(frame).not.toContain("private-token"); expect(frame).not.toContain("secret=hidden"); expect(frame).not.toContain("fragment");
@@ -34,13 +34,13 @@ test("clicking a tile activates the section and escape returns its highlight", a
 });
 
 
-test("connected tile shows the key that does what Enter does", async () => {
+test("connected tile: its letter shortcut still does what Enter does", async () => {
   const t = await createTestRenderer({ width: 100, height: 35 }); const b = new FakeBackend();
   b.status.networkmanager_active = "yes"; const app = new App(t.renderer, b);
   try {
     await app.perform("status"); await t.renderOnce();
     const line = t.captureCharFrame().split("\n").find(line => line.includes("Подключение"))!;
-    expect(line.split("│")[1]).toMatch(/Подключение +x *$/);
+    expect(line.split("│")[1]).toMatch(/Подключение *$/);
     t.mockInput.pressKey("x"); await Bun.sleep(40);
     const byKey = [app.screen, app.confirmation];
     t.mockInput.pressEscape(); await Bun.sleep(40); expect(app.screen).toBe("home");
@@ -51,13 +51,13 @@ test("connected tile shows the key that does what Enter does", async () => {
   } finally { await app.close(); }
 });
 
-test("profiles tile shows its key only where the key opens profiles", async () => {
+test("profiles tile shows no letter", async () => {
   const t = await createTestRenderer({ width: 100, height: 35 }); const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true, subscription: "configured" }; const app = new App(t.renderer, b);
   try {
     await app.perform("status"); await t.renderOnce();
     const line = t.captureCharFrame().split("\n").find(line => line.includes("Профили"))!;
-    expect(line.slice(line.indexOf("Профили")).split("│")[0]).toMatch(/Профили +c *$/);
+    expect(line.slice(line.indexOf("Профили")).split("│")[0]).toMatch(/Профили *$/);
   } finally { await app.close(); }
 });
 

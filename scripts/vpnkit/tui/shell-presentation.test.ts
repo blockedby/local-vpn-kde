@@ -474,3 +474,17 @@ test("menu selection is clamped when the list shrinks, tasks footer offers cance
     expect(app.items().find(item => item.key === "u")?.kind).toBe("open");
   } finally { await app.close(); }
 });
+
+test("servers without a table show the start row and footer without letters", async () => {
+  const terminal = await createTestRenderer({ width: 80, height: 24 });
+  const backend = new FakeBackend(); backend.status = { ...backend.status, runtime: "native", installed: true, gateway_state: "absent", vpn_state: "inactive" };
+  const app = new App(terminal.renderer, backend);
+  try {
+    await app.perform("status"); app.open("servers", false); app.paint(); await terminal.renderOnce();
+    const frame = terminal.captureCharFrame();
+    expect(frame).toContain("› Запустить сервис"); expect(frame).not.toContain("[s]");
+    expect(frame.split("\n").at(-2)?.trim()).toBe("Enter запустить сервис · Esc главная · ? все клавиши");
+    terminal.mockInput.pressEnter(); await Bun.sleep(20);
+    expect(backend.calls.some(call => call.action === "backend/start")).toBe(true);
+  } finally { await app.close(); }
+});

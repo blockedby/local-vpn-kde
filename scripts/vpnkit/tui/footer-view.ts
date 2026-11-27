@@ -32,6 +32,11 @@ export class FooterView {
       return result;
     }
     if (state.screen === "tasks") { return `↑↓ выбор${state.items()[state.selected]?.available ? " · Enter отменить" : ""} · Esc назад`; }
+    // Servers without a table (service stopped, no subscription) show a plain menu: drive it with arrows too.
+    if (state.screen === "servers" && !(state.ready() && !state.nativePreviewOnly() && state.servers.length) && state.items().length) {
+      const item = state.items()[state.selected];
+      return `${state.items().length > 1 ? "↑↓ выбор · " : ""}Enter ${(item?.title ?? item?.label ?? "выбрать").toLowerCase()} · Esc главная`;
+    }
     if (isListMenu(state.screen)) { const kind = state.items()[state.selected]?.kind; return `↑↓ выбор${kind === "toggle" ? " · ←→ изменить" : kind === "open" ? " · Enter открыть" : " · Enter выполнить"} · Esc назад`; }
     const actions = state.groupedActions().flatMap(group => group.actions).filter(action => action.available);
     if (state.screen === "home") {

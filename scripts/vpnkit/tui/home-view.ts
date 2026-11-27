@@ -50,9 +50,6 @@ export class HomeView {
     const actions = state.actions();
     const lifecycle = actions.find(a => ["home:connect", "home:start-service", "home:x"].includes(a.id));
     const lifecycleTask = [...state.tasks.values()].find(task => ["backend/start", "start", "disconnect", "stop"].includes(task.action));
-    // A tile shows a letter only when that key does what Enter on the tile does.
-    const opensProfiles = state.nativeInstalled() && state.status?.subscription === "configured";
-    const titleActions = [lifecycle, ...["global:servers", "global:tasks", opensProfiles ? "global:subscription" : "", "global:diagnostics", "global:settings"].map(id => actions.find(a => a.id === id))];
     const glyphs = ["▶", "≡", "•", "◇", "+", "*"];
     const data = [
       ["Подключение", lifecycleTask ? state.actionLabel(lifecycleTask.action) : connection(state.status).title, `Enter — ${lifecycle?.label ?? "—"}`],
@@ -92,10 +89,8 @@ export class HomeView {
     this.tiles.forEach((tile, i) => {
       tile.box.height = compact ? tileHeight : 5 + (Math.floor(i / cols) === Math.floor(5 / cols) ? extra : 0); tile.box.borderColor = i === state.homeIndex ? p.accent : p.edge;
       const title = `${i === state.homeIndex ? "›" : " "} ${glyphs[i]} ${data[i]![0]!}`;
-      const shortcut = titleActions[i]?.keys[0];
-      tile.title.content = shortcut && Bun.stringWidth(title) + 1 + Bun.stringWidth(shortcut) <= width
-        ? title + " ".repeat(width - Bun.stringWidth(title) - Bun.stringWidth(shortcut)) + shortcut
-        : cell(title, width).trimEnd();
+      // Tiles are chosen with arrows; their letter shortcuts live in the «Клавиши» window.
+      tile.title.content = cell(title, width).trimEnd();
       tile.title.fg = i === state.homeIndex ? p.accent : p.text;
       const lines = i === 5 && extra ? settingsLines : data[i]!.slice(1);
       tile.lines.forEach((line, n) => { line.visible = n < (compact ? tileHeight - 3 : 2 + (Math.floor(i / cols) === Math.floor(5 / cols) ? extra : 0)) && n < lines.length; line.content = cell(lines[n] ?? "", width).trimEnd(); });

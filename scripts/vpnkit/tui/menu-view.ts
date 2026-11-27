@@ -56,7 +56,6 @@ export class MenuView {
       label.fg = typeof line === "string" ? p.muted : p.text;
       if (typeof line === "string") { label.content = cell(line, width); return; }
       const item = items[line];
-      if (!item.kind) { label.content = cell(`[${item.key}] ${item.label}`, width); return; }
       const title = item.title ?? item.label;
       let body: string;
       if (item.value !== undefined) {
