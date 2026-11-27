@@ -89,7 +89,9 @@ test("explicit recovery rereads status and catalog without replaying interrupted
     f.b.onDisconnect?.();
     f.b.held.get("servers/select")!.reject(new Error("backend-unavailable")); await task;
     const before = f.b.calls.length;
-    await f.key("f"); await f.key("u");
+    await f.key("f"); expect(f.app.screen).toBe("recovery"); await f.key("return");
+    expect(f.app.screen).toBe("home"); expect(f.app.recovery).toBeUndefined();
+    expect(f.app.notice).toContain("Связь восстановлена");
     expect(f.b.reconnects).toBe(1);
     expect(f.b.calls.slice(before).map(c => c.action)).toEqual(["status", "servers/list"]);
     expect(f.b.calls.filter(c => c.action === "servers/select")).toHaveLength(1);

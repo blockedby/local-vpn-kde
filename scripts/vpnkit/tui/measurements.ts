@@ -197,6 +197,8 @@ export async function reconnectBackend(state: AppState) {
         const list = await state.perform("servers/list");
         if (!list?.ok) throw new Error();
       }
+      state.recovery = undefined;
+      if (state.screen === "recovery") state.open(state.overlayBase, false, false);
       state.notify("Связь восстановлена. Состояние обновлено; действия не повторялись.");
     } catch { state.backendOffline = true; state.notify("Не удалось восстановить связь. Можно повторить [u].", true); }
     finally {
