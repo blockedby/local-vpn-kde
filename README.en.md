@@ -47,7 +47,7 @@ Without a package manager: [portable bundle](docs/portable-installer.md).
 
 ## Get connected
 
-The interface opens on a home screen with Connection («Подключение»), Servers («Серверы»), Measurements («Замеры»), Profiles («Профили»), Diagnostics («Диагностика») and Settings («Настройки») tiles. Use the arrow keys to choose a tile and `Enter` to open a section or perform the connection action; `Esc` returns from a section to home. In nested screens and menus `Esc` closes those first; in the server table it first clears a filter. A breadcrumb shows the path to the section; `Tab` / `Shift+Tab` cycle through Servers, Profiles, Diagnostics and Settings.
+The interface opens on a home screen with Connection («Подключение»), Servers («Серверы»), Profiles («Профили»), Diagnostics («Диагностика») and Settings («Настройки») tiles. Use the arrow keys to choose a tile and `Enter` to open a section or perform the connection action; `Esc` returns from a section to home. In nested screens and menus `Esc` closes those first; in the server table it first clears a filter. A breadcrumb shows the path to the section; `Tab` / `Shift+Tab` cycle through Servers, Profiles, Diagnostics and Settings.
 
 For the first connection, press `c` and add a subscription or link. If the service is stopped, start it using the Connection tile or `s`. Open Servers, refresh the list if needed (`r`), choose a row and press `Enter`. Choose Select server («Выбрать сервер») from the menu and confirm: No («Нет») is selected by default, and Left/Right move between the buttons. Then return home and choose Connection or press `s`. In installed native mode with a configured subscription, `c` opens Profiles.
 

@@ -51,6 +51,7 @@ export class MenuView {
       this.indices[i] = index;
       row.visible = line !== undefined;
       row.backgroundColor = index === selected ? p.edge : p.base;
+      row.width = width;
       if (line === undefined) return;
       const label = this.labels[i];
       label.fg = typeof line === "string" ? p.muted : p.text;

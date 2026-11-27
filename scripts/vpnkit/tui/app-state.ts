@@ -22,6 +22,8 @@ export type Screen =
   | "diagnostics"
   | "target"
   | "confirm";
+/** Screens behind the home tiles, in tile order; the first tile is the connection action. */
+export const HOME_TILES = ["", "servers", "profiles", "diagnostics", "settings"] as const;
 export const overlayScreens: readonly Screen[] = ["server-rename", "autostart", "details", "confirm", "cancel-confirm", "retry-confirm", "profile-remove", "tasks", "recovery", "subscription", "target", "profile-name", "profile-source"];
 export const isOverlay = (screen: Screen) => overlayScreens.includes(screen);
 export type Batch = "ping" | "speed" | "availability";
@@ -593,7 +595,7 @@ export class AppState {
       return;
     }
     if (isOverlay(screen) && !isOverlay(this.screen)) this.overlayBase = this.screen === "home" ? "home" : this.tab;
-    const tile = ["", "servers", "tasks", "profiles", "diagnostics", "settings"].indexOf(screen);
+    const tile = HOME_TILES.indexOf(screen as typeof HOME_TILES[number]);
     if (tile > 0) this.homeIndex = tile;
     if (this.screen === "subscription") this.draft = this.editorValue;
     this.filterEditing = false;
@@ -648,16 +650,15 @@ export class AppState {
     const columns = this.homeColumns();
     const row = Math.floor(this.homeIndex / columns), col = this.homeIndex % columns;
     if (key === "home") this.homeIndex = 0;
-    else if (key === "end") this.homeIndex = 5;
+    else if (key === "end") this.homeIndex = HOME_TILES.length - 1;
     else if (key === "left" && col > 0) this.homeIndex--;
-    else if (key === "right" && col < columns - 1 && this.homeIndex < 5) this.homeIndex++;
+    else if (key === "right" && col < columns - 1 && this.homeIndex < HOME_TILES.length - 1) this.homeIndex++;
     else if (key === "up" && row > 0) this.homeIndex -= columns;
-    else if (key === "down" && this.homeIndex + columns < 6) this.homeIndex += columns;
+    else if (key === "down" && this.homeIndex + columns < HOME_TILES.length) this.homeIndex += columns;
     this.paint();
   }
   activateHome() {
-    const target = [undefined, "servers", "tasks", "profiles", "diagnostics", "settings"] as const;
-    if (this.homeIndex) { this.open(target[this.homeIndex]!); return; }
+    if (this.homeIndex) { this.open(HOME_TILES[this.homeIndex] as Screen); return; }
     const action = this.actions().find(item => ["home:connect", "home:start-service", "home:x"].includes(item.id));
     if (action?.available) action.run();
     else if (action?.unavailableBehavior === "notice" && action.unavailableReason) this.notify(action.unavailableReason, true);

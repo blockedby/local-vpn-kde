@@ -1,4 +1,4 @@
-import { isOverlay, type AppKeyEvent, type AppState, type Screen } from "./app-state";
+import { HOME_TILES, isOverlay, type AppKeyEvent, type AppState, type Screen } from "./app-state";
 import { compatible } from "./request-policy";
 import { MIN_COLS, MIN_ROWS } from "./model";
 import type { ActionDefinition, ActionScope } from "./menu-actions";
@@ -153,7 +153,7 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
   if (state.screen === "home") {
     for (const key of ["left", "right", "up", "down", "home", "end"]) {
       const cols = state.homeColumns(), i = state.homeIndex;
-      const blocked = key === "left" ? i % cols === 0 : key === "right" ? i % cols === cols - 1 || i === 5 : key === "up" ? i < cols : key === "down" ? i + cols >= 6 : key === "home" ? i === 0 : i === 5;
+      const blocked = key === "left" ? i % cols === 0 : key === "right" ? i % cols === cols - 1 || i === HOME_TILES.length - 1 : key === "up" ? i < cols : key === "down" ? i + cols >= HOME_TILES.length : key === "home" ? i === 0 : i === HOME_TILES.length - 1;
       add(`tile:${key}`, [key], "Выбор", "home", () => state.moveHome(key), blocked ? "Край сетки." : undefined, "none", true);
     }
     const lifecycleAction = actions.find(action => ["home:connect", "home:start-service", "home:x"].includes(action.id));

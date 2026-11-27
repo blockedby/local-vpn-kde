@@ -61,9 +61,9 @@ test("shell has clickable home tiles and a section breadcrumb", async () => {
   try {
     await app.perform("status"); await t.renderOnce();
     const frame = t.captureCharFrame();
-    for (const label of ["Подключение", "Серверы", "Замеры", "Профили", "Диагностика", "Настройки"]) expect(frame.split(label)).toHaveLength(2);
+    for (const label of ["Подключение", "Серверы", "Профили", "Диагностика", "Настройки"]) expect(frame.split(label)).toHaveLength(2);
     const row = frame.split("\n").findIndex(line => line.includes("Диагностика"));
-    await t.mockMouse.click(5, row); await t.renderOnce();
+    await t.mockMouse.click(frame.split("\n")[row]!.indexOf("Диагностика"), row); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("‹ Главная › Диагностика");
     expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
   } finally { await app.close(); }

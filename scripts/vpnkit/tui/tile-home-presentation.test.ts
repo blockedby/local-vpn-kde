@@ -12,11 +12,11 @@ for (const [width, height] of [[100,35],[60,16]] as const) test(`home tiles fit 
     app.profiles = { active: "a", items: [{ id: "a", name: "Дом", kind: "subscription", count: 2, stale: false }] };
     app.autostart = { gateway: true, connect: true }; app.paint(); await t.renderOnce();
     const frame = t.captureCharFrame();
-    for (const title of ["Подключение", "Серверы", "Замеры", "Профили", "Диагностика", "Настройки"]) expect(frame.split(title)).toHaveLength(2);
-    expect(frame).toContain("› ▶ Подключение");
+    for (const title of ["Подключение", "Серверы", "Профили", "Диагностика", "Настройки"]) expect(frame.split(title)).toHaveLength(2);
+    expect(frame).toContain("▶ Подключение"); expect(frame).not.toContain("Замеры"); expect(frame).not.toContain("› ▶");
     for (const glyph of ["▶", "≡", "•", "◇", "+", "*"]) expect(Bun.stringWidth(glyph)).toBe(1);
     // Tiles are chosen with arrows; no letter shortcut is drawn on them.
-    for (const title of ["Подключение", "Серверы", "Замеры", "Профили", "Диагностика", "Настройки"]) {
+    for (const title of ["Подключение", "Серверы", "Профили", "Диагностика", "Настройки"]) {
       const line = frame.split("\n").find(line => line.includes(title))!;
       expect(line.slice(line.indexOf(title)).split("│")[0]).toMatch(new RegExp(`${title} *$`));
     }
@@ -63,7 +63,7 @@ test("profiles tile shows no letter", async () => {
 
 test("tiles stay in navigation order after a resize between layouts", async () => {
   const t = await createTestRenderer({ width: 100, height: 35 }); const app = new App(t.renderer, new FakeBackend());
-  const order = (frame: string) => ["Подключение", "Серверы", "Замеры", "Профили", "Диагностика", "Настройки"]
+  const order = (frame: string) => ["Подключение", "Серверы", "Профили", "Диагностика", "Настройки"]
     .map(title => { const lines = frame.split("\n"); const row = lines.findIndex(line => line.includes(title)); return [row, lines[row]!.indexOf(title)] as const; });
   try {
     await app.perform("status"); await t.renderOnce();
@@ -72,13 +72,12 @@ test("tiles stay in navigation order after a resize between layouts", async () =
       const columns = width >= 90 ? 3 : 2, cells = order(t.captureCharFrame());
       cells.forEach(([row, column], i) => {
         expect(row).toBe(cells[i - i % columns]![0]);
-        expect(column).toBe(cells[i % columns]![1]);
         if (i % columns) expect(column).toBeGreaterThan(cells[i - 1]![1]);
         if (i >= columns) expect(row).toBeGreaterThan(cells[i - columns]![0]);
       });
     }
     t.resize(80, 35); await Bun.sleep(40); app.paint(); await t.renderOnce();
     app.homeIndex = 0; t.mockInput.pressArrow("down"); await Bun.sleep(40); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("› • Замеры");
+    expect(app.homeIndex).toBe(2); expect(t.captureCharFrame()).toContain("◇ Профили");
   } finally { await app.close(); }
 });

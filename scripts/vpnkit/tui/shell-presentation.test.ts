@@ -65,7 +65,7 @@ test("shell: a narrow tall terminal stacks home tiles in one column", async () =
   try {
     app.open("home", false); app.homeIndex = 0; app.notice = ""; app.paint(); await t.renderOnce();
     const lines = t.captureCharFrame().split("\n");
-    for (const title of ["Подключение", "Серверы", "Замеры", "Профили", "Диагностика", "Настройки"])
+    for (const title of ["Подключение", "Серверы", "Профили", "Диагностика", "Настройки"])
       expect(lines.filter(line => line.includes(title) && line.includes("│"))).toHaveLength(1);
     expect(lines.findIndex(line => line.includes("Серверы"))).toBeGreaterThan(lines.findIndex(line => line.includes("Подключение")));
     app.onKey({ name: "down", preventDefault() {} }); expect(app.homeIndex).toBe(1);
@@ -86,7 +86,7 @@ test("shell: a short home grid scrolls to the selected tile and counts hidden ti
     expect(frame).toContain("Подключение"); expect(frame).not.toContain("Настройки"); expect(frame).toMatch(/↓ ещё \d/);
     app.onKey({ name: "end", preventDefault() {} }); await t.renderOnce();
     frame = t.captureCharFrame();
-    expect(frame).toContain("› * Настройки"); expect(frame).not.toContain("Подключение"); expect(frame).toMatch(/↑ ещё \d/); expect(frame).not.toContain("↓ ещё");
+    expect(frame).toContain("* Настройки"); expect(frame).not.toContain("Подключение"); expect(frame).toMatch(/↑ ещё \d/); expect(frame).not.toContain("↓ ещё");
   } finally { await app.close(); }
 });
 
