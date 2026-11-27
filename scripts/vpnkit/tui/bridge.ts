@@ -286,6 +286,8 @@ export class DemoBackend implements Backend {
   private active = new Map<string, { cancelled: boolean }>();
   private sequence = 0;
   status: Status = {
+    runtime: "native",
+    installed: true,
     vpn_state: "inactive",
     gateway_state: "absent",
     subscription: "configured",
@@ -373,6 +375,7 @@ export class DemoBackend implements Backend {
           reply.catalog = { status: "ok", servers: structuredClone(this.servers) };
         }
       }
+      if (action.startsWith("profiles/")) reply.profiles = { active: "demo", items: [{ id: "demo", name: "Демо-подписка", kind: "subscription", count: this.servers.length, stale: false }] };
       if (action === "servers/list" || action === "servers/refresh")
         reply.catalog = { status: "ok", servers: structuredClone(this.servers) };
       if (action === "servers/check-batch" || action === "servers/speed-batch") {
