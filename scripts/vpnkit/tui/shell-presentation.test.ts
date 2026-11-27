@@ -149,7 +149,7 @@ test("shell: an empty catalog explains how to refresh", async () => {
   try {
     await app.perform("status"); app.open("servers", false); await app.perform("servers/list"); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Список серверов пуст");
-    expect(t.captureCharFrame()).toContain("[r]");
+    expect(t.captureCharFrame()).toContain("Выберите «Обновить подписку и список»");
   } finally { await app.close(); }
 });
 
@@ -201,10 +201,10 @@ test("shell: help combines aliases and long notices wrap without hiding recovery
     expect(t.captureCharFrame()).toMatch(/Tab\/Shift\+Tab +Сменить вкладку/);
     app.paletteQuery = "";
     app.onKey({ name: "escape", preventDefault() {} });
-    app.notify("Сетевые настройки VPN поменялись, нажмите [f] чтобы применить их ещё раз.", true);
+    app.notify("Сетевые настройки VPN поменялись, выберите «Применить сетевые настройки VPN».", true);
     t.resize(60, 16); await t.renderOnce();
     const frame = t.captureCharFrame().replace(/\s+/g, " ");
-    expect(frame).toContain("нажмите [f] чтобы применить их ещё раз.");
+    expect(frame).toContain("выберите «Применить сетевые настройки VPN».");
   } finally { await app.close(); }
 });
 
@@ -416,7 +416,7 @@ test("shell: activity shows running, queued and finished work and cancellation p
     backend.hold = { action: "servers/speed-batch", promise: new Promise(resolve => { finish = resolve; }) };
     const batch = app.runBatch("speed"); await Bun.sleep(10);
     app.onKey({ name: "p", preventDefault() {} }); await t.renderOnce();
-    expect(t.captureCharFrame().split("\n")[1]).toContain("в очереди 1 [j]");
+    expect(t.captureCharFrame().split("\n")[1]).toContain("в очереди 1 · Задачи");
     app.onKey({ name: "j", preventDefault() {} }); await t.renderOnce();
     let frame = t.captureCharFrame();
     expect(frame).toContain("Выполняются"); expect(frame).toContain("В очереди"); expect(frame).toContain("Завершены");

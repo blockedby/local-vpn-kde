@@ -21,7 +21,7 @@ const groups: Record<string, readonly string[]> = {
 };
 const messages: Record<string, string> = {
   "demo-unsupported": "В демо-режиме профили не меняются.",
- "native-network-busy": "Не удалось восстановить сеть VPN: её использует другая системная служба. Подробности — в диагностике [d].",
+ "native-network-busy": "Не удалось восстановить сеть VPN: её использует другая системная служба. Подробности — в диагностике.",
   "docker-unavailable": "Docker недоступен. Проверьте его состояние и установку.",
   "underlay-install-failed": "Не удалось установить маршруты обхода VPN. Подробности — в диагностике.",
   "underlay-verify-failed": "Проверка маршрутов обхода VPN не прошла. Подробности — в диагностике.",
@@ -36,7 +36,7 @@ const messages: Record<string, string> = {
 
 export function recoveryFor(action: Action, reason: string, runtime?: Status["runtime"]): Recovery {
   if (runtime === "native" && reason === "native-network-settings-changed") {
-    return { stage: "routes", message: "Сетевые настройки VPN поменялись, нажмите [f] чтобы применить их ещё раз.", actions: ["reapply"] };
+    return { stage: "routes", message: "Сетевые настройки VPN поменялись, выберите «Применить сетевые настройки VPN».", actions: ["reapply"] };
   }
   let stage = Object.entries(groups).find(([, reasons]) => reasons.includes(reason))?.[0] ?? "unknown";
   if (runtime === "native" && stage === "docker") stage = "management";

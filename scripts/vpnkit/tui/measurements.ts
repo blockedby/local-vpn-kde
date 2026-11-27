@@ -69,7 +69,7 @@ export async function runBatch(state: AppState, kind: Batch, retry?: { ids: stri
       state.notify(`Сначала запустите ${state.serviceObject()}.`, true);
       return;
     }
-    if (state.catalogStale) { state.notify("Подписка изменена. Обновите список серверов [r].", true); return; }
+    if (state.catalogStale) { state.notify("Подписка изменена. Выберите «Обновить подписку и список».", true); return; }
     state.cancelled = false;
     state.noticeIdentity = undefined;
     state.notice = "";
@@ -200,7 +200,7 @@ export async function reconnectBackend(state: AppState) {
       state.recovery = undefined;
       if (state.screen === "recovery") state.open(state.overlayBase, false, false);
       state.notify("Связь восстановлена. Состояние обновлено; действия не повторялись.");
-    } catch { state.backendOffline = true; state.notify("Не удалось восстановить связь. Можно повторить [u].", true); }
+    } catch { state.backendOffline = true; state.notify("Не удалось восстановить связь. Выберите «Восстановить связь» ещё раз.", true); }
     finally {
       state.reconnecting = false;
       state.paint();

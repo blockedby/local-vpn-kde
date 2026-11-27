@@ -45,7 +45,8 @@ test("dismissing Tasks during a server check restores the active table", async (
   const { b, key, t, app, frame, close } = fixtureState;
   try {
     await key("v"); b.holds.add("servers/check-batch"); await key("p"); await key("j");
-    expect(app.screen).toBe("tasks"); t.mockInput.pressEscape(); await settle();
+    expect(app.screen).toBe("tasks"); expect(await frame()).toContain("‹ Главная › Задачи");
+    t.mockInput.pressEscape(); await settle();
     expect(await frame()).toContain("‹ Главная › Серверы");
     t.mockInput.pressEnter(); expect(app.serverMenu).toBe(true);
     expect(b.cancelled).toEqual([]);

@@ -311,12 +311,12 @@ export function defineMenuActions(state: AppState, items: MenuItem[]): ActionDef
         : screen === "servers" && item.key === "s" ? "backend/start" : undefined;
       if (request) {
         if (state.backendOffline || state.reconnecting && !["status", "servers/list"].includes(request))
-          reason = "Служба управления недоступна. [f] Восстановить связь";
+          reason = "Служба управления недоступна. Выберите «Восстановить связь».";
         else if (state.nativePreviewOnly() && !["status", "backend/start", "network/reapply", "start", "disconnect", "stop", "autostart/read", "autostart/set"].includes(request))
           reason = state.nativeUnavailable(request);
         else if (!queueable.has(request) && (((!!state.batch || state.homeTesting) && !["servers/select", "status", "subscription/read"].includes(request)) ||
           [...state.tasks.values()].some(task => !compatible(request, task.action)))) {
-          reason = "Эта операция конфликтует с текущей. Дождитесь завершения или отмените её [k].";
+          reason = "Эта операция конфликтует с текущей. Дождитесь завершения или отмените её в разделе «Задачи».";
         }
       }
     }

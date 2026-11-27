@@ -134,7 +134,7 @@ export class SummaryView {
           ? `Для проверок запустите ${state.serviceObject()}. VPN подключать не требуется.`
           : state.status?.subscription !== "configured"
             ? "Добавьте подписку для загрузки серверов."
-            : state.catalogStale ? "Подписка изменена. Обновите список серверов [r]." : state.catalogLoaded ? "Список серверов пуст. Обновите источник [r] или откройте профили [c]." : "Загружаем серверы… Обновить список [r].";
+            : state.catalogStale ? "Подписка изменена. Выберите «Обновить подписку и список»." : state.catalogLoaded ? "Список серверов пуст. Выберите «Обновить подписку и список» или откройте «Профили»." : "Загружаем серверы…";
     if (state.screen === "settings" || state.screen === "profiles") { this.summary.content = ""; this.summary.visible = false; height = 0; }
     if (state.screen === "servers" && state.hasServerTable()) { this.summary.visible = false; height = 0; }
     this.summary.height = height;

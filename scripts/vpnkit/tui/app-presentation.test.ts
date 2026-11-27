@@ -1464,8 +1464,7 @@ for (const width of [48, 100, 140]) {
       await t.renderOnce();
       const frame = t.captureCharFrame();
       expect(frame).toContain("Сетевые настройки VPN поменялись,");
-      expect(frame).toContain("нажмите [f]");
-      expect(frame).toContain("ещё раз.");
+      expect(frame.replace(/\s+/g, " ")).toContain("выберите «Применить сетевые настройки VPN».");
       expect(frame).not.toContain("Действие не выполнено");
       expect(frame).not.toContain("[f] Действия");
       expect(frame).not.toContain("private-attempt");

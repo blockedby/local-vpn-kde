@@ -17,7 +17,7 @@ export class ProgressView {
       [...state.tasks.values()].find(task => task.action !== "status");
     if (state.batch) {
       const detail = `${state.batch.kind === "speed" ? "Ping → сайт + скорость" : "Ping → сайт"} · ${state.batch.done}/${state.batch.total} · ${Math.floor((Date.now() - state.started) / 1000)} с`;
-      this.progress.content = `${frames[state.frame % 10]} ${detail}${state.cancelled ? " · отмена…" : " · [k] отменить"}`;
+      this.progress.content = `${frames[state.frame % 10]} ${detail}${state.cancelled ? " · отмена…" : " · отмена в разделе «Задачи»"}`;
     }
     else if (activeTask) {
       this.progress.content = `${frames[state.frame % 10]} ${state.actionLabel(activeTask.action)} · ${activeTask.phase || "выполняется"} · ${Math.floor((Date.now() - activeTask.started) / 1000)} с`;
@@ -25,14 +25,14 @@ export class ProgressView {
     else
       this.progress.content =
         state.checked && Date.now() - state.checked > 15000
-          ? "Статус устарел · [u] проверить"
+          ? "Статус устарел · обновите состояние"
           : "";
     const switching = [...state.tasks.values()].find(task => task.action === "servers/select");
     if (switching && (state.batch || state.homeTesting))
       this.progress.content = `${this.progress.chunks.map(chunk => chunk.text).join("")} · Применяем сервер`;
     const activeRows = [...state.tasks.values()].filter(task => task.action !== "status");
     if (activeRows.length > 1) this.progress.content = activeRows.map(task =>
-      cell(`${frames[state.frame % 10]} ${names[task.action] ?? "Ping → сайт"} · ${task.phase || "выполняется"} · [j] задачи`, width).trimEnd()).join("\n");
+      cell(`${frames[state.frame % 10]} ${names[task.action] ?? "Ping → сайт"} · ${task.phase || "выполняется"} · Задачи`, width).trimEnd()).join("\n");
     const inlineProgress = state.screen === "home" && state.inlineSpeed() && state.homeTesting && !switching;
     this.progress.visible = this.progress.chunks.some(chunk => chunk.text.length > 0) && !inlineProgress;
     this.progress.height = this.progress.visible ? Math.max(1, activeRows.length) : 0;
