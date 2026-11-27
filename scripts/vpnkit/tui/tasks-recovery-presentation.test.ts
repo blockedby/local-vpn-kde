@@ -40,6 +40,18 @@ async function fixture() {
   return { t, b, app, key, frame, close };
 }
 
+test("dismissing Tasks during a server check restores the active table", async () => {
+  const fixtureState = await fixture();
+  const { b, key, t, app, frame, close } = fixtureState;
+  try {
+    await key("v"); b.holds.add("servers/check-batch"); await key("p"); await key("j");
+    expect(app.screen).toBe("tasks"); t.mockInput.pressEscape(); await settle();
+    expect(await frame()).toContain("‹ Главная › Серверы");
+    t.mockInput.pressEnter(); expect(app.serverMenu).toBe(true);
+    expect(b.cancelled).toEqual([]);
+  } finally { await close(); }
+});
+
 test("presentation: task chooser cancels only the chosen measurement and confirms mutation cancellation", async () => {
   const f = await fixture();
   f.b.holds = new Set(["servers/check-batch", "servers/select"]);

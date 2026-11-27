@@ -58,8 +58,7 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
       : state.screen === "confirm" && state.confirmation === "subscription" ? "subscription"
       : state.screen === "cancel-confirm" ? "tasks"
       : state.screen === "retry-confirm" ? "recovery"
-      : state.screen === "tasks" ? "home"
-      : ["autostart", "details", "confirm", "recovery", "subscription"].includes(state.screen) ? state.overlayBase : "home", state.screen !== "confirm"); }, state.closing ? "Закрываем приложение." : state.screen === "home" ? "Уже на главной." : undefined, "none", true);
+      : ["autostart", "details", "confirm", "recovery", "subscription", "tasks"].includes(state.screen) ? state.overlayBase : "home", state.screen !== "confirm"); }, state.closing ? "Закрываем приложение." : state.screen === "home" ? "Уже на главной." : undefined, "none", true);
   add("global:quit-control", ["ctrl+c"], "Выход", "global", () => void state.close(), state.closing || state.disposed ? "Закрываем приложение." : undefined, "none", true);
   if (editor) {
     add("editor:submit", ["return"], "Сохранить", "editor", () => {
