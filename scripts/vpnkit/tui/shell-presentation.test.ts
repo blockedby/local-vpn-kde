@@ -51,6 +51,7 @@ test("shell: narrow terminals keep whole footer hints and the routing mode", asy
       const lines = t.captureCharFrame().split("\n");
       expect(lines[0]).toContain("строгий");
       const footer = lines.at(-2)!.trim();
+      expect(footer.endsWith("? все клавиши")).toBe(app.screen !== "target");
       expect(footer.length).toBeGreaterThan(0);
       for (const hint of footer.split(" · ")) expect(hint).toMatch(/^\S+ \S/);
       expect(footer).not.toMatch(/ (Esc|\?|q)$/);
@@ -93,8 +94,10 @@ test("shell: help draws grouped registry actions and unavailable reason", async 
   try {
     app.onKey({ name: "?", preventDefault() {} }); await t.renderOnce();
     const frame = t.captureCharFrame();
-    expect(frame).toContain("Помощь"); expect(frame).toContain("Общие"); expect(frame).toContain("Нет операции для отмены");
+    expect(frame).toContain("Клавиши"); expect(frame).toContain("Этот экран"); expect(frame).toContain("Действие");
     expect(frame).toContain("Ping всех + сайт");
+    app.onKey({ name: "tab", preventDefault() {} }); await t.renderOnce();
+    expect(t.captureCharFrame()).toContain("Нет операции для отмены");
     app.onKey({ name: "escape", preventDefault() {} }); await t.renderOnce();
     expect(t.captureCharFrame()).not.toContain("Нет операции для отмены");
   } finally { await app.close(); }
@@ -178,7 +181,7 @@ test("shell: confirmation keeps its originating tab and footer follows context",
     app.open("target"); await t.renderOnce();
     frame = t.captureCharFrame();
     expect(frame.split("\n")[1]).toContain("‹ Главная › Настройки");
-    expect(frame.split("\n").at(-2)).not.toContain("? помощь");
+    expect(frame.split("\n").at(-2)).not.toContain("? все клавиши");
     const before = app.editorValue;
     t.mockInput.pressKey("?"); await t.renderOnce();
     expect(app.helpOpen).toBe(false);
@@ -191,9 +194,10 @@ test("shell: help combines aliases and long notices wrap without hiding recovery
   const { terminal: t, app } = await fixture(100, 35);
   try {
     app.onKey({ name: "?", preventDefault() {} }); await t.renderOnce();
+    app.onKey({ name: "tab", preventDefault() {} }); await t.renderOnce();
     const help = t.captureCharFrame();
-    expect(help).toContain("v/h Серверы");
-    expect(help).toContain("Tab/Shift+Tab Сменить вкладку");
+    expect(help).toMatch(/v\/h +Серверы/);
+    expect(help).toMatch(/Tab\/Shift\+Tab +Сменить вкладку/);
     app.onKey({ name: "escape", preventDefault() {} });
     app.notify("Сетевые настройки VPN поменялись, нажмите [f] чтобы применить их ещё раз.", true);
     t.resize(60, 16); await t.renderOnce();
@@ -293,7 +297,7 @@ test("shell: mode survives a long server name and table columns have gutters", a
     t.resize(60, 16);
     app.tasks.set("measurement", { action: "servers/ping", measurement: true, started: 0, phase: "" });
     app.paint(); await t.renderOnce();
-    expect(t.captureCharFrame().split("\n").at(-2)).toContain("Esc главная");
+    expect(t.captureCharFrame().split("\n").at(-2)?.trimEnd()).toEndWith("? все клавиши");
     app.tasks.clear();
   } finally { await app.close(); }
 });

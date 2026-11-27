@@ -104,11 +104,13 @@ The interface opens on a home screen with Connection («Подключение»
 | `T` / `b` | Test the speed of the row under the cursor / offer the fastest measured shown server for confirmation |
 | `o` / `[` / `]` / `\` | Cycle sort (name, ping, speed, site, country) / choose column / reverse direction |
 | `l` | Details for the row under the cursor |
-| `:` / `Ctrl+P` | Search commands |
+| `:` / `Ctrl+P` | Open the shortcuts table with search focused |
 | `j` / `k` | Activity / cancel operation |
 | `X` | Remove the active profile after confirmation |
 | `z` | Stop the service or Docker and the VPN after confirmation |
-| `?` / `q` | Help / exit the interface |
+| `?` / `q` | Open keyboard shortcuts / exit the interface |
+
+In the shortcuts table, `Tab` / `Shift+Tab` switches between this screen, global actions, and all actions. `/` focuses search. Select a row with `↑` / `↓`, run it with `Enter`, or close the table with `Esc`.
 
 The status line names the selected server and the footer shows available keys. `a` opens autostart; it does not run ping. Checks can overlap or wait in a queue; `j` shows running, queued and finished operations. Available actions and shortcuts depend on the section and service state.
 

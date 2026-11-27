@@ -1,11 +1,12 @@
 import { isOverlay, type AppKeyEvent, type AppState, type Screen } from "./app-state";
 import { compatible } from "./request-policy";
+import { MIN_COLS, MIN_ROWS } from "./model";
 import type { ActionDefinition, ActionScope } from "./menu-actions";
 
 export const HOME_CONNECT_KEY = "s";
 
 /** Keys use OpenTUI names; modified keys use ctrl+ / shift+ prefixes. */
-export function actionRegistry(state: AppState, rowActions = false): ActionDefinition[] {
+export function actionRegistry(state: AppState, rowActions = false, underlying = false): ActionDefinition[] {
   const editor = ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(state.screen);
   const actions: ActionDefinition[] = [];
   const add = (id: string, keys: string[], label: string, scope: ActionScope, run: () => void,
@@ -13,11 +14,18 @@ export function actionRegistry(state: AppState, rowActions = false): ActionDefin
     actions.push({ id, key: keys[0]!, keys, label, scope, run, available: !reason,
       ...(reason ? { unavailableReason: reason, unavailableBehavior } : {}), preventDefault });
   };
-  if (state.paletteOpen) {
-    add("palette:close", ["escape"], "Закрыть команды", "editor", () => { state.paletteOpen = false; state.paint(); }, undefined, "none", true);
-    add("palette:run", ["return"], "Выполнить команду", "editor", () => state.runPaletteAction(), state.filteredPaletteActions()[state.paletteIndex]?.action.available ? undefined : "Команда недоступна.", "none", true);
-    add("palette:up", ["up"], "Предыдущая команда", "editor", () => { state.paletteIndex = Math.max(0, state.paletteIndex - 1); state.paintPalette(); }, state.paletteIndex > 0 ? undefined : "Начало списка.", "none", true);
-    add("palette:down", ["down"], "Следующая команда", "editor", () => { state.paletteIndex = Math.min(state.filteredPaletteActions().length - 1, state.paletteIndex + 1); state.paintPalette(); }, state.paletteIndex + 1 < state.filteredPaletteActions().length ? undefined : "Конец списка.", "none", true);
+  if (state.helpOpen && !underlying && !rowActions) {
+    const bind = (key: string, label: string, run: () => void) => add(`keys:${key}`, [key], label, "editor", run, undefined, "none", true);
+    bind("escape", "Закрыть клавиши", () => { state.helpOpen = false; state.paint(); });
+    if (state.viewport().width < MIN_COLS || state.viewport().height < MIN_ROWS) return actions;
+    bind("return", "Выполнить", () => state.runPaletteAction());
+    for (const [key, delta] of [["up", -1], ["down", 1], ["pageup", -state.keysPageSize()], ["pagedown", state.keysPageSize()], ["home", -Infinity], ["end", Infinity]] as const)
+      bind(key, "Выбор строки", () => { state.paletteIndex = Math.max(0, Math.min(state.filteredPaletteActions().length - 1, state.paletteIndex + delta)); state.paintPalette(); });
+    for (const [key, delta] of [["tab", 1], ["shift+tab", -1]] as const)
+      bind(key, "Сменить вкладку", () => { state.keysTab = (state.keysTab + delta + 3) % 3; state.paletteIndex = 0; state.paintPalette(); });
+    for (const key of state.searchFocused ? ["ctrl+p"] : ["/", ":", "ctrl+p"])
+      bind(key, "Поиск", () => { state.searchFocused = true; state.paint(); });
+    if (!state.searchFocused) bind("?", "Все клавиши", () => state.openKeys(false));
     add("global:quit-control", ["ctrl+c"], "Выход", "global", () => void state.close(), undefined, "none", true);
     return actions;
   }
@@ -27,17 +35,14 @@ export function actionRegistry(state: AppState, rowActions = false): ActionDefin
     add("global:quit-control", ["ctrl+c"], "Выход", "global", () => void state.close(), undefined, "none", true);
     return actions;
   }
-  if (state.helpOpen) {
-    add("help:close", ["escape", "?"], "Закрыть помощь", "global", () => { state.helpOpen = false; state.paint(); }, undefined, "none", true);
-    add("help:up", ["up", "pageup"], "Вверх", "global", () => { state.helpOffset = Math.max(0, state.helpOffset - 1); state.paint(); }, state.helpOffset === 0 ? "Начало списка." : undefined);
-    add("help:down", ["down", "pagedown"], "Вниз", "global", () => { state.helpOffset++; state.paint(); });
-    return actions;
+  if (!editor) {
+    add("global:help", ["?"], "Все клавиши", "global", () => state.openKeys(false), undefined, "none", true);
+    add("global:palette", [":", "ctrl+p"], "Поиск клавиш", "global", () => state.openKeys(true), undefined, "none", true);
   }
   if (state.serverMenu && !rowActions) {
     const entries = serverMenuActions(state);
     const move = (index: number) => { state.serverMenuIndex = index; state.paint(); };
     add("server-menu:close", ["escape"], "Закрыть меню", "menu", () => state.closeServerMenu(), undefined, "none", true);
-    add("global:help", ["?"], "Помощь", "global", () => { state.helpOffset = 0; state.helpOpen = true; state.paint(); }, undefined, "none", true);
     for (const [key, next] of [["up", Math.max(0, state.serverMenuIndex - 1)], ["down", Math.min(entries.length - 1, state.serverMenuIndex + 1)], ["home", 0], ["end", entries.length - 1]] as const)
       add(`server-menu:${key}`, [key], "Выбор действия", "menu", () => move(next), next === state.serverMenuIndex || next < 0 ? "Край списка." : undefined, "none", true);
     const current = entries[state.serverMenuIndex];
@@ -46,7 +51,6 @@ export function actionRegistry(state: AppState, rowActions = false): ActionDefin
     add("global:quit-control", ["ctrl+c"], "Выход", "global", () => void state.close(), undefined, "none", true);
     return actions;
   }
-  if (!editor) add("global:help", ["?"], "Помощь", "global", () => { state.helpOffset = 0; state.helpOpen = true; state.paint(); }, undefined, "none", true);
   add("global:back", ["escape"], state.screen === "servers" && state.filter ? "Очистить фильтр" : "Назад", editor ? "editor" : "global", () => { if (state.screen === "home") return; if (state.screen === "servers" && state.filter) { state.editFilter(""); if (state.filterAnchor && state.servers.some(s => s.server_id === state.filterAnchor)) state.serverID = state.filterAnchor; state.filterAnchor = undefined; state.syncServerViewport(); state.paint(); return; } state.open(
     state.screen.startsWith("profile-") ? "profiles"
       : state.screen === "server-rename" ? state.overlayBase
@@ -103,7 +107,6 @@ export function actionRegistry(state: AppState, rowActions = false): ActionDefin
   }
   add("global:quit", ["q"], "Выход", "global", () => void state.close(), state.closing || state.disposed ? "Закрываем приложение." : undefined);
   if (state.closing) return actions;
-  add("global:palette", [":", "ctrl+p"], "Команды", "global", () => { state.paletteOpen = true; state.paletteQuery = ""; state.paletteIndex = 0; state.paint(); }, undefined, "none", true);
   add("global:tasks", ["j"], "Задачи", "global", () => state.open("tasks"));
   if (state.recovery) {
     const reapply = state.recovery.actions.includes("reapply");
@@ -221,11 +224,11 @@ export function matchesAction(action: ActionDefinition, key: AppKeyEvent): boole
 }
 
 /** Stable, ordered groups usable by a footer, help screen or command palette. */
-export function groupedActions(state: AppState) {
+export function groupedActions(state: AppState, underlying = false) {
   const hint: Record<string, string> = { escape: "Esc", return: "Enter", tab: "Tab", "shift+tab": "Shift+Tab", "ctrl+c": "Ctrl+C", "ctrl+p": "Ctrl+P", up: "↑", down: "↓", pageup: "PgUp", pagedown: "PgDn", "shift+t": "T", home: "Home", end: "End", left: "←", right: "→" };
   const groups: { scope: ActionScope; actions: (ActionDefinition & { keyHints: string[] })[] }[] = [];
-  const listed = actionRegistry(state);
-  if (state.serverMenu && !state.helpOpen) {
+  const listed = actionRegistry(state, false, underlying);
+  if (state.serverMenu && (!state.helpOpen || underlying)) {
     const select = serverMenuActions(state).find(action => action.id === "servers:select");
     if (select) listed.push(select);
   }

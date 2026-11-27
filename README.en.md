@@ -64,7 +64,7 @@ For the first connection, press `c` and add a subscription or link. If the servi
 
 `m` — routing mode · `a` — autostart · `d` — diagnostics · `x` — disconnect VPN.
 
-The status line shows the connection, selected server and routing mode. `?` opens help, `:` or `Ctrl+P` searches commands, and `j` opens activity. Checks can overlap or wait in a queue; cancel a task from the activity panel.
+The status line shows the connection, selected server and routing mode. `?` opens the keyboard shortcuts table, `:` or `Ctrl+P` opens the same table with search focused, and `j` opens activity. Checks can overlap or wait in a queue; cancel a task from the activity panel.
 
 The table shows name, two-letter country code, ping, speed, website access and status. The Country («Страна») column is hidden when the table is narrower than 60 characters. `Enter` opens the row menu: Select server («Выбрать сервер»), Ping and site («Ping и сайт»), Server speed («Скорость сервера»), Server details («Подробности сервера») and Rename («Переименовать»). `/` filters the displayed and original names and country code, `Enter` keeps the filter and `Esc` clears it. `p` checks ping and website access and `t` checks speed and website access for the shown servers; `T` tests the speed of the row under the cursor and `b` offers the fastest measured shown server for confirmation. `o` cycles sort columns (name, ping, speed, site, country), `[` and `]` choose a column, and `\` reverses direction; clicking a header also sorts it. `l` opens server details, `i` opens settings, and `X` removes the active profile after confirmation. `a` opens autostart; it does not run ping.
 
