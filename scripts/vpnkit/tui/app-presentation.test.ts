@@ -117,7 +117,7 @@ test("missing actual autostart status stays explicit and does not infer from sav
     await settle();
     await t.renderOnce();
     const frame = t.captureCharFrame();
-    expect(frame).toContain("Запускать шлюз: да");
+    expect(frame).toMatch(/Запускать шлюз [ .]+‹ да ›/);
     expect(frame).toContain("не проверено");
     expect(frame).toContain("недоступно");
     expect(frame).not.toContain("Фактическое состояние службы: автозапуск включён");
@@ -360,11 +360,11 @@ test("presentation: native autostart edits retain the returned runtime and do no
     t.mockInput.pressKey("a");
     await settle();
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запускать native-службу: нет");
+    expect(t.captureCharFrame()).toMatch(/Запускать native-службу [ .]+‹ нет ›/);
     t.mockInput.pressKey("g");
     await settle();
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запускать native-службу: да");
+    expect(t.captureCharFrame()).toMatch(/Запускать native-службу [ .]+‹ да ›/);
   } finally {
     await app.close();
   }
@@ -762,11 +762,11 @@ test("presentation: autostart is opt-in, keeps gateway/connect consistent and ne
     await app.perform("status");
     t.mockInput.pressKey("a"); await settle(); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("При входе в KDE");
-    expect(t.captureCharFrame()).toContain("Подключать VPN: нет");
+    expect(t.captureCharFrame()).toMatch(/Подключать VPN [ .]+‹ нет ›/);
     t.mockInput.pressKey("a"); await settle();
     t.mockInput.pressKey("g"); await settle();
     t.resize(60, 18); await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запускать шлюз: нет");
+    expect(t.captureCharFrame()).toMatch(/Запускать шлюз [ .]+‹ нет ›/);
   } finally { await app.close(); }
 });
 
@@ -786,7 +786,7 @@ test("presentation: failed autostart save requires rereading authoritative setti
     t.mockInput.pressKey("a"); await settle();
     t.mockInput.pressKey("a"); await settle(); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Загрузить настройки");
-    expect(t.captureCharFrame()).not.toContain("Подключать VPN: да");
+    expect(t.captureCharFrame()).not.toMatch(/Подключать VPN [ .]+‹ да ›/);
   } finally { await app.close(); }
 });
 
@@ -809,8 +809,8 @@ test("presentation: autostart screen keeps saved intent separate from the actual
     await settle();
     await t.renderOnce();
     const frame = t.captureCharFrame();
-    expect(frame).toContain("Запускать шлюз: да");
-    expect(frame).toContain("Подключать VPN: да");
+    expect(frame).toMatch(/Запускать шлюз [ .]+‹ да ›/);
+    expect(frame).toMatch(/Подключать VPN [ .]+‹ да ›/);
     expect(frame).toContain("Фактическое состояние службы: автозапуск отключён");
     expect(frame).toContain("текущее состояние: неактивна");
   } finally {
@@ -848,7 +848,7 @@ test("presentation: successful autostart saves refresh actual state and preserve
     t.mockInput.pressKey("g");
     await settle();
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("Запускать native-службу: нет");
+    expect(t.captureCharFrame()).toMatch(/Запускать native-службу [ .]+‹ нет ›/);
     expect(t.captureCharFrame()).toContain("автозапуск отключён");
   } finally {
     await app.close();

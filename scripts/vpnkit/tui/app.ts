@@ -47,13 +47,7 @@ export class App extends AppState {
     this.homeView = new HomeView(renderer, this.content, index => { if (this.screen !== "home" || this.helpOpen) return; this.homeIndex = index; this.activateHome(); });
     this.summaryView = new SummaryView(renderer, this.content);
     this.menuView = new MenuView(renderer, this.content, index => {
-      if (isOverlay(this.screen) || this.helpOpen) return;
-      this.selected = index;
-      const item = this.items()[index];
-      const action = item && this.actions().find(candidate => candidate.keys.includes(item.key));
-      if (action?.available) action.run();
-      else if (action?.unavailableBehavior === "notice" && action.unavailableReason) this.notify(action.unavailableReason, true);
-      this.paint();
+      if (!isOverlay(this.screen)) this.activateMenuRow(index);
     });
     const serverArea = new BoxRenderable(renderer, { flexDirection: "row", flexGrow: 1, minHeight: 0, overflow: "hidden" });
     this.content.add(serverArea);
@@ -89,18 +83,19 @@ export class App extends AppState {
     const small = this.renderer.width < MIN_COLS || this.renderer.height < MIN_ROWS;
     this.tooSmall.visible = small;
     const overlayScreen = this.screen;
+    const noticeRows = this.noticeView.update(this);
     const modal = isOverlay(overlayScreen);
     if (modal) this.screen = this.overlayBase;
     this.homeView.update(this, !small && this.screen === "home");
     const editor = !small && ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(this.screen);
     this.editorView.update(this.editorValue, editor && !this.helpOpen, this.closing);
     const items = small || this.screen === "home" || this.screen === "servers" && this.ready() && !this.nativePreviewOnly() && this.status?.subscription === "configured" ? [] : this.items();
-    this.menuView.update(items, editor || small, this.selected, true, ["settings", "diagnostics", "profiles"].includes(this.screen));
-    this.summaryView.update(this);
+    const summaryRows = this.summaryView.update(this);
+    this.menuView.update(items, editor || small, this.selected, this.renderer.terminalWidth - 2, this.renderer.terminalHeight - 3 - summaryRows - noticeRows);
     if (small || this.screen === "home") this.summaryView.hide();
     this.paintTable();
     this.screen = overlayScreen;
-    this.noticeView.update(this); this.footerView.update(this, modal && ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(overlayScreen)); this.overlayView.update(this);
+    this.footerView.update(this, modal && ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(overlayScreen)); this.overlayView.update(this);
   }
   override onClosing() { this.editorView.blur(); }
   override onBeforeDispose() { this.renderer.keyInput.off("keypress", this.onKey); this.renderer.off("resize", this.onResize); }

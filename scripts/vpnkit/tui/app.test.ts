@@ -193,7 +193,7 @@ test("native setup failures never echo the private editor value", async () => {
   }
 });
 
-test("Settings toggles resume independently without connecting", async () => {
+test("settings arrows, Space and the letter toggle resume independently without connecting", async () => {
   const b = new FakeBackend();
   b.status = { ...b.status, runtime: "native", installed: true };
   const original = b.request.bind(b);
@@ -208,9 +208,12 @@ test("Settings toggles resume independently without connecting", async () => {
   try {
     await app.perform("status"); app.open("settings"); await settle();
     expect(app.items().find(item => item.key === "w")?.label).toBe("Автостарт после сна: нет");
-    app.onKey({ name: "w", preventDefault() {} }); await settle();
-    expect(options).toEqual({ gateway: false, connect: false, runtime: "native", resume: true });
-    expect(app.items().find(item => item.key === "w")?.label).toBe("Автостарт после сна: да");
+    for (const name of ["right", "left", "space", "w"]) {
+      const resume = !options.resume;
+      app.onKey({ name, preventDefault() {} }); await settle();
+      expect(options).toEqual({ gateway: false, connect: false, runtime: "native", resume });
+      expect(app.items()[app.selected]?.label).toBe(`Автостарт после сна: ${resume ? "да" : "нет"}`);
+    }
     expect(b.calls.some(call => ["start", "backend/start"].includes(call.action))).toBe(false);
   } finally { await app.close(); }
 });
@@ -246,6 +249,12 @@ test("native autostart edits retain the returned runtime and do not connect imme
     expect(JSON.parse(set!.value!).runtime).toBe("native");
     expect(options).toMatchObject({ gateway: true, connect: false, runtime: "native" });
     expect(app.autostart).toMatchObject({ gateway: true, connect: false, runtime: "native" });
+    key("down");
+    for (const name of ["right", "left", "space", "a"]) {
+      const connect = !options.connect;
+      key(name); await settle();
+      expect(options).toMatchObject({ gateway: true, connect, runtime: "native" });
+    }
     expect(b.calls.some((call) => ["start", "backend/start", "disconnect", "stop"].includes(call.action))).toBe(false);
   } finally {
     await app.close();

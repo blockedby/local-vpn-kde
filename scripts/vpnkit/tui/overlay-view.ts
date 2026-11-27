@@ -1,7 +1,7 @@
 import { BoxRenderable, InputRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
 import { isOverlay, type AppState } from "./app-state";
 import { SummaryView } from "./summary-view";
-import { MenuView } from "./menu-view";
+import { MenuView, menuHeight } from "./menu-view";
 import { EditorView } from "./editor-view";
 import { MIN_COLS, MIN_ROWS, palette as p } from "./model";
 import { cell, safeText, wrapText } from "./formatting";
@@ -41,18 +41,7 @@ export class OverlayView {
     }
     root.add(this.rowMenu);
     this.dialogSummary = new SummaryView(renderer, this.dialog);
-    this.dialogMenu = new MenuView(renderer, this.dialog, index => {
-      if (!this.current || this.current.helpOpen) return;
-      const state = this.current;
-      index += this.listOffset;
-      if (state.screen === "tasks") { const mapped = this.taskRows[index]; if (mapped === undefined || mapped < 0) return; index = mapped; }
-      state.selected = index;
-      const item = state.items()[index];
-      const action = item && state.actions().find(candidate => candidate.keys.includes(item.key));
-      if (action?.available) action.run();
-      else if (action?.unavailableBehavior === "notice" && action.unavailableReason) state.notify(action.unavailableReason, true);
-      state.paint();
-    }, "overlay");
+    this.dialogMenu = new MenuView(renderer, this.dialog, index => this.current?.activateMenuRow(index), "overlay");
     this.dialogEditor = new EditorView(renderer, this.dialog, value => this.current?.edit(value));
     this.backdrop = new BoxRenderable(renderer, { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", zIndex: 99, visible: false });
     root.add(this.backdrop);
@@ -65,9 +54,7 @@ export class OverlayView {
     for (let i = 0; i < 24; i++) { const row = new TextRenderable(renderer, { content: "", height: 1, flexShrink: 0 }); this.box.add(row); this.keysRows.push(row); }
   }
   private current?: AppState;
-  private listOffset = 0;
   private keysOffset = 0;
-  private taskRows: number[] = [];
   updatePalette(state: AppState) {
     this.current = state;
     const visible = state.helpOpen && this.renderer.width >= MIN_COLS && this.renderer.height >= MIN_ROWS;
@@ -144,21 +131,12 @@ export class OverlayView {
     if (modal) {
       const width = Math.min(64, this.renderer.terminalWidth - 4);
       this.dialogSummary.update(state);
-      const summaryHeight = this.dialogSummary.fit(width - 2);
       const items = state.items();
-      let displayItems: { key: string; label: string; id?: string }[] = items.map(item => ({ key: item.key, label: item.label, id: item.id }));
-      this.taskRows = [];
-      if (state.screen === "tasks") {
-        displayItems = [];
-        const running = [...state.tasks.values()].filter(task => task.action !== "status").length;
-        let at = 0;
-        for (const [title, count] of [["Выполняются", running], ["В очереди", state.queue.length], ["Завершены", state.history.length]] as const) {
-          if (!count) continue;
-          displayItems.push({ key: "", label: title }); this.taskRows.push(-1);
-          for (let i = 0; i < count; i++, at++) { const item = items[at]; if (item) { displayItems.push({ key: item.key, label: item.label, id: item.id }); this.taskRows.push(at); } }
-        }
-      }
-      const height = Math.min(this.renderer.terminalHeight - 4, Math.max(5, 2 + summaryHeight + (editor ? 3 : displayItems.length)));
+      const listHeight = menuHeight(items);
+      const maxHeight = this.renderer.terminalHeight - 4;
+      const summaryLimit = listHeight ? Math.max(1, maxHeight - 2 - Math.min(listHeight, 2)) : Infinity;
+      const summaryHeight = Math.min(summaryLimit, this.dialogSummary.fit(width - 2, 0, summaryLimit));
+      const height = Math.min(maxHeight, Math.max(5, 2 + summaryHeight + (editor ? 3 : listHeight)));
       if (state.screen === "details") {
         state.detailsOffset = Math.min(state.detailsOffset, Math.max(0, summaryHeight - (height - 2)));
         this.dialogSummary.update(state);
@@ -169,9 +147,7 @@ export class OverlayView {
       this.dialog.top = Math.floor((this.renderer.terminalHeight - height) / 2);
       this.dialog.title = state.screen === "server-rename" ? ` ${safeText(state.renameTarget?.original ?? "Сервер")} ` : ["confirm", "profile-remove", "cancel-confirm", "retry-confirm"].includes(state.screen) ? " Подтверждение " : state.screen === "autostart" ? " Автозапуск " : state.screen === "details" ? " Сервер " : state.screen === "tasks" ? " Задачи " : state.screen === "recovery" ? " Восстановление " : " Редактор ";
       const availableRows = Math.max(1, height - 2 - summaryHeight);
-      const selected = state.screen === "tasks" ? Math.max(0, this.taskRows.indexOf(state.selected)) : state.selected;
-      this.listOffset = Math.max(0, Math.min(Math.max(0, displayItems.length - availableRows), selected - availableRows + 1));
-      this.dialogMenu.update(displayItems.slice(this.listOffset, this.listOffset + availableRows), editor, selected - this.listOffset, true, state.screen === "tasks");
+      this.dialogMenu.update(items, editor, state.selected, width - 2, availableRows);
     }
   }
 }

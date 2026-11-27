@@ -601,7 +601,7 @@ export class AppState {
     if (["servers", "profiles", "diagnostics", "settings"].includes(screen)) this.tab = screen as typeof this.tab;
     this.helpOpen = false;
     this.pendingScreenRead = undefined;
-    this.selected = screen === "profile-remove" ? 1 : 0;
+    this.selected = 0;
     if (screen === "details") this.detailsOffset = 0;
     if (screen === "retry-confirm") {
       this.confirmationSnapshot = this.confirmationContext();
@@ -776,6 +776,14 @@ export class AppState {
   }
   items(): ActionDefinition[] {
     return defineMenuActions(this, menuItems(this));
+  }
+  activateMenuRow(index: number) {
+    if (this.helpOpen || this.filterEditing) return;
+    const item = this.items()[index];
+    if (!item) return;
+    this.selected = index;
+    this.onKey({ name: item.kind ? "return" : item.key, preventDefault() {} });
+    this.paint();
   }
   actions(): ActionDefinition[] { return actionRegistry(this); }
   groupedActions() { return groupedActions(this); }

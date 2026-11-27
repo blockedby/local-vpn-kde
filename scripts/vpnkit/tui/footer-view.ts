@@ -1,6 +1,7 @@
 import { BoxRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
 import { isOverlay, type AppState } from "./app-state";
 import { palette as p } from "./model";
+import { isListMenu } from "./menu-actions";
 
 export class FooterView {
   private footer: TextRenderable;
@@ -30,7 +31,7 @@ export class FooterView {
         if (actions.some(action => action.id === id && action.available)) result += ` · ${hint}`;
       return result;
     }
-    if (state.screen === "tasks") { return `↑↓ выбор${state.items()[state.selected]?.available ? " · Enter отменить" : ""} · Esc назад`; }
+    if (isListMenu(state.screen)) return `↑↓ выбор${state.items()[state.selected]?.kind === "toggle" ? " · ←→ изменить" : ""} · Enter открыть · Esc назад`;
     const actions = state.groupedActions().flatMap(group => group.actions).filter(action => action.available);
     if (state.screen === "home") {
       const has = (id: string) => state.groupedActions().flatMap(group => group.actions).some(action => action.id === id);

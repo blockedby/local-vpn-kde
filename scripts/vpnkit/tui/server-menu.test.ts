@@ -74,7 +74,7 @@ test("selection defaults to No and retains or rejects its captured identity", as
       expect(state.confirmation).toBe("select"); expect(state.selected).toBe(0); expect(backend.calls).toEqual([]);
       if (change === "removed") state.servers = [state.servers[1]!];
       if (change === "renamed") state.servers[0]!.display_name = "changed";
-      key("right"); expect(state.selected).toBe(1); key("return");
+      key("down"); expect(state.selected).toBe(1); key("return");
       expect(backend.calls.filter(c => c.action === "servers/select").map(c => c.value)).toEqual(change === "cursor" ? [rows[0]!.server_id] : []);
       expect(state.queue).toHaveLength(0);
     } finally { await state.close(); }
@@ -83,10 +83,14 @@ test("selection defaults to No and retains or rejects its captured identity", as
   try { key("return"); state.servers = [state.servers[1]!]; state.serverID = rows[1]!.server_id; key("return"); expect(backend.calls).toEqual([]); expect(state.notice).toContain("Сервер изменился"); } finally { await state.close(); }
 });
 
-test("confirmation navigation includes Tab and horizontal arrows with safe default", async () => {
+test("confirmation defaults to the safe choice and horizontal arrows do not activate actions", async () => {
   for (const screen of ["confirm", "profile-remove", "retry-confirm", "cancel-confirm"] as const) {
     const { state, key } = fixture();
-    try { state.open(screen, false, false); const safe = screen === "profile-remove" ? 1 : 0; expect(state.selected).toBe(safe); key("tab"); expect(state.selected).toBe(1 - safe); key("left"); expect(state.selected).toBe(safe); key("right"); expect(state.selected).toBe(1 - safe); } finally { await state.close(); }
+    try {
+      state.open(screen, false, false); expect(state.items()[state.selected]?.key).toBe("n");
+      key("tab"); key("left"); key("right"); expect(state.screen).toBe(screen); expect(state.items()[state.selected]?.key).toBe("y");
+      key("up"); expect(state.items()[state.selected]?.key).toBe("n");
+    } finally { await state.close(); }
   }
 });
 

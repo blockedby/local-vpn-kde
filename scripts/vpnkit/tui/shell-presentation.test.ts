@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import { App } from "./app";
 import { FakeBackend, rows } from "./app-test-fixtures";
+import { MIN_COLS } from "./model";
 
 async function fixture(width: number, height: number) {
   const terminal = await createTestRenderer({ width, height });
@@ -171,7 +172,7 @@ test("shell: confirmation keeps its originating tab and footer follows context",
   try {
     app.status!.networkmanager_active = "yes";
     app.open("settings"); await t.renderOnce();
-    expect(t.captureCharFrame().split("\n").at(-2)).toContain("x отключить");
+    expect(t.captureCharFrame().split("\n").at(-2)?.trim()).toBe("↑↓ выбор · Enter открыть · Esc назад · ? все клавиши");
     app.onKey({ name: "x", preventDefault() {} }); await t.renderOnce();
     let frame = t.captureCharFrame();
     expect(frame.split("\n")[1]).toContain("‹ Главная › Настройки");
@@ -228,7 +229,7 @@ test("shell: dialogs keep the workspace, capture shortcuts and stack help", asyn
     let frame = t.captureCharFrame();
     expect(frame).toContain("Node 00");
     expect(frame).toContain("остановить Docker и отключить VPN?");
-    expect(frame).toContain("[n] Нет"); expect(frame).toContain("[y] Да");
+    expect(frame).toMatch(/› Нет +n│/); expect(frame).toMatch(/ Да +y│/);
     const before = backend.calls.length;
     app.onKey({ name: "d", preventDefault() {} });
     expect(app.screen).toBe("confirm"); expect(backend.calls.length).toBe(before);
@@ -237,7 +238,7 @@ test("shell: dialogs keep the workspace, capture shortcuts and stack help", asyn
     expect(t.captureCharFrame()).not.toContain("confirm");
     app.onKey({ name: "escape", preventDefault() {} }); await t.renderOnce();
     expect(app.helpOpen).toBe(false); expect(app.screen).toBe("confirm");
-    frame = t.captureCharFrame(); expect(frame).toContain("[n] Нет");
+    frame = t.captureCharFrame(); expect(frame).toMatch(/› Нет +n│/);
     app.onKey({ name: "escape", preventDefault() {} });
     expect(app.screen).toBe("servers"); expect(backend.calls.length).toBe(before);
   } finally { await app.close(); }
@@ -255,7 +256,7 @@ test("shell: editor and native confirmation fit the minimum terminal", async () 
     app.confirmation = "subscription"; app.open("confirm"); await t.renderOnce();
     frame = t.captureCharFrame();
     expect(frame).toContain("Polkit"); expect(frame).toContain("автозапуск не изменяется");
-    expect(frame).toContain("[n] Нет"); expect(frame).toContain("[y] Да");
+    expect(frame).toMatch(/› Нет +n│/); expect(frame).toMatch(/ Да +y│/);
   } finally { await app.close(); }
 });
 
@@ -311,11 +312,11 @@ test("shell: settings show stored and actual state and profiles use available ro
     app.open("settings"); await t.renderOnce();
     let frame = t.captureCharFrame();
     expect(frame).toContain("шлюз да, VPN нет"); expect(frame).toContain("служба активна/вкл");
-    expect(frame).toContain(app.target); expect(frame).toContain("Режим: строгий");
+    expect(frame).toContain(app.target); expect(frame).toMatch(/Режим [ .]+‹ строгий ›/);
     expect(frame).not.toContain("[a] Автозапуск");
     t.resize(60, 16); app.open("autostart"); await t.renderOnce();
     frame = t.captureCharFrame();
-    expect(frame).toContain("Автозапуск"); expect(frame).toContain("[g]"); expect(frame).toContain("[a]");
+    expect(frame).toContain("Автозапуск"); expect(frame).toMatch(/Запускать шлюз .* g│/); expect(frame).toMatch(/Подключать VPN .* a│/);
     app.onKey({ name: "escape", preventDefault() {} }); expect(app.screen).toBe("settings");
     t.resize(80, 24);
     app.profiles = { active: "p0", items: Array.from({ length: 9 }, (_, i) => ({ id: `p${i}`, name: `Profile ${i}`, kind: "server" as const, count: i, stale: i === 2 })) };
@@ -336,11 +337,61 @@ test("shell: long task overlays scroll and outside clicks cannot activate worksp
     expect(app.screen).toBe("tasks"); expect(app.serverID).toBe(before);
     for (let i = 0; i < 11; i++) app.onKey({ name: "down", preventDefault() {} });
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("› 12  Выполняется");
+    expect(t.captureCharFrame()).toMatch(/› Выполняется .* 12│/);
     app.tasks.clear(); app.open("profiles"); app.open("profile-remove");
     expect(app.items()[app.selected]?.key).toBe("n");
     await t.renderOnce(); expect(t.captureCharFrame()).toContain("Удалить активный профиль?");
   } finally { app.tasks.clear(); await app.close(); }
+});
+
+for (const width of [80, MIN_COLS]) test(`menu rows keep value, arrow and shortcut on one line at ${width} columns`, async () => {
+  const { terminal, app } = await fixture(width, 24);
+  try {
+    app.status = { ...app.status!, runtime: "native", installed: true };
+    app.autostart = { gateway: false, connect: false, resume: false };
+    app.open("settings", false, false);
+    await terminal.renderOnce();
+    const lines = terminal.captureCharFrame().split("\n");
+    const first = lines.findIndex(line => line.includes("› Автостарт после сна"));
+    expect(first).toBeGreaterThan(0);
+    expect(lines[first]).toMatch(/‹ нет › +w $/);
+    expect(lines[first + 1]).toMatch(/Автозапуск .*→ +a $/);
+    expect(lines[first + 2]).toMatch(/Режим .*‹ строгий › +m $/);
+    for (const line of lines.slice(first, first + 3)) expect(Bun.stringWidth(line)).toBe(width);
+    expect(lines.at(-2)?.trimEnd()).toEndWith("? все клавиши");
+    if (width === 80) expect(lines.at(-2)?.trim()).toBe("↑↓ выбор · ←→ изменить · Enter открыть · Esc назад · ? все клавиши");
+    for (const key of ["right", "return"]) {
+      app.open("settings", false, false); terminal.mockInput.pressArrow("down");
+      await terminal.renderOnce();
+      expect(terminal.captureCharFrame().split("\n").at(-2)).not.toContain("←→ изменить");
+      terminal.mockInput.pressArrow("left"); expect(app.screen).toBe("settings");
+      if (key === "right") terminal.mockInput.pressArrow("right"); else terminal.mockInput.pressEnter();
+      expect(app.screen).toBe("autostart"); await terminal.renderOnce();
+      const dialog = terminal.captureCharFrame().split("\n");
+      const toggle = dialog.findIndex(line => /› Запускать.*‹ нет › +g│/.test(line));
+      expect(toggle).toBeGreaterThan(0); expect(dialog[toggle + 1]).toMatch(/Подключать VPN.*‹ нет › +a│/);
+    }
+  } finally { await app.close(); }
+});
+
+test("dangerous settings are last; clicking the divider does nothing and arrows skip it", async () => {
+  const { terminal, app, backend } = await fixture(80, 24);
+  try {
+    app.status = { ...app.status!, runtime: "native", installed: true }; app.gatewayRestartOffered = true;
+    app.open("settings", false, false);
+    const items = app.items();
+    expect(items.slice(-2).map(item => item.key)).toEqual(["g", "z"]);
+    app.selected = items.length - 3; app.paint(); await terminal.renderOnce();
+    const lines = terminal.captureCharFrame().split("\n");
+    const divider = lines.findIndex(line => /^\s*─+\s*$/.test(line)); expect(divider).toBeGreaterThan(0);
+    const before = backend.calls.length;
+    await terminal.mockMouse.click(8, divider); expect(app.selected).toBe(items.length - 3);
+    terminal.mockInput.pressArrow("down"); expect(items[app.selected]?.key).toBe("g");
+    terminal.mockInput.pressArrow("up"); expect(app.selected).toBe(items.length - 3);
+    await terminal.mockMouse.click(8, divider + 1);
+    expect(app.confirmation).toBe("gateway/restart"); expect(app.items()[app.selected]?.key).toBe("n");
+    expect(backend.calls).toHaveLength(before);
+  } finally { await app.close(); }
 });
 
 test("shell: fastest server confirmation names the measurement and defaults to No", async () => {
