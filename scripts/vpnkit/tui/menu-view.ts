@@ -32,6 +32,8 @@ export class MenuView {
 
   update(items: MenuItem[], editor: boolean, selected: number, width = this.renderer.terminalWidth - 2, available = this.rows.length) {
     this.controls.visible = !editor;
+    // Keep values and shortcuts near their titles on wide terminals.
+    width = Math.min(width, 76);
     const lines: (number | string)[] = [];
     items.forEach((item, index) => {
       if (item.dividerBefore) lines.push(item.dividerBefore === true ? "─".repeat(width) : item.dividerBefore);

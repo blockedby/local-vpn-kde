@@ -354,12 +354,13 @@ for (const width of [80, MIN_COLS]) test(`menu rows keep value, arrow and shortc
     const lines = terminal.captureCharFrame().split("\n");
     const first = lines.findIndex(line => line.includes("› Автостарт после сна"));
     expect(first).toBeGreaterThan(0);
-    expect(lines[first]).toMatch(/‹ нет › +w $/);
-    expect(lines[first + 1]).toMatch(/Автозапуск .*→ +a $/);
-    expect(lines[first + 2]).toMatch(/Режим .*‹ строгий › +m $/);
+    expect(lines[first]).toMatch(/‹ нет › +w *$/);
+    expect(lines[first + 1]).toMatch(/Автозапуск .*→ +a *$/);
+    expect(lines[first + 2]).toMatch(/Режим .*‹ строгий › +m *$/);
+    for (const line of lines.slice(first, first + 3)) expect(Bun.stringWidth(line.trimEnd())).toBeLessThanOrEqual(78);
     for (const line of lines.slice(first, first + 3)) expect(Bun.stringWidth(line)).toBe(width);
     expect(lines.at(-2)?.trimEnd()).toEndWith("? все клавиши");
-    if (width === 80) expect(lines.at(-2)?.trim()).toBe("↑↓ выбор · ←→ изменить · Enter открыть · Esc назад · ? все клавиши");
+    if (width === 80) expect(lines.at(-2)?.trim()).toBe("↑↓ выбор · ←→ изменить · Esc назад · ? все клавиши");
     for (const key of ["right", "return"]) {
       app.open("settings", false, false); terminal.mockInput.pressArrow("down");
       await terminal.renderOnce();

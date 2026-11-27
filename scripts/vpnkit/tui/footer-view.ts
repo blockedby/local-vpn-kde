@@ -31,7 +31,7 @@ export class FooterView {
         if (actions.some(action => action.id === id && action.available)) result += ` · ${hint}`;
       return result;
     }
-    if (isListMenu(state.screen)) return `↑↓ выбор${state.items()[state.selected]?.kind === "toggle" ? " · ←→ изменить" : ""} · Enter открыть · Esc назад`;
+    if (isListMenu(state.screen)) { const kind = state.items()[state.selected]?.kind; return `↑↓ выбор${kind === "toggle" ? " · ←→ изменить" : kind === "open" ? " · Enter открыть" : " · Enter выполнить"} · Esc назад`; }
     const actions = state.groupedActions().flatMap(group => group.actions).filter(action => action.available);
     if (state.screen === "home") {
       const has = (id: string) => state.groupedActions().flatMap(group => group.actions).some(action => action.id === id);
