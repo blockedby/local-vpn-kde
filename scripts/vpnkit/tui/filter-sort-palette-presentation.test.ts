@@ -37,11 +37,11 @@ test("selected shortcut stays visible at minimum size and after paging", async (
   const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
     key("?"); key("pagedown");
-    expect(app.paletteIndex).toBe(app.keysPageSize());
+    expect(app.paletteIndex).toBe(Math.max(1, app.keysPageSize() - 3));
     key("end"); await terminal.renderOnce();
     expect(app.paletteIndex).toBe(app.filteredPaletteActions().length - 1);
     expect(terminal.captureCharFrame()).toContain("›");
-    key("pageup"); expect(app.paletteIndex).toBe(app.filteredPaletteActions().length - 1 - app.keysPageSize());
+    key("pageup"); expect(app.paletteIndex).toBe(app.filteredPaletteActions().length - 1 - Math.max(1, app.keysPageSize() - 3));
     key("home"); key("down"); key("up"); expect(app.paletteIndex).toBe(0);
     terminal.resize(39, 10); await terminal.renderOnce();
     expect(terminal.captureCharFrame()).toContain("Увеличьте окно"); expect(terminal.captureCharFrame()).not.toContain("Клавиши");
@@ -75,5 +75,36 @@ test("clicking a table column selects and then reverses its sort", async () => {
     expect(app.sort).toBe("ping"); expect(app.sortDescending).toBe(false); expect(terminal.captureCharFrame()).toContain("Ping мс↑");
     await terminal.mockMouse.click(42, 2); await terminal.renderOnce();
     expect(app.sortDescending).toBe(true); expect(terminal.captureCharFrame()).toContain("Ping мс↓");
+  } finally { await app.close(); }
+});
+
+test("search finds row-menu actions and runs them for the selected server", async () => {
+  const terminal = await createTestRenderer({ width: 100, height: 30 });
+  const app = new App(terminal.renderer, new FakeBackend());
+  try {
+    await app.perform("status"); app.open("servers", false); await app.perform("servers/list");
+    app.serverID = app.servers[0]!.server_id;
+    app.openKeys(true); app.paletteQuery = "переименовать";
+    expect(app.filteredPaletteActions().map(row => row.action.id)).toContain("servers:rename");
+    app.paletteIndex = app.filteredPaletteActions().findIndex(row => row.action.id === "servers:rename");
+    app.runPaletteAction();
+    expect(app.helpOpen).toBe(false); expect(String(app.screen)).toBe("server-rename");
+    app.open("servers", false); app.serverMenu = true; app.openKeys(false);
+    expect(app.filteredPaletteActions().some(row => row.action.label === "Ping и сайт")).toBe(true);
+  } finally { await app.close(); }
+});
+
+test("search footer follows the Esc behaviour and Ctrl+C quits below minimum size", async () => {
+  const terminal = await createTestRenderer({ width: 80, height: 24 });
+  const app = new App(terminal.renderer, new FakeBackend());
+  const input = terminal.mockInput;
+  try {
+    input.pressKey(":"); await terminal.renderOnce();
+    expect(terminal.captureCharFrame()).toContain("Esc закрыть");
+    input.pressKey("q"); await terminal.renderOnce();
+    expect(terminal.captureCharFrame()).toContain("Esc очистить");
+    terminal.resize(39, 9); await terminal.renderOnce();
+    app.onKey({ name: "c", ctrl: true, preventDefault() {} });
+    expect(app.closing).toBe(true);
   } finally { await app.close(); }
 });

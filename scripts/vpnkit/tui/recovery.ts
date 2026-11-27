@@ -20,6 +20,7 @@ const groups: Record<string, readonly string[]> = {
   input: ["invalid-request"],
 };
 const messages: Record<string, string> = {
+  "demo-unsupported": "В демо-режиме профили не меняются.",
  "native-network-busy": "Не удалось восстановить сеть VPN: её использует другая системная служба. Подробности — в диагностике [d].",
   "docker-unavailable": "Docker недоступен. Проверьте его состояние и установку.",
   "underlay-install-failed": "Не удалось установить маршруты обхода VPN. Подробности — в диагностике.",

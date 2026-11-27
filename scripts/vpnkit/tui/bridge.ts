@@ -306,6 +306,7 @@ export class DemoBackend implements Backend {
     "New York",
     "Москва",
   ].map((display_name, i) => ({
+    profile_id: "demo",
     server_id: `srv_${String(i).padStart(27, "0")}`,
     display_name,
     country: ["FI", "NL", "DE", "JP", "US", "RU"][i],
@@ -375,6 +376,8 @@ export class DemoBackend implements Backend {
           reply.catalog = { status: "ok", servers: structuredClone(this.servers) };
         }
       }
+      // The demo has one fixed profile; changing it would report work that never happened.
+      if (action === "profiles/add" || action === "profiles/remove") { reply.ok = false; reply.reason = "demo-unsupported"; }
       if (action.startsWith("profiles/")) reply.profiles = { active: "demo", items: [{ id: "demo", name: "Демо-подписка", kind: "subscription", count: this.servers.length, stale: false }] };
       if (action === "servers/list" || action === "servers/refresh")
         reply.catalog = { status: "ok", servers: structuredClone(this.servers) };

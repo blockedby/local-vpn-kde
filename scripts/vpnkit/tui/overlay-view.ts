@@ -60,7 +60,7 @@ export class OverlayView {
     root.add(this.box);
     this.search = new InputRenderable(renderer, { width: "100%", flexShrink: 0, maxLength: 256, placeholder: "действие или клавиша", backgroundColor: p.panel, textColor: p.text, focusedBackgroundColor: p.edge,
       onMouseDown: () => { if (this.current?.helpOpen) { this.current.searchFocused = true; this.current.paint(); } } });
-    this.search.on("input", () => { if (!this.current?.helpOpen || this.current.paletteQuery === this.search.value) return; this.current.paletteQuery = this.search.value; this.current.paletteIndex = 0; this.current.paintPalette(); });
+    this.search.on("input", () => { if (!this.current?.helpOpen || this.current.paletteQuery === this.search.value) return; const flipped = !this.current.paletteQuery !== !this.search.value; this.current.paletteQuery = this.search.value; this.current.paletteIndex = 0; if (flipped) this.current.paint(); else this.current.paintPalette(); });
     this.box.add(this.search);
     for (let i = 0; i < 24; i++) { const row = new TextRenderable(renderer, { content: "", height: 1, flexShrink: 0 }); this.box.add(row); this.keysRows.push(row); }
   }
@@ -83,7 +83,7 @@ export class OverlayView {
     const searching = state.searchFocused || !!state.paletteQuery;
     // Fixed size while open, so typing a query does not make the window jump.
     const width = Math.min(56, this.renderer.terminalWidth - 4);
-    const height = Math.min(this.keysRows.length, state.keysPageSize(), 18) + 2;
+    const height = Math.min(this.keysRows.length, state.keysPageSize()) + 2;
     const count = height - 2 - (searching ? 1 : 0);
     this.box.width = width; this.box.height = height;
     this.box.left = Math.floor((this.renderer.terminalWidth - width) / 2); this.box.top = Math.max(1, Math.floor((this.renderer.terminalHeight - height - 1) / 2));

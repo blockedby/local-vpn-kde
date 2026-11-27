@@ -17,14 +17,16 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
   if (state.helpOpen && !underlying && !rowActions) {
     const bind = (key: string, label: string, run: () => void) => add(`keys:${key}`, [key], label, "editor", run, undefined, "none", true);
     bind("escape", state.paletteQuery ? "Очистить поиск" : "Закрыть клавиши", () => { if (state.paletteQuery) { state.paletteQuery = ""; state.searchFocused = false; state.paletteIndex = 0; } else state.helpOpen = false; state.paint(); });
+    add("global:quit-control", ["ctrl+c"], "Выход", "global", () => void state.close(), undefined, "none", true);
     if (state.viewport().width < MIN_COLS || state.viewport().height < MIN_ROWS) return actions;
     bind("return", "Выполнить", () => state.runPaletteAction());
-    for (const [key, delta] of [["up", -1], ["down", 1], ["pageup", -state.keysPageSize()], ["pagedown", state.keysPageSize()], ["home", -Infinity], ["end", Infinity]] as const)
+    // A page leaves room for the search row and section headers, so the selection stays on screen.
+    const page = Math.max(1, state.keysPageSize() - 3);
+    for (const [key, delta] of [["up", -1], ["down", 1], ["pageup", -page], ["pagedown", page], ["home", -Infinity], ["end", Infinity]] as const)
       bind(key, "Выбор строки", () => { state.paletteIndex = Math.max(0, Math.min(state.filteredPaletteActions().length - 1, state.paletteIndex + delta)); state.paintPalette(); });
     for (const key of state.searchFocused ? ["ctrl+p"] : ["/", ":", "ctrl+p"])
       bind(key, "Поиск", () => { state.searchFocused = true; state.paint(); });
     if (!state.searchFocused) bind("?", "Все клавиши", () => state.openKeys(false));
-    add("global:quit-control", ["ctrl+c"], "Выход", "global", () => void state.close(), undefined, "none", true);
     return actions;
   }
   if (state.filterEditing) {

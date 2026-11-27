@@ -7,7 +7,7 @@ import { serverViewport, sortedServers, type ServerSort } from "./catalog-order"
 import { safeText } from "./formatting";
 import { names } from "./action-labels";
 import { dispatchKey } from "./key-dispatch";
-import { actionRegistry, groupedActions } from "./action-registry";
+import { actionRegistry, groupedActions, serverMenuActions } from "./action-registry";
 import { perform, updateCatalog } from "./request-execution";
 import { testHomeSpeed, runBatch, cancelTask, cancel, retryCheck, reconnectBackend } from "./measurements";
 import { defineMenuActions, menuItems, type ActionDefinition } from "./menu-actions";
@@ -266,7 +266,7 @@ export class AppState {
     this.paletteQuery = ""; this.paletteIndex = 0; this.paint();
   }
   /** Rows the shortcuts list can show, including section headers. */
-  keysPageSize() { return Math.max(1, Math.min(24, this.viewport().terminalHeight - 7)); }
+  keysPageSize() { return Math.max(1, Math.min(18, this.viewport().terminalHeight - 7)); }
   paletteActions(all = true) {
     const screen = this.screen, menu = this.serverMenu;
     const result: { action: ActionDefinition & { keyHints: string[] }; screen: Screen }[] = [];
@@ -281,6 +281,12 @@ export class AppState {
           if (target === "tasks" && action.id.startsWith("task:cancel:") && Number(action.key) > [...this.tasks.values()].filter(task => task.action !== "status").length + this.queue.length) continue;
           const outsideDialog = index > 0 && (menu || isOverlay(screen));
           seen.add(action.id); result.push({ action: outsideDialog ? { ...action, available: false, unavailableReason: "Сначала закройте текущее окно." } : action, screen: target });
+        }
+        // Row-menu actions (rename, single ping) have no key of their own but should be searchable.
+        if (target === "servers" && !this.serverMenu) for (const action of serverMenuActions(this)) {
+          if (seen.has(action.id)) continue;
+          const outsideDialog = index > 0 && (menu || isOverlay(screen));
+          seen.add(action.id); result.push({ action: { ...action, keyHints: [], ...(outsideDialog ? { available: false, unavailableReason: "Сначала закройте текущее окно." } : {}) }, screen: target });
         }
       }
     } finally { this.screen = screen; this.serverMenu = menu; }
@@ -298,7 +304,7 @@ export class AppState {
     for (const entry of this.paletteActions(all ?? !!query)) {
       const action = entry.action;
       // Arrows and paging are in the footer; listing them only pushes real actions out of view.
-      if (action.keys.every(key => navigation.has(key))) continue;
+      if (action.keys.length && action.keys.every(key => navigation.has(key))) continue;
       const section = action.scope === "global" ? "Общие" : entry.screen === this.screen ? here : this.keysSectionName(entry.screen);
       const alias = merged.find(row => row.section === section && row.screen === entry.screen && row.action.label === action.label && row.action.unavailableReason === action.unavailableReason);
       if (alias) {
@@ -316,7 +322,8 @@ export class AppState {
     if (!entry.action.available) { this.notify(entry.action.unavailableReason ?? "Команда недоступна.", true); return; }
     this.helpOpen = false;
     if (this.screen !== entry.screen) this.open(entry.screen, false, false);
-    const action = this.groupedActions().flatMap(group => group.actions).find(action => action.id === entry.action.id);
+    const action = this.groupedActions().flatMap(group => group.actions).find(action => action.id === entry.action.id)
+      ?? (this.screen === "servers" ? serverMenuActions(this).find(action => action.id === entry.action.id) : undefined);
     if (action?.available) action.run();
     else this.notify(action?.unavailableReason ?? "Команда недоступна.", true);
     this.paint();
