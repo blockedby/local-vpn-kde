@@ -22,7 +22,7 @@ export class FooterView {
       const base = "↑↓ сервер · Enter действия · / фильтр · Esc главная";
       let result = base;
       const actions = state.actions();
-      for (const [id, hint] of [["global:cancel", "k отменить"], ["servers:p", "p ping"], ["servers:t", "t скорость"], ["servers:sort", "o сортировка"], ["global:help", "? помощь"]] as const)
+      for (const [id, hint] of [["global:cancel", "k отменить"], ["servers:p", "p ping"], ["servers:t", "t скорость"], ["servers:r", "r обновить"], ["servers:sort", "o сортировка"], ["global:help", "? помощь"]] as const)
         if (actions.some(action => action.id === id && action.available) && Bun.stringWidth(`${result} · ${hint}`) <= this.renderer.terminalWidth - 2) result += ` · ${hint}`;
       return result;
     }
