@@ -35,7 +35,9 @@ export class FooterView {
     // Servers without a table (service stopped, no subscription) show a plain menu: drive it with arrows too.
     if (state.screen === "servers") {
       const rows = state.visibleMenuItems(), item = rows[state.selected];
-      return `${rows.length > 1 ? "↑↓ выбор · " : ""}Enter ${(item?.title ?? item?.label ?? "выбрать").toLowerCase()} · Esc главная`;
+      const enter = `Enter ${(item?.title ?? item?.label ?? "выбрать").toLowerCase()}`;
+      // Enter goes first and is shortened rather than dropped on narrow terminals.
+      return [Bun.stringWidth(enter) + 18 > this.renderer.terminalWidth ? "Enter выбрать" : enter, rows.length > 1 ? "↑↓ выбор" : "", "Esc главная"].filter(Boolean).join(" · ");
     }
     if (isListMenu(state.screen)) { const kind = state.items()[state.selected]?.kind; return `↑↓ выбор${kind === "toggle" ? " · ←→ изменить" : kind === "open" ? " · Enter открыть" : " · Enter выполнить"} · Esc назад`; }
     const actions = state.groupedActions().flatMap(group => group.actions).filter(action => action.available);

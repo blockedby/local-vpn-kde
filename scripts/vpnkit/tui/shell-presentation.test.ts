@@ -499,3 +499,28 @@ test("server row menu and server details share one panel position and size", asy
     expect(menu.top).toBeGreaterThan(0); expect(details).toEqual(menu);
   } finally { await app.close(); }
 });
+
+test("servers: table-only keys do nothing once the table disappears, and the fallback keeps a selected row", async () => {
+  const { terminal: t, backend, app } = await fixture(80, 24);
+  try {
+    app.status = { ...app.status!, subscription: "missing" as any }; app.paint(); await t.renderOnce();
+    for (const name of ["/", "l", "b"]) app.onKey({ name, preventDefault() {} });
+    expect(app.filterEditing).toBe(false); expect(String(app.screen)).toBe("servers");
+    app.filterEditing = true; app.paint(); expect(app.filterEditing).toBe(false);
+    app.status = { ...app.status!, runtime: "native", installed: true, subscription: "configured", gateway_state: "egress-unavailable" }; app.servers = []; app.paint(); await t.renderOnce();
+    const rows = app.visibleMenuItems(); expect(rows.length).toBeGreaterThan(1);
+    app.selected = rows.length - 1;
+    app.status = { ...app.status!, gateway_state: "absent" }; app.paint(); await t.renderOnce();
+    expect(app.selected).toBeLessThan(app.visibleMenuItems().length);
+    expect(t.captureCharFrame()).toContain("› ");
+    void backend;
+  } finally { await app.close(); }
+});
+
+test("servers fallback footer keeps Enter at the minimum width", async () => {
+  const { terminal: t, app } = await fixture(MIN_COLS, 10);
+  try {
+    app.servers = []; app.catalogLoaded = true; app.paint(); await t.renderOnce();
+    expect(t.captureCharFrame().split("\n").at(-2)).toContain("Enter");
+  } finally { await app.close(); }
+});

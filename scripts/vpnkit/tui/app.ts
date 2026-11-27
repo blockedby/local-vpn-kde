@@ -90,7 +90,11 @@ export class App extends AppState {
     this.homeView.update(this, !small && this.screen === "home");
     const editor = !small && ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(this.screen);
     this.editorView.update(this.editorValue, editor && !this.helpOpen, this.closing);
+    // The table can disappear under an open filter (subscription removed, service stopped).
+    if (this.filterEditing && this.screen === "servers" && !this.hasServerTable()) this.filterEditing = false;
     const items = small ? [] : this.visibleMenuItems();
+    // Rows can shrink under the cursor; keep the marker on a row that Enter will run.
+    if (items.length && this.selected >= items.length) this.selected = items.length - 1;
     // Diagnostics puts its action above the facts; other screens describe first, then list actions.
     const actionFirst = this.screen === "diagnostics";
     if (actionFirst !== this.actionFirst) {

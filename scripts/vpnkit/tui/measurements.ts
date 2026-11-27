@@ -187,6 +187,7 @@ export async function reconnectBackend(state: AppState) {
     if (!state.backend.reconnect) { state.notify("Перезапустите интерфейс: служба не поддерживает восстановление.", true); return; }
     state.reconnecting = true;
     state.paint();
+    const recovery = state.recovery;
     try {
       await state.backend.reconnect();
       if (state.closing || state.disposed) return;
@@ -197,8 +198,12 @@ export async function reconnectBackend(state: AppState) {
         const list = await state.perform("servers/list");
         if (!list?.ok) throw new Error();
       }
-      state.recovery = undefined;
-      if (state.screen === "recovery") state.open(state.overlayBase, false, false);
+      // A disconnect that arrived during these reads wins: keep its recovery and stay offline.
+      if (state.backendOffline) throw new Error();
+      if (state.recovery === recovery) {
+        state.recovery = undefined;
+        if (state.screen === "recovery") state.open(state.overlayBase, false, false);
+      }
       state.notify("Связь восстановлена. Состояние обновлено; действия не повторялись.");
     } catch { state.backendOffline = true; state.notify("Не удалось восстановить связь. Выберите «Восстановить связь» ещё раз.", true); }
     finally {

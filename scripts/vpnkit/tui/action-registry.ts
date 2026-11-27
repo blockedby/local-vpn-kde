@@ -160,9 +160,9 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
   }
   const items = state.items();
   if (state.screen === "servers") {
-    add("servers:filter", ["/"], "Фильтр серверов", "server-table", () => { state.filterEditing = true; state.filterAnchor = state.serverID; state.paint(); }, state.ready() && state.servers.length ? undefined : "Список серверов недоступен.", "none", true);
-    add("servers:fastest", ["b"], "Подключить самый быстрый", "server-table", () => state.confirmFastest());
-    add("servers:details", ["l"], "Подробности сервера", "server-table", () => state.open("details"), state.serverID ? undefined : "Нет выбранного сервера.");
+    add("servers:filter", ["/"], "Фильтр серверов", "server-table", () => { state.filterEditing = true; state.filterAnchor = state.serverID; state.paint(); }, state.hasServerTable() ? undefined : "Список серверов недоступен.", "none", true);
+    add("servers:fastest", ["b"], "Подключить самый быстрый", "server-table", () => state.confirmFastest(), state.hasServerTable() ? undefined : "Список серверов недоступен.");
+    add("servers:details", ["l"], "Подробности сервера", "server-table", () => state.open("details"), !state.hasServerTable() ? "Список серверов недоступен." : state.serverID ? undefined : "Нет выбранного сервера.");
     if (rowActions) add("servers:rename", ["n"], "Переименовать", "server-table", () => state.openServerRename(), state.serverID ? undefined : "Нет выбранного сервера.", "notice", true);
     const ping = items.find(item => item.key === "p");
     add(ping?.id ?? "servers:ping-alias", ["p"], state.filter ? `Ping показанных (${state.filteredServers().length}) + сайт` : "Ping всех + сайт", "server-table", () => void state.runBatch("ping"),
