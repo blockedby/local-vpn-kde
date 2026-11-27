@@ -91,11 +91,11 @@ test("palette filters actions, ignores text hotkeys, and preserves confirmations
     state.screen = screen;
     for (const action of state.actions()) if (!/^(help:|editor:|filter:)/.test(action.id) && action.id !== "global:palette") expect(ids.has(action.id)).toBe(true);
   }
-  state.screen = "servers"; state.openKeys(true); state.onKey(key("tab"));
+  state.screen = "servers"; state.openKeys(true); state.onKey(key("shift+tab"));
   state.onKey(key("q")); expect(state.helpOpen).toBe(true); expect(state.closing).toBe(false);
   state.paletteQuery = "отключить vpn"; state.paletteIndex = 0; state.onKey(key("return"));
   expect(String(state.screen)).toBe("confirm"); expect(backend.calls.some(call => call.action === "disconnect")).toBe(false);
-  state.open("servers", false); state.onKey(key(":")); state.onKey(key("tab")); state.paletteQuery = "отменить";
+  state.open("servers", false); state.onKey(key(":")); state.onKey(key("shift+tab")); state.paletteQuery = "отменить";
   const index = state.filteredPaletteActions().findIndex(v => !v.action.available); expect(index).toBeGreaterThanOrEqual(0);
   const reason = state.filteredPaletteActions()[index]!.action.unavailableReason!;
   state.paletteIndex = index; state.onKey(key("return")); expect(state.helpOpen).toBe(true); expect(state.notice).toBe(reason);
@@ -105,7 +105,7 @@ test("palette filters actions, ignores text hotkeys, and preserves confirmations
 test("Enter on an exact alias runs the searched shortcut, not the first key of the row", async () => {
   const { state } = fixture();
   try {
-    state.openKeys(true); state.onKey(key("tab")); state.paletteQuery = "Shift+Tab";
+    state.openKeys(true); state.onKey(key("shift+tab")); state.paletteQuery = "Shift+Tab";
     expect(state.filteredPaletteActions().map(row => row.action.keyHints)).toEqual([["Tab", "Shift+Tab"]]);
     state.onKey(key("return")); expect(state.helpOpen).toBe(false); expect(state.screen).toBe("settings");
   } finally { await state.close(); }

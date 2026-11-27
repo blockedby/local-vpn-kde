@@ -23,9 +23,9 @@ test("shortcut tabs, search focus and selection share one keyboard window", asyn
     input.pressKey("/"); await input.typeText("cTrL+p"); await terminal.renderOnce();
     expect(app.filteredPaletteActions().map(row => row.action.id)).toEqual(["global:palette"]);
     input.pressEscape(); await Bun.sleep(50); input.pressKey(":");
-    expect(app.searchFocused).toBe(true); expect(app.paletteQuery).toBe(""); expect(app.keysTab).toBe(0);
+    expect(app.searchFocused).toBe(true); expect(app.paletteQuery).toBe(""); expect(app.keysTab).toBe(2);
     input.pressKey("?"); await terminal.renderOnce();
-    expect(app.paletteQuery).toBe("?"); expect(terminal.captureCharFrame()).toContain("Ничего не найдено");
+    expect(app.paletteQuery).toBe("?"); expect(app.filteredPaletteActions().map(row => row.action.id)).toEqual(["global:help"]);
     input.pressEscape(); await Bun.sleep(50); expect(app.helpOpen).toBe(false);
   } finally { await app.close(); }
 });

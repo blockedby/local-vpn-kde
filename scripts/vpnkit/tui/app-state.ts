@@ -263,7 +263,7 @@ export class AppState {
   paletteQuery = "";
   paletteIndex = 0;
   openKeys(search: boolean) {
-    this.helpOpen = true; this.searchFocused = search; this.keysTab = 0;
+    this.helpOpen = true; this.searchFocused = search; this.keysTab = search ? 2 : 0;
     this.paletteQuery = ""; this.paletteIndex = 0; this.paint();
   }
   keysPageSize() { return Math.max(1, Math.min(30, this.viewport().terminalHeight - 4) - 5); }

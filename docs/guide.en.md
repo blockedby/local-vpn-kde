@@ -104,7 +104,7 @@ The interface opens on a home screen with Connection («Подключение»
 | `T` / `b` | Test the speed of the row under the cursor / offer the fastest measured shown server for confirmation |
 | `o` / `[` / `]` / `\` | Cycle sort (name, ping, speed, site, country) / choose column / reverse direction |
 | `l` | Details for the row under the cursor |
-| `:` / `Ctrl+P` | Open the shortcuts table with search focused |
+| `:` / `Ctrl+P` | Search all actions in the shortcuts table |
 | `j` / `k` | Activity / cancel operation |
 | `X` | Remove the active profile after confirmation |
 | `z` | Stop the service or Docker and the VPN after confirmation |
