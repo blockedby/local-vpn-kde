@@ -1,7 +1,25 @@
 import { expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import { App } from "./app";
-import { FakeBackend, rows } from "./app-test-fixtures";
+import { FakeBackend, rows, settle } from "./app-test-fixtures";
+
+for (const scenario of ["missing subscription", "egress unavailable", "empty catalog"]) test(`Servers fallback activates its displayed row: ${scenario}`, async () => {
+  const terminal = await createTestRenderer({ width: 100, height: 24 });
+  const backend = new FakeBackend(); backend.rows = [];
+  backend.status = { ...backend.status, runtime: "native", installed: true,
+    ...(scenario === "missing subscription" ? { subscription: "not configured" } : scenario === "egress unavailable" ? { gateway_state: "egress-unavailable" } : {}) };
+  const app = new App(terminal.renderer, backend);
+  try {
+    await app.perform("status"); terminal.mockInput.pressKey("v"); await settle();
+    if (scenario === "egress unavailable") terminal.mockInput.pressArrow("down");
+    const label = scenario === "missing subscription" ? "Добавить подписку" : scenario === "egress unavailable" ? "Запустить сервис" : "Обновить подписку и список";
+    await terminal.renderOnce(); const frame = terminal.captureCharFrame();
+    expect(frame).toContain(`› ${label}`); expect(frame).toContain(`Enter ${label.toLowerCase()}`);
+    const before = backend.calls.length; terminal.mockInput.pressEnter(); await settle();
+    if (scenario === "missing subscription") expect(app.screen).toBe("subscription");
+    else expect(backend.calls[before]?.action).toBe(scenario === "egress unavailable" ? "backend/start" : "servers/refresh");
+  } finally { await app.close(); }
+});
 
 for (const [width, height] of [[100, 35], [60, 16]] as const) test(`row menu fits ${width}x${height}`, async () => {
   const terminal = await createTestRenderer({ width, height }); const backend = new FakeBackend(); const app = new App(terminal.renderer, backend);

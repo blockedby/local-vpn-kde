@@ -65,13 +65,13 @@ export class App extends AppState {
   }
   private onResize = () => { this.syncServerViewport(); this.paint(); };
   override viewport() { return { width: this.renderer.width, height: this.renderer.height, terminalHeight: this.renderer.terminalHeight }; }
-  override paintMeasurement() { super.paintMeasurement(); this.headerView.update(this, this.demo); this.detailsView.update(this, this.renderer.width >= DETAILS_THRESHOLD && (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0); if (this.screen === "details") this.overlayView.update(this); }
+  override paintMeasurement() { super.paintMeasurement(); this.headerView.update(this, this.demo); this.detailsView.update(this, this.renderer.width >= DETAILS_THRESHOLD && (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.hasServerTable()); if (this.screen === "details") this.overlayView.update(this); }
   override paintTable() {
     super.paintTable();
-    const tableVisible = (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0;
+    const tableVisible = (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.hasServerTable();
     const wide = this.renderer.width >= DETAILS_THRESHOLD && tableVisible;
     this.detailsView.update(this, wide);
-    this.tableView.update({ width: this.renderer.terminalWidth - 2 - (wide ? DETAILS_WIDTH : 0), visible: this.renderer.width >= MIN_COLS && this.renderer.height >= MIN_ROWS && (this.screen === "servers" || isOverlay(this.screen) && this.tab === "servers") && this.ready() && !this.nativePreviewOnly() && this.servers.length > 0, servers: this.visibleServers(), rowCount: this.rowCount(), serverID: this.serverID, batch: this.batch, frame: this.frame, liveSpeeds: this.liveSpeeds, sort: this.sort, sortDescending: this.sortDescending, filter: this.filter, filterEditing: this.filterEditing, shown: this.filteredServers().length, total: this.servers.length });
+    this.tableView.update({ width: this.renderer.terminalWidth - 2 - (wide ? DETAILS_WIDTH : 0), visible: this.renderer.width >= MIN_COLS && this.renderer.height >= MIN_ROWS && tableVisible, servers: this.visibleServers(), rowCount: this.rowCount(), serverID: this.serverID, batch: this.batch, frame: this.frame, liveSpeeds: this.liveSpeeds, sort: this.sort, sortDescending: this.sortDescending, filter: this.filter, filterEditing: this.filterEditing, shown: this.filteredServers().length, total: this.servers.length });
     this.headerView.update(this, this.demo);
     if (this.screen === "details" || this.serverMenu) this.overlayView.update(this);
   }
@@ -90,7 +90,7 @@ export class App extends AppState {
     this.homeView.update(this, !small && this.screen === "home");
     const editor = !small && ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(this.screen);
     this.editorView.update(this.editorValue, editor && !this.helpOpen, this.closing);
-    const items = small || this.screen === "home" || this.screen === "servers" && this.ready() && !this.nativePreviewOnly() && this.status?.subscription === "configured" ? [] : this.items();
+    const items = small ? [] : this.visibleMenuItems();
     // Diagnostics puts its action above the facts; other screens describe first, then list actions.
     const actionFirst = this.screen === "diagnostics";
     if (actionFirst !== this.actionFirst) {

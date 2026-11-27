@@ -178,7 +178,7 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
     }, state.servers.length ? undefined : "Список серверов пуст.");
     for (const [key, delta] of [["[", -1], ["]", 1]] as const) add(`servers:sort-${key}`, [key], "Столбец сортировки", "server-table", () => { const sorts = ["name", "ping", "speed", "availability", "country"] as const; state.setSort(sorts[(sorts.indexOf(state.sort) + delta + sorts.length) % sorts.length]!); }, state.servers.length ? undefined : "Список серверов пуст.");
     add("servers:sort-reverse", ["\\"], "Обратить сортировку", "server-table", () => state.setSort(state.sort), state.servers.length ? undefined : "Список серверов пуст.");
-    if (rowActions || state.servers.length && state.ready() && !state.nativePreviewOnly()) {
+    if (rowActions || state.hasServerTable()) {
       for (const [name, delta] of [["up", -1], ["down", 1], ["pageup", -state.rowCount()], ["pagedown", state.rowCount()], ["home", -Infinity], ["end", Infinity]] as const) {
         const list = state.sortedServers(), at = Math.max(0, list.findIndex(s => s.server_id === state.serverID));
         const next = Math.max(0, Math.min(list.length - 1, at + delta));
@@ -190,11 +190,7 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
     }
   }
   // The list is ordered in the same precedence as the former dispatch path.
-  if (state.screen !== "servers" && state.screen !== "home") bindList(items);
-  if (state.screen === "servers" && (!state.ready() || state.nativePreviewOnly())) {
-    const current = items[state.selected];
-    add("menu:select", ["return"], "Выбрать", "menu", () => { current?.run(); state.paint(); }, current ? current.unavailableReason : "Нет выбранного пункта.", current?.unavailableBehavior ?? "none");
-  }
+  if (state.screen !== "home" && !(state.screen === "servers" && (rowActions || state.hasServerTable()))) bindList(state.visibleMenuItems(items));
   if (!items.some(item => item.key === "u")) add("global:refresh", ["u"], state.screen === "diagnostics" ? "Обновить диагностику" : "Обновить состояние", "global", () => { void state.perform(state.screen === "diagnostics" ? "diagnostics" : "status"); state.paint(); }, state.backendOffline ? "Служба управления недоступна." : undefined, state.backendOffline ? "notice" : "none");
   for (const item of items) actions.push({ ...item, preventDefault: true, run: () => { item.run(); state.paint(); } });
   // A shortcut has one effective owner. Earlier definitions have the same

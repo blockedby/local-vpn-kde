@@ -459,6 +459,9 @@ export class AppState {
   ready() {
     return (this.status?.gateway_state ?? this.status?.vpn_state) === "healthy";
   }
+  hasServerTable() {
+    return this.ready() && !this.nativePreviewOnly() && this.status?.subscription === "configured" && this.servers.length > 0;
+  }
   runtime(): "docker" | "native" {
     return this.status?.runtime === "native" ? "native" : "docker";
   }
@@ -778,12 +781,18 @@ export class AppState {
   items(): ActionDefinition[] {
     return defineMenuActions(this, menuItems(this));
   }
+  visibleMenuItems(items = this.items()) {
+    if (this.screen === "home" || this.screen === "servers" && this.hasServerTable()) return [];
+    if (this.screen === "servers" && this.ready() && !this.nativePreviewOnly() && this.status?.subscription === "configured")
+      return items.filter(item => item.key === "r");
+    return items;
+  }
   activateMenuRow(index: number) {
     if (this.helpOpen || this.filterEditing) return;
-    const item = this.items()[index];
+    const item = this.visibleMenuItems()[index];
     if (!item) return;
     this.selected = index;
-    this.onKey({ name: item.kind ? "return" : item.key, preventDefault() {} });
+    this.onKey({ name: item.kind || this.screen === "servers" ? "return" : item.key, preventDefault() {} });
     this.paint();
   }
   actions(): ActionDefinition[] { return actionRegistry(this); }
