@@ -13,6 +13,7 @@ export class MenuView {
   private rows: BoxRenderable[] = [];
   private labels: TextRenderable[] = [];
   private indices: (number | undefined)[] = [];
+  get node() { return this.controls; }
 
   constructor(private renderer: CliRenderer, parent: BoxRenderable, activate: (index: number) => void, scope = "workspace") {
     this.controls = new BoxRenderable(renderer, { flexDirection: "column", flexShrink: 0 });

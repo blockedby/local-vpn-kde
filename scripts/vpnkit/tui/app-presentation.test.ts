@@ -65,7 +65,7 @@ test("shell has clickable home tiles and a section breadcrumb", async () => {
     const row = frame.split("\n").findIndex(line => line.includes("Диагностика"));
     await t.mockMouse.click(frame.split("\n")[row]!.indexOf("Диагностика"), row); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("‹ Главная › Диагностика");
-    expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+    expect(t.captureCharFrame()).toContain("Сеть VPN");
   } finally { await app.close(); }
 });
 
@@ -141,7 +141,7 @@ test("presentation: completed diagnostics never reopen a screen the user left", 
     finish(reply());
     await task;
     await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("OpenVPN / KDE");
+    expect(t.captureCharFrame()).not.toContain("Сеть VPN");
     expect(t.captureCharFrame()).toContain("Enter — Подключить");
   } finally {
     finish(reply());
@@ -381,11 +381,11 @@ test("presentation: navigation and diagnostics Back are immediate during a held 
     const task = app.perform("start");
     t.mockInput.pressKey("d");
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+    expect(t.captureCharFrame()).toContain("Сеть VPN");
     t.mockInput.pressEscape();
     await Bun.sleep(60);
     await t.renderOnce();
-    expect(t.captureCharFrame()).not.toContain("OpenVPN / KDE");
+    expect(t.captureCharFrame()).not.toContain("Сеть VPN");
     t.mockInput.pressKey("c");
     await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Enter сохранить");
@@ -504,7 +504,7 @@ test("presentation: batch publishes each result and allows navigation without ca
     await settle();
     t.mockInput.pressKey("d");
     await t.renderOnce();
-    expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+    expect(t.captureCharFrame()).toContain("Сеть VPN");
     b.hold = undefined;
     finish({
       ...reply(),
@@ -938,8 +938,8 @@ test("presentation: installed native diagnostics failure can be retried without 
     expect(t.captureCharFrame()).toContain("Не удалось создать журнал");
     t.mockInput.pressKey("u"); await settle(); await t.renderOnce();
     const frame = t.captureCharFrame();
-    expect(frame).toContain("Native-служба:");
-    expect(frame).toContain("Проверка: выполнена");
+    expect(frame).toMatch(/Сервис +/);
+    expect(frame).toMatch(/Проверка +выполнена/);
     expect(frame).not.toContain("Docker");
     expect(frame).not.toContain("Не удалось создать журнал");
     t.mockInput.pressKey("h"); await Bun.sleep(60); await t.renderOnce();
@@ -1263,7 +1263,7 @@ test("presentation: ping and site render before batch completion and completed r
   expect(row).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
   expect(t.captureCharFrame()).toContain("1/2");
   t.mockInput.pressKey("d"); await t.renderOnce();
-  expect(t.captureCharFrame()).toContain("OpenVPN / KDE");
+  expect(t.captureCharFrame()).toContain("Сеть VPN");
   t.mockInput.pressKey("v"); await t.renderOnce();
   expect(t.captureCharFrame()).toContain("37");
   finish({...reply(),catalog:{status:"ok",servers:rows.map(s=>({...s,ping_status:"ready",availability:"ready",latency_ms:37}))}});

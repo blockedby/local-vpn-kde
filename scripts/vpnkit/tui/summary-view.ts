@@ -1,7 +1,7 @@
 import { BoxRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
 import type { AppState } from "./app-state";
 import { palette as p } from "./model";
-import { safeText } from "./formatting";
+import { cell, safeText } from "./formatting";
 import { detailsLines } from "./details-view";
 
 function wrapDialogLine(input: string, width: number): string[] {
@@ -33,6 +33,7 @@ export class SummaryView {
     return lines.length;
   }
   hide() { this.summary.visible = false; this.summary.height = 0; }
+  get node() { return this.summary; }
   update(state: AppState) {
     const gateway = state.status?.gateway_state ?? state.status?.vpn_state;
     const gatewayNames: Record<string, string> = { healthy: "готов", "egress-unavailable": "нет выхода в сеть", absent: "не запущен", inactive: "не запущен", stopped: "остановлен", starting: "запускается", unhealthy: "ошибка", running: "проверяется" };
@@ -108,10 +109,22 @@ export class SummaryView {
     if (state.screen === "target")
       this.summary.content =
         "Адрес для проверки доступности\nHTTPS-запрос через каждый сервер; это не тест скорости.";
-    if (state.screen === "diagnostics")
-      this.summary.content = state.nativeMode()
-        ? `OpenVPN / KDE: ${state.status?.networkmanager_active === "yes" ? "активен" : state.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nNative-служба: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${state.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${state.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${state.status?.last_attempt ?? "—"}`
-        : `OpenVPN / KDE: ${state.status?.networkmanager_active === "yes" ? "активен" : state.status?.networkmanager_active === "no" ? "отключён" : "неизвестно"}\nDocker: ${gatewayNames[gateway ?? ""] ?? "неизвестно"}\nПрофиль KDE: ${state.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"}\nПроверка: ${state.status?.diagnostics === "available" ? "выполнена" : "не запускалась"}\nПоследняя попытка: ${state.status?.last_attempt ?? "—"}`;
+    if (state.screen === "diagnostics") {
+      // The action comes first (the menu is drawn above); the facts follow as a compact grid.
+      const facts: [string, string][] = [
+        ["Сеть VPN", state.status?.networkmanager_active === "yes" ? "активна" : state.status?.networkmanager_active === "no" ? "отключена" : "неизвестно"],
+        [state.nativeMode() ? "Сервис" : "Docker", gatewayNames[gateway ?? ""] ?? "неизвестно"],
+        ["Профиль KDE", state.status?.networkmanager_configured === "yes" ? "настроен" : "не подтверждён"],
+        ["Проверка", state.status?.diagnostics === "available" ? "выполнена" : "не запускалась"],
+        ["Последняя попытка", state.status?.last_attempt || "—"],
+      ];
+      const label = Math.max(...facts.map(([name]) => Bun.stringWidth(name))) + 2;
+      const pair = ([name, value]: [string, string]) => `${cell(name, label)}${value}`;
+      const columns = this.renderer.terminalWidth >= 80 ? 2 : 1, half = Math.ceil(facts.length / columns);
+      const lines = Array.from({ length: half }, (_, row) => columns === 1 ? pair(facts[row]!) : `${cell(pair(facts[row]!), 38)}${facts[row + half] ? pair(facts[row + half]!) : ""}`.trimEnd());
+      this.summary.content = ["", ...lines].join("\n");
+      height = lines.length + 1;
+    }
     if (state.screen === "servers")
       this.summary.content = state.nativePreviewOnly()
         ? !state.ready()
@@ -122,7 +135,7 @@ export class SummaryView {
           : state.status?.subscription !== "configured"
             ? "Добавьте подписку для загрузки серверов."
             : state.catalogStale ? "Подписка изменена. Обновите список серверов [r]." : state.catalogLoaded ? "Список серверов пуст. Обновите источник [r] или откройте профили [c]." : "Загружаем серверы… Обновить список [r].";
-    if (state.screen === "settings") { this.summary.content = ""; this.summary.visible = false; height = 0; }
+    if (state.screen === "settings" || state.screen === "profiles") { this.summary.content = ""; this.summary.visible = false; height = 0; }
     if (state.screen === "servers" && state.ready() && !state.nativePreviewOnly() && state.status?.subscription === "configured" && state.servers.length) { this.summary.visible = false; height = 0; }
     this.summary.height = height;
     return height;

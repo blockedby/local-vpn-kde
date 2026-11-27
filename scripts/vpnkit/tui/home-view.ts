@@ -30,14 +30,15 @@ export class HomeView {
     this.root.visible = visible;
     if (!visible) return;
     const cols = state.homeColumns(), rowsTotal = Math.ceil(TILES / cols);
-    // Full tiles take five rows, compact four, title-only three. Header, footer and
-    // a two-line notice take four; when even title-only rows do not fit, scroll.
+    // Full tiles take five rows, compact four, title-only three, plus one blank row under
+    // each. Content is centred, so every height leaves equal space above and below.
+    // Header, footer and a two-line notice take four; when even title-only rows do not fit, scroll.
     const room = this.renderer.height - 2 - (state.noticeReserved() ? 2 : 0);
-    const compact = this.renderer.height < rowsTotal * 5 + 5;
-    const tileHeight = !compact ? 5 : rowsTotal * 4 <= room ? 4 : 3;
-    const fitsAll = rowsTotal * tileHeight <= room;
+    const compact = this.renderer.height < rowsTotal * 6 + 5;
+    const tileHeight = !compact ? 5 : rowsTotal * 5 <= room ? 4 : 3;
+    const fitsAll = rowsTotal * (tileHeight + 1) <= room;
     // A scrolled grid spends one row saying how many tiles are out of view.
-    const visibleRows = fitsAll ? rowsTotal : Math.max(1, Math.min(rowsTotal, Math.floor((room - 1) / tileHeight)));
+    const visibleRows = fitsAll ? rowsTotal : Math.max(1, Math.min(rowsTotal, Math.floor((room - 1) / (tileHeight + 1))));
     const selectedRow = Math.floor(state.homeIndex / cols);
     if (selectedRow < this.firstRow) this.firstRow = selectedRow;
     if (selectedRow >= this.firstRow + visibleRows) this.firstRow = selectedRow - visibleRows + 1;
@@ -82,8 +83,8 @@ export class HomeView {
       return lines;
     };
     const settingsLines = compact ? [data[LAST]![1]!] : [...wrap(data[LAST]![1]!), ...wrap(data[LAST]![2]!)];
-    const extra = compact ? 0 : Math.min(2, Math.max(0, this.renderer.height - (rowsTotal * 5) - 2), Math.max(0, settingsLines.length - 2));
-    this.rows.forEach((row, i) => { row.visible = i >= this.firstRow && i < this.firstRow + visibleRows; row.height = compact ? tileHeight : 5 + (i === Math.floor(LAST / cols) ? extra : 0); });
+    const extra = compact ? 0 : Math.min(2, Math.max(0, this.renderer.height - (rowsTotal * 6) - 2), Math.max(0, settingsLines.length - 2));
+    this.rows.forEach((row, i) => { row.visible = i >= this.firstRow && i < this.firstRow + visibleRows; row.height = 1 + (compact ? tileHeight : 5 + (i === Math.floor(LAST / cols) ? extra : 0)); });
     // Rebuild every row when the column count changes: appending only the moved
     // tiles would leave them after the ones that stayed, out of navigation order.
     if (cols !== this.columns) {
@@ -92,8 +93,8 @@ export class HomeView {
       this.tiles.forEach((tile, i) => this.rows[Math.floor(i / cols)]!.add(tile.box));
     }
     this.tiles.forEach((tile, i) => {
-      // One blank row under each block separates the rows of the grid.
-      tile.box.height = (compact ? tileHeight : 5 + (Math.floor(i / cols) === Math.floor(LAST / cols) ? extra : 0)) - 1; tile.box.backgroundColor = i === state.homeIndex ? p.edge : p.panel;
+      // The row is one taller than the block, leaving a blank row between grid rows.
+      tile.box.height = compact ? tileHeight : 5 + (Math.floor(i / cols) === Math.floor(LAST / cols) ? extra : 0); tile.box.backgroundColor = i === state.homeIndex ? p.edge : p.panel;
       // Centred tiles: the highlighted border and title colour mark the selection, so no cursor glyph.
       // Letter shortcuts are not drawn; they live in the «Клавиши» window.
       const own = tileWidth(i);

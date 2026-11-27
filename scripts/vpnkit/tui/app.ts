@@ -19,6 +19,7 @@ export { cell } from "./formatting";
 const RELAUNCH_COMMAND = "/usr/bin/kvpn";
 
 export class App extends AppState {
+  private actionFirst = false;
   private root: BoxRenderable;
   private headerView: HeaderView;
   private tabView: TabView;
@@ -90,6 +91,13 @@ export class App extends AppState {
     const editor = !small && ["subscription", "target", "profile-name", "profile-source", "server-rename"].includes(this.screen);
     this.editorView.update(this.editorValue, editor && !this.helpOpen, this.closing);
     const items = small || this.screen === "home" || this.screen === "servers" && this.ready() && !this.nativePreviewOnly() && this.status?.subscription === "configured" ? [] : this.items();
+    // Diagnostics puts its action above the facts; other screens describe first, then list actions.
+    const actionFirst = this.screen === "diagnostics";
+    if (actionFirst !== this.actionFirst) {
+      this.actionFirst = actionFirst;
+      if (actionFirst) this.content.insertBefore(this.menuView.node, this.summaryView.node);
+      else this.content.insertBefore(this.summaryView.node, this.menuView.node);
+    }
     const summaryRows = this.summaryView.update(this);
     this.menuView.update(items, editor || small, this.selected, this.renderer.terminalWidth - 2, this.renderer.terminalHeight - 3 - summaryRows - noticeRows);
     if (small || this.screen === "home") this.summaryView.hide();
