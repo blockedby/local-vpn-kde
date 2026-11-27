@@ -91,11 +91,11 @@ test("palette filters actions, ignores text hotkeys, and preserves confirmations
     state.screen = screen;
     for (const action of state.actions()) if (!/^(help:|editor:|filter:)/.test(action.id) && action.id !== "global:palette") expect(ids.has(action.id)).toBe(true);
   }
-  state.screen = "servers"; state.openKeys(true); state.onKey(key("shift+tab"));
+  state.screen = "servers"; state.openKeys(true);
   state.onKey(key("q")); expect(state.helpOpen).toBe(true); expect(state.closing).toBe(false);
   state.paletteQuery = "отключить vpn"; state.paletteIndex = 0; state.onKey(key("return"));
   expect(String(state.screen)).toBe("confirm"); expect(backend.calls.some(call => call.action === "disconnect")).toBe(false);
-  state.open("servers", false); state.onKey(key(":")); state.onKey(key("shift+tab")); state.paletteQuery = "отменить";
+  state.open("servers", false); state.onKey(key(":")); state.paletteQuery = "отменить";
   const index = state.filteredPaletteActions().findIndex(v => !v.action.available); expect(index).toBeGreaterThanOrEqual(0);
   const reason = state.filteredPaletteActions()[index]!.action.unavailableReason!;
   state.paletteIndex = index; state.onKey(key("return")); expect(state.helpOpen).toBe(true); expect(state.notice).toBe(reason);
@@ -105,7 +105,7 @@ test("palette filters actions, ignores text hotkeys, and preserves confirmations
 test("Enter on an exact alias runs the searched shortcut, not the first key of the row", async () => {
   const { state } = fixture();
   try {
-    state.openKeys(true); state.onKey(key("shift+tab")); state.paletteQuery = "Shift+Tab";
+    state.openKeys(true); state.paletteQuery = "Shift+Tab";
     expect(state.filteredPaletteActions().map(row => row.action.keyHints)).toEqual([["Tab", "Shift+Tab"]]);
     state.onKey(key("return")); expect(state.helpOpen).toBe(false); expect(state.screen).toBe("settings");
   } finally { await state.close(); }
@@ -117,7 +117,7 @@ test("palette autostart toggle does not start a conflicting screen read", async 
   let finish!: (r: Reply) => void;
   backend.hold = { action: "autostart/read", promise: new Promise(resolve => { finish = resolve; }) };
   try {
-    state.openKeys(true); state.keysTab = 2;
+    state.openKeys(true); state.paletteQuery = state.filteredPaletteActions(true).find(entry => entry.action.id === "autostart:g")!.action.label;
     state.paletteIndex = state.filteredPaletteActions().findIndex(entry => entry.action.id === "autostart:g");
     expect(state.paletteIndex).toBeGreaterThanOrEqual(0);
     state.runPaletteAction(); await settle();
@@ -130,7 +130,7 @@ test("palette excludes finished task history", async () => {
   const { state } = fixture();
   try {
     state.history.push({ action: "diagnostics", started: Date.now(), ended: Date.now(), phase: "", outcome: "Завершено" });
-    state.keysTab = 2; state.paletteQuery = "завершено";
+    state.paletteQuery = "завершено";
     expect(state.filteredPaletteActions()).toHaveLength(0);
   } finally { await state.close(); }
 });
@@ -152,12 +152,11 @@ test("every available palette action avoids conflicts with reads it starts", asy
     return { state, pending };
   }
   const seed = prepared();
-  seed.state.keysTab = 2;
-  const ids = seed.state.filteredPaletteActions().filter(entry => entry.action.available).map(entry => entry.action.id);
+  const ids = seed.state.filteredPaletteActions(true).filter(entry => entry.action.available).map(entry => [entry.action.id, entry.action.label] as const);
   await seed.state.close();
-  for (const id of ids) {
+  for (const [id, label] of ids) {
     const { state, pending } = prepared();
-    state.openKeys(true); state.keysTab = 2;
+    state.openKeys(true); state.paletteQuery = label;
     state.paletteIndex = state.filteredPaletteActions().findIndex(entry => entry.action.id === id);
     try {
       expect(state.paletteIndex).toBeGreaterThanOrEqual(0);

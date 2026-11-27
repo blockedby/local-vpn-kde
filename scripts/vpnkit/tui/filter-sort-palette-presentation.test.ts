@@ -3,7 +3,7 @@ import { createTestRenderer } from "@opentui/core/testing";
 import { App } from "./app";
 import { FakeBackend } from "./app-test-fixtures";
 
-test("shortcut tabs, search focus and selection share one keyboard window", async () => {
+test("shortcut sections, search focus and selection share one keyboard window", async () => {
   const terminal = await createTestRenderer({ width: 80, height: 24 });
   const app = new App(terminal.renderer, new FakeBackend());
   const input = terminal.mockInput;
@@ -15,18 +15,19 @@ test("shortcut tabs, search focus and selection share one keyboard window", asyn
     }
     input.pressKey("?"); input.pressKey("q"); await terminal.renderOnce();
     expect(app.helpOpen).toBe(true); expect(app.searchFocused).toBe(false); expect(app.paletteQuery).toBe("");
-    expect(terminal.captureCharFrame()).toContain("Фильтр серверов");
-    input.pressTab(); expect(app.keysTab).toBe(1);
-    expect(app.filteredPaletteActions().every(row => row.action.scope === "global")).toBe(true);
-    input.pressTab(); expect(app.keysTab).toBe(2);
-    input.pressKey("\x1b[Z"); expect(app.keysTab).toBe(1);
+    const frame = terminal.captureCharFrame();
+    expect(frame).toContain("Клавиши · Серверы · / поиск"); expect(frame).toContain("Фильтр серверов"); expect(frame).toContain("── Общие ─");
+    expect(frame.indexOf("Фильтр серверов")).toBeLessThan(frame.indexOf("── Общие ─"));
+    expect(app.filteredPaletteActions().some(row => ["up", "down", "pageup"].includes(row.action.key))).toBe(false);
     input.pressKey("/"); await input.typeText("cTrL+p"); await terminal.renderOnce();
     expect(app.filteredPaletteActions().map(row => row.action.id)).toEqual(["global:palette"]);
-    input.pressEscape(); await Bun.sleep(50); input.pressKey(":");
-    expect(app.searchFocused).toBe(true); expect(app.paletteQuery).toBe(""); expect(app.keysTab).toBe(2);
+    input.pressEscape(); await Bun.sleep(50);
+    expect(app.helpOpen).toBe(true); expect(app.paletteQuery).toBe(""); expect(app.searchFocused).toBe(false);
+    input.pressEscape(); await Bun.sleep(50); expect(app.helpOpen).toBe(false);
+    input.pressKey(":"); expect(app.searchFocused).toBe(true); expect(app.paletteQuery).toBe("");
     input.pressKey("?"); await terminal.renderOnce();
     expect(app.paletteQuery).toBe("?"); expect(app.filteredPaletteActions().map(row => row.action.id)).toEqual(["global:help"]);
-    input.pressEscape(); await Bun.sleep(50); expect(app.helpOpen).toBe(false);
+    input.pressEscape(); await Bun.sleep(50); input.pressEscape(); await Bun.sleep(50); expect(app.helpOpen).toBe(false);
   } finally { await app.close(); }
 });
 
@@ -35,7 +36,7 @@ test("selected shortcut stays visible at minimum size and after paging", async (
   const app = new App(terminal.renderer, new FakeBackend());
   const key = (name: string) => app.onKey({ name, preventDefault() {} });
   try {
-    key("?"); key("tab"); key("tab"); key("pagedown");
+    key("?"); key("pagedown");
     expect(app.paletteIndex).toBe(app.keysPageSize());
     key("end"); await terminal.renderOnce();
     expect(app.paletteIndex).toBe(app.filteredPaletteActions().length - 1);
@@ -43,7 +44,7 @@ test("selected shortcut stays visible at minimum size and after paging", async (
     key("pageup"); expect(app.paletteIndex).toBe(app.filteredPaletteActions().length - 1 - app.keysPageSize());
     key("home"); key("down"); key("up"); expect(app.paletteIndex).toBe(0);
     terminal.resize(39, 10); await terminal.renderOnce();
-    expect(terminal.captureCharFrame()).toContain("Увеличьте окно"); expect(terminal.captureCharFrame()).not.toContain("Этот экран");
+    expect(terminal.captureCharFrame()).toContain("Увеличьте окно"); expect(terminal.captureCharFrame()).not.toContain("Клавиши");
     key("return"); expect(app.helpOpen).toBe(true); key("escape"); expect(app.helpOpen).toBe(false);
   } finally { await app.close(); }
 });

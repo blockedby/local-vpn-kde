@@ -110,7 +110,7 @@ The interface opens on a home screen with Connection («Подключение»
 | `z` | Stop the service or Docker and the VPN after confirmation |
 | `?` / `q` | Open keyboard shortcuts / exit the interface |
 
-In the shortcuts table, `Tab` / `Shift+Tab` switches between this screen, global actions, and all actions. `/` focuses search. Select a row with `↑` / `↓`, run it with `Enter`, or close the table with `Esc`.
+The shortcuts window lists the current screen's actions first, then a «Общие» (global) section. `/` searches every screen; `Esc` clears the search first, then closes the window. Select a row with `↑` / `↓` and press `Enter` to run it; when an action is unavailable, the reason appears on the bottom border.
 
 The status line names the selected server and the footer shows available keys. `a` opens autostart; it does not run ping. Checks can overlap or wait in a queue; `j` shows running, queued and finished operations. Available actions and shortcuts depend on the section and service state.
 

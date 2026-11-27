@@ -16,13 +16,11 @@ export function actionRegistry(state: AppState, rowActions = false, underlying =
   };
   if (state.helpOpen && !underlying && !rowActions) {
     const bind = (key: string, label: string, run: () => void) => add(`keys:${key}`, [key], label, "editor", run, undefined, "none", true);
-    bind("escape", "Закрыть клавиши", () => { state.helpOpen = false; state.paint(); });
+    bind("escape", state.paletteQuery ? "Очистить поиск" : "Закрыть клавиши", () => { if (state.paletteQuery) { state.paletteQuery = ""; state.searchFocused = false; state.paletteIndex = 0; } else state.helpOpen = false; state.paint(); });
     if (state.viewport().width < MIN_COLS || state.viewport().height < MIN_ROWS) return actions;
     bind("return", "Выполнить", () => state.runPaletteAction());
     for (const [key, delta] of [["up", -1], ["down", 1], ["pageup", -state.keysPageSize()], ["pagedown", state.keysPageSize()], ["home", -Infinity], ["end", Infinity]] as const)
       bind(key, "Выбор строки", () => { state.paletteIndex = Math.max(0, Math.min(state.filteredPaletteActions().length - 1, state.paletteIndex + delta)); state.paintPalette(); });
-    for (const [key, delta] of [["tab", 1], ["shift+tab", -1]] as const)
-      bind(key, "Сменить вкладку", () => { state.keysTab = (state.keysTab + delta + 3) % 3; state.paletteIndex = 0; state.paintPalette(); });
     for (const key of state.searchFocused ? ["ctrl+p"] : ["/", ":", "ctrl+p"])
       bind(key, "Поиск", () => { state.searchFocused = true; state.paint(); });
     if (!state.searchFocused) bind("?", "Все клавиши", () => state.openKeys(false));

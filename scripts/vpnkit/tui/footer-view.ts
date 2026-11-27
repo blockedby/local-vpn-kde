@@ -8,7 +8,7 @@ export class FooterView {
     this.footer = new TextRenderable(renderer, { content: "", fg: p.muted, height: 1, flexShrink: 0 }); root.add(this.footer);
   }
   update(state: AppState, editor: boolean) {
-    const suffix = !editor && !state.filterEditing && !(state.helpOpen && state.searchFocused) ? ["? все клавиши"] : [];
+    const suffix = !editor && !state.filterEditing && !state.helpOpen ? ["? все клавиши"] : [];
     const hints = this.hints(state, editor).split(" · ").filter(Boolean);
     const line = () => [...hints, ...suffix].join(" · ");
     while (hints.length && Bun.stringWidth(line()) > this.renderer.terminalWidth - 2) {
@@ -18,7 +18,7 @@ export class FooterView {
     this.footer.content = line();
   }
   private hints(state: AppState, editor: boolean): string {
-    if (state.helpOpen) { return "Tab вкладка · ↑↓ выбор · Enter выполнить · Esc закрыть"; }
+    if (state.helpOpen) { return `↑↓ выбор · Enter выполнить${state.searchFocused ? "" : " · / поиск"} · Esc ${state.paletteQuery ? "очистить" : "закрыть"}`; }
     if (state.screen === "server-rename") { return "Enter сохранить · Esc отмена"; }
     if (state.filterEditing) { return "Enter применить · Esc очистить"; }
     if (state.serverMenu) { return "↑↓ действие · Enter выполнить · Esc закрыть"; }

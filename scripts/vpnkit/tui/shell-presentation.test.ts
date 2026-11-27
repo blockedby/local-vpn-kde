@@ -94,9 +94,9 @@ test("shell: help draws grouped registry actions and unavailable reason", async 
   try {
     app.onKey({ name: "?", preventDefault() {} }); await t.renderOnce();
     const frame = t.captureCharFrame();
-    expect(frame).toContain("Клавиши"); expect(frame).toContain("Этот экран"); expect(frame).toContain("Действие");
-    expect(frame).toContain("Ping всех + сайт");
-    app.onKey({ name: "tab", preventDefault() {} }); await t.renderOnce();
+    expect(frame).toContain("Клавиши"); expect(frame).toContain("/ поиск"); expect(frame).toContain("── Общие ─");
+    expect(frame).toContain("Ping всех + сайт"); expect(frame).not.toContain("Нет операции для отмены");
+    app.paletteIndex = app.filteredPaletteActions().findIndex(row => row.action.id === "global:cancel"); app.paint(); await t.renderOnce();
     expect(t.captureCharFrame()).toContain("Нет операции для отмены");
     app.onKey({ name: "escape", preventDefault() {} }); await t.renderOnce();
     expect(t.captureCharFrame()).not.toContain("Нет операции для отмены");
@@ -193,11 +193,12 @@ test("shell: confirmation keeps its originating tab and footer follows context",
 test("shell: help combines aliases and long notices wrap without hiding recovery", async () => {
   const { terminal: t, app } = await fixture(100, 35);
   try {
-    app.onKey({ name: "?", preventDefault() {} }); await t.renderOnce();
-    app.onKey({ name: "tab", preventDefault() {} }); await t.renderOnce();
-    const help = t.captureCharFrame();
-    expect(help).toMatch(/v\/h +Серверы/);
-    expect(help).toMatch(/Tab\/Shift\+Tab +Сменить вкладку/);
+    app.onKey({ name: "?", preventDefault() {} });
+    app.paletteQuery = "серверы"; app.paint(); await t.renderOnce();
+    expect(t.captureCharFrame()).toMatch(/v\/h +Серверы/);
+    app.paletteQuery = "вкладку"; app.paint(); await t.renderOnce();
+    expect(t.captureCharFrame()).toMatch(/Tab\/Shift\+Tab +Сменить вкладку/);
+    app.paletteQuery = "";
     app.onKey({ name: "escape", preventDefault() {} });
     app.notify("Сетевые настройки VPN поменялись, нажмите [f] чтобы применить их ещё раз.", true);
     t.resize(60, 16); await t.renderOnce();

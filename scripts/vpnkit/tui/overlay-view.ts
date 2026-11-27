@@ -1,4 +1,4 @@
-import { BoxRenderable, fg, InputRenderable, TabSelectRenderable, TextTableRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
+import { BoxRenderable, InputRenderable, TextRenderable, type CliRenderer } from "@opentui/core";
 import { isOverlay, type AppState } from "./app-state";
 import { SummaryView } from "./summary-view";
 import { MenuView } from "./menu-view";
@@ -16,8 +16,7 @@ export class OverlayView {
   private backdrop: BoxRenderable;
   private box: BoxRenderable;
   private search: InputRenderable;
-  private tabs: TabSelectRenderable;
-  private keysTable: TextTableRenderable;
+  private keysRows: TextRenderable[] = [];
   private rowBackdrop: BoxRenderable;
   private rowMenu: BoxRenderable;
   private rowHeader: TextRenderable;
@@ -57,42 +56,59 @@ export class OverlayView {
     this.dialogEditor = new EditorView(renderer, this.dialog, value => this.current?.edit(value));
     this.backdrop = new BoxRenderable(renderer, { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", zIndex: 99, visible: false });
     root.add(this.backdrop);
-    this.box = new BoxRenderable(renderer, { position: "absolute", zIndex: 100, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, title: " Клавиши ", overflow: "hidden", visible: false });
+    this.box = new BoxRenderable(renderer, { position: "absolute", zIndex: 100, border: true, borderStyle: "rounded", borderColor: p.accent, backgroundColor: p.panel, title: " Клавиши ", bottomTitleAlignment: "left", overflow: "hidden", flexDirection: "column", visible: false });
     root.add(this.box);
-    this.search = new InputRenderable(renderer, { width: "100%", maxLength: 256, placeholder: "/ Поиск по действию или клавише", backgroundColor: p.panel, textColor: p.text, focusedBackgroundColor: p.edge,
+    this.search = new InputRenderable(renderer, { width: "100%", flexShrink: 0, maxLength: 256, placeholder: "действие или клавиша", backgroundColor: p.panel, textColor: p.text, focusedBackgroundColor: p.edge,
       onMouseDown: () => { if (this.current?.helpOpen) { this.current.searchFocused = true; this.current.paint(); } } });
     this.search.on("input", () => { if (!this.current?.helpOpen || this.current.paletteQuery === this.search.value) return; this.current.paletteQuery = this.search.value; this.current.paletteIndex = 0; this.current.paintPalette(); });
     this.box.add(this.search);
-    this.tabs = new TabSelectRenderable(renderer, { options: ["Этот экран", "Общие", "Все"].map(name => ({ name, description: "" })), tabWidth: 12, height: 1, showDescription: false, showUnderline: false, showScrollArrows: false, selectedBackgroundColor: p.edge, selectedTextColor: p.accent, textColor: p.muted });
-    this.box.add(this.tabs);
-    this.keysTable = new TextTableRenderable(renderer, { width: "100%", columnWidthMode: "full", columnFitter: "balanced", cellPadding: 0, columnGap: 1, border: false, wrapMode: "none", selectable: false });
-    this.keysTable.focusable = true;
-    this.box.add(this.keysTable);
+    for (let i = 0; i < 24; i++) { const row = new TextRenderable(renderer, { content: "", height: 1, flexShrink: 0 }); this.box.add(row); this.keysRows.push(row); }
   }
   private current?: AppState;
   private listOffset = 0;
+  private keysOffset = 0;
   private taskRows: number[] = [];
   updatePalette(state: AppState) {
     this.current = state;
     const visible = state.helpOpen && this.renderer.width >= MIN_COLS && this.renderer.height >= MIN_ROWS;
     this.box.visible = this.backdrop.visible = visible;
-    if (!visible) { this.search.blur(); this.keysTable.blur(); return; }
-    const width = Math.min(104, this.renderer.terminalWidth - 2), height = state.keysPageSize() + 5;
-    this.box.width = width; this.box.height = height;
-    this.box.left = Math.floor((this.renderer.terminalWidth - width) / 2); this.box.top = Math.floor((this.renderer.terminalHeight - height - 2) / 2);
-    if (this.search.value !== state.paletteQuery) this.search.value = state.paletteQuery;
-    if (state.searchFocused) this.search.focus(); else this.keysTable.focus();
-    this.tabs.setSelectedIndex(state.keysTab);
-    const entries = state.filteredPaletteActions(), count = state.keysPageSize();
+    if (!visible) { this.search.blur(); return; }
+    const entries = state.filteredPaletteActions();
     state.paletteIndex = Math.max(0, Math.min(state.paletteIndex, entries.length - 1));
-    const offset = Math.floor(state.paletteIndex / count) * count;
-    const rows = entries.slice(offset, offset + count).map(({ action }, index) => {
-      const selected = offset + index === state.paletteIndex;
-      const color = selected ? p.accent : action.available ? p.text : p.muted;
-      return [[fg(color)(`${selected ? "›" : " "} ${action.keyHints.join("/") || "—"}`)], [fg(color)(safeText(action.label))], [fg(p.muted)(safeText(action.unavailableReason ?? ""))]];
+    // One list: a section header before each change of section, then its rows.
+    type Line = { header: string } | { index: number };
+    const lines: Line[] = [];
+    entries.forEach((entry, index) => { if (index && entries[index - 1]!.section !== entry.section) lines.push({ header: entry.section }); lines.push({ index }); });
+    const keyWidth = Math.min(8, Math.max(1, ...entries.map(({ action }) => Bun.stringWidth(action.keyHints.join("/") || "—"))));
+    const searching = state.searchFocused || !!state.paletteQuery;
+    // Fixed size while open, so typing a query does not make the window jump.
+    const width = Math.min(56, this.renderer.terminalWidth - 4);
+    const height = Math.min(this.keysRows.length, state.keysPageSize(), 18) + 2;
+    const count = height - 2 - (searching ? 1 : 0);
+    this.box.width = width; this.box.height = height;
+    this.box.left = Math.floor((this.renderer.terminalWidth - width) / 2); this.box.top = Math.max(1, Math.floor((this.renderer.terminalHeight - height - 1) / 2));
+    const here = state.keysSectionName();
+    this.box.title = cell(` Клавиши · ${state.paletteQuery ? "поиск" : here} `, width - 14).trimEnd() + (searching ? " " : " · / поиск ");
+    this.search.visible = searching;
+    if (this.search.value !== state.paletteQuery) this.search.value = state.paletteQuery;
+    if (state.searchFocused) this.search.focus(); else this.search.blur();
+    const at = lines.findIndex(line => "index" in line && line.index === state.paletteIndex);
+    if (at >= 0 && at < this.keysOffset) this.keysOffset = at > 0 && "header" in lines[at - 1]! ? at - 1 : at;
+    if (at >= this.keysOffset + count) this.keysOffset = at - count + 1;
+    const top = this.keysOffset = Math.max(0, Math.min(this.keysOffset, lines.length - count));
+    this.keysRows.forEach((row, i) => {
+      const line = lines[top + i]; row.visible = i < count;
+      if (i >= count) return;
+      if (!entries.length) { row.content = i ? "" : "  Ничего не найдено"; row.fg = p.muted; return; }
+      if (!line) { row.content = ""; return; }
+      if ("header" in line) { const label = `── ${line.header} `; row.content = label + "─".repeat(Math.max(0, width - 2 - Bun.stringWidth(label))); row.fg = p.muted; return; }
+      const { action } = entries[line.index]!, selected = line.index === state.paletteIndex;
+      const keys = action.keyHints.join("/") || "—";
+      row.content = cell(`${selected ? "›" : " "} ${Bun.stringWidth(keys) > keyWidth ? keys : cell(keys, keyWidth)}  ${safeText(action.label)}`, width - 2).trimEnd();
+      row.fg = selected ? p.accent : action.available ? p.text : p.muted;
     });
-    if (!rows.length) rows.push([[], [fg(p.muted)("Ничего не найдено")], []]);
-    this.keysTable.content = [["Клавиша", "Действие", "Статус"].map(title => [fg(p.accent)(title)]), ...rows];
+    const chosen = entries[state.paletteIndex]?.action;
+    this.box.bottomTitle = chosen && !chosen.available ? cell(` ${safeText(chosen.unavailableReason ?? "Недоступно.")} `, width - 4).trimEnd() + " " : undefined;
   }
   update(state: AppState) {
     this.current = state;

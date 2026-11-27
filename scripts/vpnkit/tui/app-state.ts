@@ -258,15 +258,15 @@ export class AppState {
   filter = "";
   filterEditing = false;
   filterAnchor?: string;
-  keysTab = 0;
   searchFocused = false;
   paletteQuery = "";
   paletteIndex = 0;
   openKeys(search: boolean) {
-    this.helpOpen = true; this.searchFocused = search; this.keysTab = search ? 2 : 0;
+    this.helpOpen = true; this.searchFocused = search;
     this.paletteQuery = ""; this.paletteIndex = 0; this.paint();
   }
-  keysPageSize() { return Math.max(1, Math.min(30, this.viewport().terminalHeight - 4) - 5); }
+  /** Rows the shortcuts list can show, including section headers. */
+  keysPageSize() { return Math.max(1, Math.min(24, this.viewport().terminalHeight - 7)); }
   paletteActions(all = true) {
     const screen = this.screen, menu = this.serverMenu;
     const result: { action: ActionDefinition & { keyHints: string[] }; screen: Screen }[] = [];
@@ -286,19 +286,29 @@ export class AppState {
     } finally { this.screen = screen; this.serverMenu = menu; }
     return result;
   }
-  filteredPaletteActions() {
+  keysSectionName(screen: Screen = this.screen) {
+    return ({ home: "Главная", servers: "Серверы", profiles: "Профили", diagnostics: "Диагностика", settings: "Настройки", autostart: "Автозапуск", tasks: "Задачи", details: "Сервер", recovery: "Восстановление" } as Partial<Record<Screen, string>>)[screen] ?? "Это окно";
+  }
+  /** Without a query: this screen, then global keys. With a query: every screen. */
+  filteredPaletteActions(all?: boolean) {
     const query = this.paletteQuery.trim().toLocaleLowerCase("ru");
-    const merged: ReturnType<AppState["paletteActions"]> = [];
-    for (const entry of this.paletteActions(this.keysTab === 2)) {
+    const here = this.keysSectionName();
+    const merged: (ReturnType<AppState["paletteActions"]>[number] & { section: string })[] = [];
+    const navigation = new Set(["up", "down", "left", "right", "pageup", "pagedown", "home", "end"]);
+    for (const entry of this.paletteActions(all ?? !!query)) {
       const action = entry.action;
-      if (this.keysTab !== 2 && (this.keysTab === 1) !== (action.scope === "global")) continue;
-      const alias = merged.find(row => row.screen === entry.screen && row.action.scope === action.scope && row.action.label === action.label && row.action.unavailableReason === action.unavailableReason);
+      // Arrows and paging are in the footer; listing them only pushes real actions out of view.
+      if (action.keys.every(key => navigation.has(key))) continue;
+      const section = action.scope === "global" ? "Общие" : entry.screen === this.screen ? here : this.keysSectionName(entry.screen);
+      const alias = merged.find(row => row.section === section && row.screen === entry.screen && row.action.label === action.label && row.action.unavailableReason === action.unavailableReason);
       if (alias) {
         const exactKey = [...action.keys, ...action.keyHints].some(key => key.toLocaleLowerCase("ru") === query);
         alias.action = { ...(exactKey ? action : alias.action), keys: [...new Set([...alias.action.keys, ...action.keys])], keyHints: [...new Set([...alias.action.keyHints, ...action.keyHints])] };
-      } else merged.push(entry);
+      } else merged.push({ ...entry, section });
     }
-    return merged.filter(({action}) => `${action.label} ${action.keys.join(" ")} ${action.keyHints.join(" ")}`.toLocaleLowerCase("ru").includes(query));
+    const rank = (section: string) => section === here ? 0 : section === "Общие" ? 1 : 2;
+    return merged.filter(({action}) => `${action.label} ${action.keys.join(" ")} ${action.keyHints.join(" ")}`.toLocaleLowerCase("ru").includes(query))
+      .map((entry, order) => ({ entry, order })).sort((a, b) => rank(a.entry.section) - rank(b.entry.section) || a.order - b.order).map(({ entry }) => entry);
   }
   runPaletteAction() {
     const entry = this.filteredPaletteActions()[this.paletteIndex];
